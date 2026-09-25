@@ -3,43 +3,80 @@
 
 use std::sync::Arc;
 
-use super::exec::{Context, Execution, Installs, execute};
+use super::exec::{Context, Execution, Installs, execute, install_at};
 use super::knowledge::{Knowledge, Origin};
+use super::program::Event;
 use crate::context::VerifyContext;
 use crate::solve::deduce::Deducer;
-use crate::solve::symbolic;
+use crate::solve::symbolic::{self, SymbolicState};
 use crate::solve::vars::{self, Substitution};
 use crate::solve::{Pass, propose};
+use crate::theory::obtainable;
 use crate::types::*;
 
-pub(crate) struct Node {
-	pub(crate) installs: Installs,
-	pub(crate) ex: Execution,
+struct Node {
+	installs: Installs,
+	ex: Execution,
 }
 
 pub(crate) struct Search<'a, 'b> {
-	pub(crate) ctx: &'a VerifyContext,
-	pub(crate) cx: &'a Context<'b>,
-	pub(crate) states: &'a [PrincipalState],
-	pub(crate) nodes: Vec<Node>,
-	pub(crate) union: Knowledge,
+	ctx: &'a VerifyContext,
+	cx: &'a Context<'b>,
+	nodes: Vec<Node>,
+	union: Knowledge,
 	provenance: Vec<Vec<u32>>,
 	closed: Knowledge,
 	closed_provenance: Vec<Vec<u32>>,
-	tried: IdMap<u64, Vec<Installs>>,
+	tried: Tried,
+	probed: Tried,
 	protocol_seen: IdMap<u64, Vec<(Value, Value)>>,
 	stuck: Vec<Stuck>,
-	fresh: IdMap<u64, Vec<(Value, usize, usize, usize)>>,
+	fresh: IdMap<u64, Vec<(Value, Source)>>,
 	merged_targets: Vec<u64>,
 	drops: Vec<Installs>,
 	executed: usize,
 	current: usize,
-	pub(crate) debug: bool,
+	debug: bool,
 	family: &'static str,
-	stats: IdMap<u64, (&'static str, usize, usize)>,
+	stats: Vec<(&'static str, usize, usize)>,
 }
 
-type Stuck = (Installs, Vec<(usize, usize)>, Vec<usize>);
+#[derive(Clone)]
+struct Stuck {
+	installs: Installs,
+	slots: Vec<(usize, usize)>,
+	tried_with: Vec<usize>,
+}
+
+#[derive(Clone, Copy)]
+struct Source {
+	node: usize,
+	run: usize,
+	slot: usize,
+}
+
+struct Settled {
+	accepted: bool,
+	halts: Vec<Option<usize>>,
+}
+
+#[derive(Default)]
+struct Tried(IdMap<u64, Vec<Installs>>);
+
+impl Tried {
+	fn insert(&mut self, installs: &Installs) -> bool {
+		let bucket = self.0.entry(installs_hash(installs)).or_default();
+		if bucket.iter().any(|seen| same_installs(seen, installs)) {
+			return false;
+		}
+		bucket.push(installs.clone());
+		true
+	}
+
+	fn len(&self) -> usize {
+		self.0.values().map(Vec::len).sum()
+	}
+}
 
 type Candidate = (Vec<(usize, Value)>, Vec<Value>, Substitution);
 
@@ -75,13 +112,8 @@ fn normalize(mut installs: Installs) -> Installs {
 }
 
 impl<'a, 'b> Search<'a, 'b> {
-	pub(crate) fn new(
-		ctx: &'a VerifyContext,
-		cx: &'a Context<'b>,
-		states: &'a [PrincipalState],
-		root: Execution,
-	) -> Self {
-		let mut union = Knowledge::new(cx.program.max_phase);
+	pub(crate) fn new(ctx: &'a VerifyContext, cx: &'a Context<'b>, root: Execution) -> Self {
+		let mut union = Knowledge::new(cx.km.max_phase);
 		let mut provenance = Vec::new();
 		for v in root.knowledge.state.known.iter() {
 			if union.learn(v, Origin::Initial) {
@@ -91,7 +123,6 @@ impl<'a, 'b> Search<'a, 'b> {
 		let mut search = Search {
 			ctx,
 			cx,
-			states,
 			nodes: vec![Node {
 				installs: Vec::new(),
 				ex: root,
@@ -100,7 +131,8 @@ impl<'a, 'b> Search<'a, 'b> {
 			closed_provenance: provenance.clone(),
 			union,
 			provenance,
-			tried: IdMap::default(),
+			tried: Tried::default(),
+			probed: Tried::default(),
 			protocol_seen: IdMap::default(),
 			stuck: Vec::new(),
 			fresh: IdMap::default(),
@@ -110,17 +142,9 @@ impl<'a, 'b> Search<'a, 'b> {
 			current: 0,
 			debug: std::env::var("VERIFPAL_SOLVE_DEBUG").is_ok(),
 			family: "base",
-			stats: IdMap::default(),
+			stats: Vec::new(),
 		};
-		search.absorb_reuse(0);
-		let protocol: Vec<(Value, Value, bool)> = search.nodes[0].ex.knowledge.protocol.to_vec();
-		for (value, pre, own) in protocol {
-			search.note_union_protocol(value, pre, own);
-		}
-		let built = Arc::clone(&search.nodes[0].ex.knowledge.built);
-		for term in built.values().flatten() {
-			search.union.note_built(term);
-		}
+		search.absorb_terms(0);
 		search.close_union();
 		search
 	}
@@ -129,23 +153,10 @@ impl<'a, 'b> Search<'a, 'b> {
 		self.ctx.all_resolved() || self.ctx.cancelled()
 	}
 
-	fn absorb_reuse(&mut self, node: usize) {
-		let pairs: Vec<[Value; 2]> = self.nodes[node].ex.knowledge.state.reused.to_vec();
-		for pair in pairs {
-			if !self.union.state.reused.iter().any(|held| {
-				held[0].equivalent(&pair[0], true) && held[1].equivalent(&pair[1], true)
-			}) {
-				let state = Arc::make_mut(&mut self.union.state);
-				Arc::make_mut(&mut state.reused).push(pair);
-				state.chain = next_chain();
-			}
-		}
-	}
-
 	fn novel_terms(&self, ex: &Execution) -> Vec<Value> {
-		let carrier = self.cx.carrier;
+		let capabilities = &self.cx.km.capabilities;
 		let union = &self.union.state;
-		let _memo = crate::theory::DeductionMemo::scoped(carrier, union);
+		let _memo = crate::theory::DeductionMemo::scoped(capabilities, union);
 		let depth = self.ctx.term_bound(self.cx.km).depth();
 		let mut own: IdMap<u64, Vec<&Value>> = IdMap::default();
 		for (value, _, produced) in ex.knowledge.protocol.iter() {
@@ -166,20 +177,20 @@ impl<'a, 'b> Search<'a, 'b> {
 			.filter(|(i, v)| {
 				let emitted = matches!(
 					knowledge.origin(*i),
-					super::knowledge::Origin::Wire { .. } | super::knowledge::Origin::Leak { .. }
+					Origin::Wire { .. } | Origin::Leak { .. }
 				);
 				union.knows(v).is_none()
 					&& ((emitted && produced(v) && crate::solve::control::term_depth(v) <= depth)
-						|| !crate::theory::obtainable(v, carrier, union))
+						|| !obtainable(v, capabilities, union))
 			})
 			.map(|(_, v)| v.clone())
 			.collect()
 	}
 
 	fn absorb(&mut self, node: usize, novel: Vec<Value>) {
-		let known: Vec<Value> = self.nodes[node].ex.knowledge.state.known.to_vec();
-		for v in known {
-			if let Some(i) = self.union.knows(&v)
+		let known = Arc::clone(&self.nodes[node].ex.knowledge.state.known);
+		for v in known.iter() {
+			if let Some(i) = self.union.knows(v)
 				&& !self.provenance[i].contains(&(node as u32))
 			{
 				self.provenance[i].push(node as u32);
@@ -197,28 +208,32 @@ impl<'a, 'b> Search<'a, 'b> {
 				});
 			}
 		}
-		let protocol: Vec<(Value, Value, bool)> = self.nodes[node].ex.knowledge.protocol.to_vec();
-		for (value, pre, own) in protocol {
-			self.note_union_protocol(value, pre, own);
-		}
-		let built = Arc::clone(&self.nodes[node].ex.knowledge.built);
-		for term in built.values().flatten() {
-			self.union.note_built(term);
-		}
-		self.absorb_reuse(node);
+		self.absorb_terms(node);
 	}
 
-	fn note_union_protocol(&mut self, value: Value, pre: Value, own: bool) {
-		let key = value.hash_value() ^ pre.hash_value().rotate_left(7);
-		let bucket = self.protocol_seen.entry(key).or_default();
-		if bucket
-			.iter()
-			.any(|(v, p)| v.equivalent(&value, true) && p.equivalent(&pre, true))
-		{
-			return;
+	fn absorb_terms(&mut self, node: usize) {
+		let knowledge = &self.nodes[node].ex.knowledge;
+		let protocol = Arc::clone(&knowledge.protocol);
+		let built = Arc::clone(&knowledge.built);
+		let reused = Arc::clone(&knowledge.state.reused);
+		for (value, pre, own) in protocol.iter() {
+			let key = value.hash_value() ^ pre.hash_value().rotate_left(7);
+			let bucket = self.protocol_seen.entry(key).or_default();
+			if bucket
+				.iter()
+				.any(|(v, p)| v.equivalent(value, true) && p.equivalent(pre, true))
+			{
+				continue;
+			}
+			bucket.push((value.clone(), pre.clone()));
+			self.union.note_protocol(value, pre, *own);
 		}
-		bucket.push((value.clone(), pre.clone()));
-		self.union.note_protocol(&value, &pre, own);
+		for term in built.iter() {
+			self.union.note_built(term);
+		}
+		for pair in reused.iter() {
+			self.union.note_reused(pair);
+		}
 	}
 
 	fn describe(&self, node: usize) -> String {
@@ -242,7 +257,7 @@ impl<'a, 'b> Search<'a, 'b> {
 	fn close_union(&mut self) {
 		self.closed = self.union.clone();
 		self.closed_provenance = self.provenance.clone();
-		self.closed.close(self.cx.carrier);
+		self.closed.close(&self.cx.km.capabilities);
 		while self.closed_provenance.len() < self.closed.len() {
 			self.closed_provenance.push(Vec::new());
 		}
@@ -273,10 +288,7 @@ impl<'a, 'b> Search<'a, 'b> {
 				.find(|&n| self.compatible(plan, n))
 				.unwrap_or(candidates[0]);
 			for install in &self.nodes[best].installs {
-				if !plan
-					.iter()
-					.any(|(r, s, _)| *r == install.0 && *s == install.1)
-				{
+				if install_at(plan, install.0, install.1).is_none() {
 					plan.push(install.clone());
 				}
 			}
@@ -286,35 +298,18 @@ impl<'a, 'b> Search<'a, 'b> {
 		let Some(record) = self.closed.state.derivations.get(idx) else {
 			return;
 		};
-		let mut next: Vec<usize> = Vec::new();
 		for ingredient in record.ingredients() {
 			if let Some(i) = self.closed.knows(ingredient) {
-				next.push(i);
+				self.leaves(i, plan, out, seen);
 			}
-		}
-		if let DerivationRecord::Decomposed { using, .. }
-		| DerivationRecord::Recomposed { using, .. }
-		| DerivationRecord::Rewritten { using, .. } = record
-		{
-			for u in using {
-				if let Some(i) = self.closed.knows(u) {
-					next.push(i);
-				}
-			}
-		}
-		for i in next {
-			self.leaves(i, plan, out, seen);
 		}
 	}
 
-	fn merged(&self, extra: &[usize], installs: Installs) -> Installs {
-		let mut installs = installs;
-		let touched: Vec<usize> = installs.iter().map(|(run, _, _)| *run).collect();
+	fn merged(&self, extra: &[usize], mut installs: Installs) -> Installs {
+		let touched = runs_of(&installs);
 		for &base in extra {
 			for (run, slot, value) in &self.nodes[base].installs {
-				if touched.contains(run)
-					|| installs.iter().any(|(r2, s2, _)| r2 == run && s2 == slot)
-				{
+				if touched.contains(run) || install_at(&installs, *run, *slot).is_some() {
 					continue;
 				}
 				installs.push((*run, *slot, value.clone()));
@@ -389,14 +384,7 @@ impl<'a, 'b> Search<'a, 'b> {
 				plans.push(plan);
 			}
 		}
-		for plan in plans {
-			if self.done() {
-				break;
-			}
-			let family = std::mem::replace(&mut self.family, "merge");
-			self.consider(plan);
-			self.family = family;
-		}
+		self.consider_all("merge", plans);
 	}
 
 	pub(crate) fn run(&mut self) {
@@ -440,7 +428,7 @@ impl<'a, 'b> Search<'a, 'b> {
 					before,
 					self.union.len(),
 					self.nodes.len(),
-					self.tried.values().map(Vec::len).sum::<usize>(),
+					self.tried.len(),
 					self.stuck.len(),
 					self.fresh.values().map(Vec::len).sum::<usize>()
 				);
@@ -460,13 +448,13 @@ impl<'a, 'b> Search<'a, 'b> {
 	) -> Vec<Vec<(ValueId, Value)>> {
 		self.current = r;
 		let km = self.cx.km;
-		let ps = &self.states[r];
+		let principal = self.cx.program.runs[r].id;
 		let attacker: AttackerState = (*self.union.state).clone();
-		let controllable = crate::solve::control::Controllable::of(km, ps, &attacker);
-		if !(0..ps.values.len()).any(|slot| controllable.admits(ps, &attacker, slot)) {
+		let controllable = crate::solve::control::Controllable::of(km, principal, &attacker);
+		if !(0..km.slots.len()).any(|slot| controllable.admits(principal, &attacker, slot)) {
 			return Vec::new();
 		}
-		let sym = symbolic::build(&controllable, ps, &attacker);
+		let sym = symbolic::build(&controllable, km, principal, &attacker);
 		if sym.var_slots.is_empty() {
 			return Vec::new();
 		}
@@ -478,8 +466,13 @@ impl<'a, 'b> Search<'a, 'b> {
 				if self.done() {
 					return replays;
 				}
-				let refined =
-					symbolic::build_assuming_honest(&controllable, ps, &attacker, &honest);
+				let refined = symbolic::build_assuming_honest(
+					&controllable,
+					km,
+					principal,
+					&attacker,
+					&honest,
+				);
 				if !refined.var_slots.is_empty() {
 					replays.extend(self.propose_and_try(
 						r,
@@ -495,20 +488,20 @@ impl<'a, 'b> Search<'a, 'b> {
 		if pass != Pass::Targeted || self.done() {
 			return replays;
 		}
+		if !sym
+			.var_slots
+			.iter()
+			.any(|&slot| crate::solve::split_delivered(km, principal, slot))
+		{
+			return replays;
+		}
 		let shared: Vec<usize> = sym
 			.var_slots
 			.iter()
 			.copied()
-			.filter(|&slot| !crate::solve::directly_unguarded(km, ps, slot))
+			.filter(|&slot| !crate::solve::directly_unguarded(km, principal, slot))
 			.collect();
-		if !sym
-			.var_slots
-			.iter()
-			.any(|&slot| crate::solve::split_delivered(km, ps, slot))
-		{
-			return replays;
-		}
-		let addressed = symbolic::build_addressed(&controllable, ps, &attacker, &shared);
+		let addressed = symbolic::build_addressed(&controllable, km, principal, &attacker, &shared);
 		if !addressed.var_slots.is_empty() {
 			self.propose_and_try(r, pass, &attacker, &addressed, Vec::new(), true);
 		}
@@ -520,34 +513,23 @@ impl<'a, 'b> Search<'a, 'b> {
 		r: usize,
 		pass: Pass,
 		attacker: &AttackerState,
-		sym: &symbolic::SymbolicState,
+		sym: &SymbolicState,
 		taken: Vec<Vec<(ValueId, Value)>>,
 		addressed: bool,
 	) -> Vec<Vec<(ValueId, Value)>> {
 		let km = self.cx.km;
-		let ps = &self.states[r];
-		let honest_terms: Substitution = sym
-			.var_slots
-			.iter()
-			.zip(crate::solve::honest_slot_terms(km, ps, sym))
-			.map(|(&slot, honest)| (vars::attacker_var_id(slot), honest))
-			.collect();
-		let deducer = Deducer::with_basis(
-			ps,
-			attacker,
-			sym,
-			self.ctx.known_subterms(attacker),
-			honest_terms,
-		);
+		let run = &self.cx.program.runs[r];
+		let deducer = self.deducer(attacker, sym);
 		let truncated = deducer.truncation_flag();
-		let (proposals, replays) = propose(self.ctx, km, ps, pass, attacker, sym, deducer, taken);
+		let (proposals, replays) =
+			propose(self.ctx, km, run.id, pass, attacker, sym, deducer, taken);
 		if truncated.load(std::sync::atomic::Ordering::Relaxed) {
 			self.ctx.note_truncation(Truncation::SolverVariables);
 		}
 		let mut signatures: Vec<Candidate> = Vec::new();
 		let mut buckets: IdMap<u64, Vec<usize>> = IdMap::default();
 		for proposal in vars::dedupe(proposals) {
-			let unpinned = crate::solve::leave_honest_slots(km, ps, sym, proposal.clone());
+			let unpinned = crate::solve::leave_honest_slots(km, sym, proposal.clone());
 			let variants = if unpinned.len() == proposal.len() {
 				vec![proposal]
 			} else {
@@ -561,7 +543,7 @@ impl<'a, 'b> Search<'a, 'b> {
 				if signature.is_empty() {
 					continue;
 				}
-				let chained = crate::solve::emissions_under(ps, sym, &variant);
+				let chained = crate::solve::emissions_under(km, sym, &variant);
 				let bucket = buckets
 					.entry(crate::solve::signature_hash(&signature))
 					.or_default();
@@ -578,7 +560,7 @@ impl<'a, 'b> Search<'a, 'b> {
 		if self.debug {
 			eprintln!(
 				"[search] {} {:?} known={} proposals={}",
-				ps.name,
+				run.name,
 				pass == Pass::Targeted,
 				attacker.known.len(),
 				signatures.len()
@@ -589,8 +571,7 @@ impl<'a, 'b> Search<'a, 'b> {
 			if self.done() {
 				break;
 			}
-			let halts = self.try_flight(r, attacker, signature, addressed, &chained);
-			let mut halted = halts.get(r).copied().flatten();
+			let mut halted = self.try_flight(r, attacker, signature, addressed, &chained);
 			let mut binding = variant;
 			while let Some(check) = halted {
 				let Some(Value::Primitive(p)) = sym.terms.get(check) else {
@@ -599,27 +580,13 @@ impl<'a, 'b> Search<'a, 'b> {
 				if !vars::contains_var(&Value::Primitive(p.clone())) {
 					break;
 				}
-				let deducer = repairer.get_or_insert_with(|| {
-					let honest_terms: Substitution = sym
-						.var_slots
-						.iter()
-						.zip(crate::solve::honest_slot_terms(km, ps, sym))
-						.map(|(&slot, honest)| (vars::attacker_var_id(slot), honest))
-						.collect();
-					Deducer::with_basis(
-						ps,
-						attacker,
-						sym,
-						self.ctx.known_subterms(attacker),
-						honest_terms,
-					)
-				});
+				let deducer = repairer.get_or_insert_with(|| self.deducer(attacker, sym));
 				let started = self.debug.then(std::time::Instant::now);
 				let solutions = deducer.repair_check(p, &binding);
 				if let Some(started) = started {
 					eprintln!(
 						"[search] repair {} at {} -> {} solutions in {:?}",
-						ps.name,
+						run.name,
 						km.slots[check].constant,
 						solutions.len(),
 						started.elapsed()
@@ -634,11 +601,11 @@ impl<'a, 'b> Search<'a, 'b> {
 					if signature.is_empty() {
 						continue;
 					}
-					let family = std::mem::replace(&mut self.family, "repair");
-					let emitted = crate::solve::emissions_under(ps, sym, &solution);
-					let halts = self.try_flight(r, attacker, signature, addressed, &emitted);
-					self.family = family;
-					match halts.get(r).copied().flatten() {
+					let emitted = crate::solve::emissions_under(km, sym, &solution);
+					let halt = self.as_family("repair", |search| {
+						search.try_flight(r, attacker, signature, addressed, &emitted)
+					});
+					match halt {
 						Some(later) if later > check && next.is_none() => {
 							next = Some((later, solution));
 						}
@@ -657,9 +624,26 @@ impl<'a, 'b> Search<'a, 'b> {
 		replays
 	}
 
+	fn deducer<'x>(&self, attacker: &'x AttackerState, sym: &'x SymbolicState) -> Deducer<'x>
+	where
+		'b: 'x,
+	{
+		let km = self.cx.km;
+		let honest: Substitution = sym
+			.var_slots
+			.iter()
+			.zip(crate::solve::honest_slot_terms(km, sym))
+			.map(|(&slot, honest)| (vars::attacker_var_id(slot), honest))
+			.collect();
+		Deducer::with_basis(km, attacker, sym, self.ctx.known_subterms(attacker), honest)
+	}
+
 	fn derivable_in(&self, node: usize, v: &Value) -> bool {
-		let state = &self.nodes[node].ex.knowledge.state;
-		state.knows(v).is_some() || crate::theory::obtainable(v, self.cx.carrier, state)
+		obtainable(
+			v,
+			&self.cx.km.capabilities,
+			&self.nodes[node].ex.knowledge.state,
+		)
 	}
 
 	fn bases(
@@ -668,8 +652,8 @@ impl<'a, 'b> Search<'a, 'b> {
 		signature: &[(usize, Value)],
 		chained: &[Value],
 	) -> Option<Vec<usize>> {
-		let carrier = self.cx.carrier;
-		let mut inputs = crate::theory::KnowledgeInputs::new(carrier, attacker);
+		let capabilities = &self.cx.km.capabilities;
+		let mut inputs = crate::theory::KnowledgeInputs::new(capabilities, attacker);
 		let mut chosen: Vec<usize> = Vec::new();
 		let mut emitted: Option<Knowledge> = None;
 		for (_, value) in signature {
@@ -687,9 +671,8 @@ impl<'a, 'b> Search<'a, 'b> {
 					}
 					with
 				});
-				if with.state.knows(value).is_some()
-					|| crate::theory::obtainable(value, carrier, &with.state)
-					|| with.derivable(value, carrier)
+				if obtainable(value, capabilities, &with.state)
+					|| with.derivable(value, capabilities)
 				{
 					continue;
 				}
@@ -792,10 +775,8 @@ impl<'a, 'b> Search<'a, 'b> {
 		signature: Vec<(usize, Value)>,
 		addressed: bool,
 		chained: &[Value],
-	) -> Vec<Option<usize>> {
-		let Some(bases) = self.bases(attacker, &signature, chained) else {
-			return Vec::new();
-		};
+	) -> Option<usize> {
+		let bases = self.bases(attacker, &signature, chained)?;
 		let km = self.cx.km;
 		let bound = self.ctx.term_bound(km);
 		let mut installs: Installs = Vec::new();
@@ -804,8 +785,8 @@ impl<'a, 'b> Search<'a, 'b> {
 			for run in self.targets(r, slot, addressed) {
 				let id = self.cx.program.runs[run].id;
 				if !bound.admits_at(km, id, slot, &value) {
-					self.ctx.note_depth_cut(id, slot);
-					return Vec::new();
+					self.ctx.note_truncation(Truncation::TermDepth);
+					return None;
 				}
 				installs.push((run, slot, value.clone()));
 			}
@@ -813,7 +794,7 @@ impl<'a, 'b> Search<'a, 'b> {
 				continue;
 			}
 			for run in self.receivers(slot) {
-				if installs.iter().any(|(r2, s2, _)| *r2 == run && *s2 == slot) {
+				if install_at(&installs, run, slot).is_some() {
 					continue;
 				}
 				let id = self.cx.program.runs[run].id;
@@ -833,18 +814,15 @@ impl<'a, 'b> Search<'a, 'b> {
 			everywhere
 		});
 		let merged = self.merged(&bases, installs);
-		let halts = self.consider_halts(merged).1;
+		let halts = self.consider(merged);
 		self.drain_drops();
 		if let Some(everywhere) = everywhere
 			&& !self.done()
 		{
 			let merged = self.merged(&bases, everywhere);
-			let family = std::mem::replace(&mut self.family, "shared");
-			self.consider_halts(merged);
-			self.family = family;
-			self.drain_drops();
+			self.probe(merged);
 		}
-		halts
+		halts.and_then(|halts| halts[r])
 	}
 
 	fn drain_drops(&mut self) {
@@ -859,9 +837,7 @@ impl<'a, 'b> Search<'a, 'b> {
 					.filter(|(i, _)| *i != skip)
 					.map(|(_, install)| install.clone())
 					.collect();
-				let family = std::mem::replace(&mut self.family, "drop");
-				self.consider_derived(fewer);
-				self.family = family;
+				self.as_family("drop", |search| search.consider_derived(fewer));
 			}
 		}
 	}
@@ -883,8 +859,7 @@ impl<'a, 'b> Search<'a, 'b> {
 		let km = self.cx.km;
 		let program = self.cx.program;
 		let installs = self.nodes[node].installs.clone();
-		let mut runs: Vec<usize> = installs.iter().map(|(run, _, _)| *run).collect();
-		runs.dedup();
+		let runs = runs_of(&installs);
 		let mut plans: Vec<Installs> = Vec::new();
 		for &q in &runs {
 			for r in 0..program.runs.len() {
@@ -917,19 +892,13 @@ impl<'a, 'b> Search<'a, 'b> {
 				}
 			}
 		}
-		for plan in plans {
-			if self.done() {
-				break;
-			}
-			let family = std::mem::replace(&mut self.family, "merge");
-			self.consider(plan);
-			self.family = family;
-		}
+		self.consider_all("merge", plans);
 	}
 
-	fn fresh_emissions(&self, ex: &Execution) -> Vec<(Value, usize, usize)> {
+	fn fresh_emissions(&self, node: usize) -> Vec<(Value, Source)> {
 		let root = &self.nodes[0].ex;
-		let mut out: Vec<(Value, usize, usize)> = Vec::new();
+		let ex = &self.nodes[node].ex;
+		let mut out: Vec<(Value, Source)> = Vec::new();
 		for (d, delivery) in self.cx.program.deliveries.iter().enumerate() {
 			let Some(sent) = &ex.sent[d] else {
 				continue;
@@ -941,9 +910,14 @@ impl<'a, 'b> Search<'a, 'b> {
 				}
 				if !out
 					.iter()
-					.any(|(w, run, _)| *run == delivery.sender && w.equivalent(v, true))
+					.any(|(w, source)| source.run == delivery.sender && w.equivalent(v, true))
 				{
-					out.push((v.clone(), delivery.sender, delivery.slots[k].0));
+					let source = Source {
+						node,
+						run: delivery.sender,
+						slot: delivery.slots[k].0,
+					};
+					out.push((v.clone(), source));
 				}
 			}
 		}
@@ -951,33 +925,31 @@ impl<'a, 'b> Search<'a, 'b> {
 	}
 
 	fn note_fresh(&mut self, node: usize) -> bool {
-		let emissions = self.fresh_emissions(&self.nodes[node].ex);
 		let touched = runs_of(&self.nodes[node].installs);
 		let mut added = false;
-		for (v, run, slot) in emissions {
+		for (v, source) in self.fresh_emissions(node) {
 			let bucket = self.fresh.entry(v.hash_value()).or_default();
-			if bucket.iter().any(|(w, r, _, n)| {
-				*r == run && w.equivalent(&v, true) && runs_of(&self.nodes[*n].installs) == touched
+			if bucket.iter().any(|(w, held)| {
+				held.run == source.run
+					&& w.equivalent(&v, true)
+					&& runs_of(&self.nodes[held.node].installs) == touched
 			}) {
 				continue;
 			}
-			bucket.push((v, run, slot, node));
+			bucket.push((v, source));
 			added = true;
 		}
 		added
 	}
 
-	fn fresh_sources(&self, v: &Value) -> Vec<(usize, usize, usize)> {
+	fn fresh_sources(&self, v: &Value) -> Vec<Source> {
 		self.fresh
 			.get(&v.hash_value())
-			.map(|bucket| {
-				bucket
-					.iter()
-					.filter(|(w, _, _, _)| w.equivalent(v, true))
-					.map(|(_, run, slot, node)| (*node, *run, *slot))
-					.collect()
-			})
-			.unwrap_or_default()
+			.into_iter()
+			.flatten()
+			.filter(|(w, _)| w.equivalent(v, true))
+			.map(|(_, source)| *source)
+			.collect()
 	}
 
 	fn cone(&self, run: usize, slot: usize, out: &mut Vec<(usize, usize)>) {
@@ -991,8 +963,8 @@ impl<'a, 'b> Search<'a, 'b> {
 			return;
 		};
 		match program.runs[run].steps[step].event {
-			super::program::Event::Recv(d) => self.cone(program.deliveries[d].sender, slot, out),
-			super::program::Event::Assign(_) => {
+			Event::Recv(d) => self.cone(program.deliveries[d].sender, slot, out),
+			Event::Assign(_) => {
 				for leaf in km.slots[slot].initial_value.constant_leaves() {
 					if let Some(at) = km.index_of(leaf) {
 						self.cone(run, at, out);
@@ -1007,17 +979,17 @@ impl<'a, 'b> Search<'a, 'b> {
 		&self,
 		plan: &Installs,
 		stuck: &[(usize, usize)],
-		(node, run, slot): (usize, usize, usize),
+		source: Source,
 	) -> Option<Installs> {
 		let mut cone = Vec::new();
-		self.cone(run, slot, &mut cone);
-		let source = &self.nodes[node];
+		self.cone(source.run, source.slot, &mut cone);
+		let source = &self.nodes[source.node];
 		let kept: Installs = plan
 			.iter()
 			.filter(|(r, s, v)| {
 				stuck.contains(&(*r, *s))
 					|| !cone.contains(&(*r, *s))
-					|| source.installs.iter().any(|(r2, s2, _)| r2 == r && s2 == s)
+					|| install_at(&source.installs, *r, *s).is_some()
 					|| source.ex.runs[*r]
 						.held(*s)
 						.is_none_or(|h| h.value.equivalent(v, true))
@@ -1028,38 +1000,43 @@ impl<'a, 'b> Search<'a, 'b> {
 	}
 
 	fn retry_stuck(&mut self, at: usize) {
-		let (installs, stuck, tried) = self.stuck[at].clone();
-		let mut sources: Vec<(usize, usize, usize)> = Vec::new();
+		let Stuck {
+			installs,
+			slots,
+			tried_with,
+		} = self.stuck[at].clone();
+		let mut sources: Vec<Source> = Vec::new();
 		for (run, slot, value) in &installs {
-			if !stuck.contains(&(*run, *slot)) {
+			if !slots.contains(&(*run, *slot)) {
 				continue;
 			}
 			for source in self.fresh_sources(value) {
-				let n = source.0;
+				let n = source.node;
 				if n != 0
-					&& !sources.iter().any(|s| s.0 == n)
-					&& !tried.contains(&n)
+					&& !sources.iter().any(|s| s.node == n)
+					&& !tried_with.contains(&n)
 					&& self.compatible(&installs, n)
 				{
 					sources.push(source);
 				}
 			}
 		}
-		self.stuck[at].2.extend(sources.iter().map(|s| s.0));
+		self.stuck[at]
+			.tried_with
+			.extend(sources.iter().map(|s| s.node));
 		for source in sources {
 			if self.done() {
 				return;
 			}
-			let plan = self.merged(&[source.0], installs.clone());
-			let cleared = self.cleared(&plan, &stuck, source);
-			let family = std::mem::replace(&mut self.family, "stuck");
-			let settled =
-				!same_installs(&plan, &installs) && !self.consider_derived_halts(plan).1.is_empty();
+			let plan = self.merged(&[source.node], installs.clone());
+			let cleared = self.cleared(&plan, &slots, source);
+			let settled = !same_installs(&plan, &installs)
+				&& self
+					.as_family("stuck", |search| search.consider_derived(plan))
+					.is_some();
 			if !settled && let Some(cleared) = cleared {
-				self.family = "cleared";
-				self.consider_derived(cleared);
+				self.as_family("cleared", |search| search.consider_derived(cleared));
 			}
-			self.family = family;
 		}
 	}
 
@@ -1071,12 +1048,20 @@ impl<'a, 'b> Search<'a, 'b> {
 		}
 	}
 
-	pub(crate) fn consider(&mut self, installs: Installs) -> Option<usize> {
-		self.consider_halts(installs).0
+	fn as_family<T>(&mut self, family: &'static str, f: impl FnOnce(&mut Self) -> T) -> T {
+		let outer = std::mem::replace(&mut self.family, family);
+		let out = f(self);
+		self.family = outer;
+		out
 	}
 
-	fn consider_derived(&mut self, installs: Installs) -> Option<usize> {
-		self.consider_derived_halts(installs).0
+	fn consider_all(&mut self, family: &'static str, plans: Vec<Installs>) {
+		for plan in plans {
+			if self.done() {
+				break;
+			}
+			self.as_family(family, |search| search.consider(plan));
+		}
 	}
 
 	fn execute_counted(&mut self, installs: &Installs) -> Execution {
@@ -1087,7 +1072,7 @@ impl<'a, 'b> Search<'a, 'b> {
 		crate::info::info_status_update(|| {
 			crate::verify::status_line(
 				ctx,
-				self.cx.program.max_phase,
+				self.cx.km.max_phase,
 				&self.cx.program.runs[self.current].name,
 				&format!(
 					"{executed} execution{} checked",
@@ -1098,27 +1083,32 @@ impl<'a, 'b> Search<'a, 'b> {
 		execute(self.cx, installs)
 	}
 
-	fn consider_derived_halts(
-		&mut self,
-		installs: Installs,
-	) -> (Option<usize>, Vec<Option<usize>>) {
-		let key = installs_hash(&installs);
-		let bucket = self.tried.entry(key).or_default();
-		if bucket.iter().any(|seen| same_installs(seen, &installs)) {
-			return (None, Vec::new());
+	fn consider(&mut self, installs: Installs) -> Option<Vec<Option<usize>>> {
+		if !self.tried.insert(&installs) {
+			return None;
 		}
-		bucket.push(installs.clone());
+		let ex = self.execute_counted(&installs);
+		let halts = halts_of(&ex);
+		let fills = self.fills(&ex);
+		self.settle(installs.clone(), ex);
+		if !fills.is_empty() && !self.done() {
+			let mut filled = installs;
+			filled.extend(fills);
+			let filled = normalize(filled);
+			if let Some(settled) = self.as_family("fill", |search| search.consider_derived(filled))
+			{
+				return Some(settled.halts);
+			}
+		}
+		Some(halts)
+	}
+
+	fn consider_derived(&mut self, installs: Installs) -> Option<Settled> {
+		if !self.tried.insert(&installs) {
+			return None;
+		}
 		let ex = self.execute_counted(&installs);
 		if self.debug {
-			let shown: Vec<String> = installs
-				.iter()
-				.map(|(run, slot, v)| {
-					format!(
-						"{}.{}={}",
-						self.cx.program.runs[*run].name, self.cx.km.slots[*slot].constant, v
-					)
-				})
-				.collect();
 			let halted: Vec<String> = ex
 				.runs
 				.iter()
@@ -1141,46 +1131,40 @@ impl<'a, 'b> Search<'a, 'b> {
 			eprintln!(
 				"[search]   derived {} [{}] stuck={} halted=[{}]",
 				self.family,
-				shown.join(" "),
+				self.shown(&installs),
 				ex.stuck.len(),
 				halted.join(" ")
 			);
 		}
 		if !ex.stuck.is_empty() {
-			return (None, Vec::new());
+			return None;
 		}
-		let halts: Vec<Option<usize>> = ex.runs.iter().map(|run| run.halted).collect();
-		(self.settle(installs, ex), halts)
+		let halts = halts_of(&ex);
+		let accepted = self.settle(installs, ex);
+		Some(Settled { accepted, halts })
 	}
 
-	fn consider_halts(&mut self, installs: Installs) -> (Option<usize>, Vec<Option<usize>>) {
-		let key = installs_hash(&installs);
-		let bucket = self.tried.entry(key).or_default();
-		if bucket.iter().any(|seen| same_installs(seen, &installs)) {
-			return (None, Vec::new());
-		}
-		bucket.push(installs.clone());
-		let ex = self.execute_counted(&installs);
-		let halts: Vec<Option<usize>> = ex.runs.iter().map(|run| run.halted).collect();
-		let mut fills: Installs = Vec::new();
-		for &(run, slot) in &ex.withheld {
-			let honest = self.nodes[0].ex.runs[run]
-				.held(slot)
-				.map(|h| h.value.clone());
-			let value = honest
-				.filter(|v| {
-					ex.knowledge.knows(v).is_some()
-						|| crate::theory::obtainable(v, self.cx.carrier, &ex.knowledge.state)
-				})
-				.unwrap_or_else(crate::value::value_nil);
-			fills.push((run, slot, value));
-		}
+	fn fills(&self, ex: &Execution) -> Installs {
+		let honest = &self.nodes[0].ex;
+		let obtains = |v: &Value| obtainable(v, &self.cx.km.capabilities, &ex.knowledge.state);
+		let mut fills: Installs = ex
+			.withheld
+			.iter()
+			.map(|&(run, slot)| {
+				let value = honest.runs[run]
+					.held(slot)
+					.map(|h| h.value.clone())
+					.filter(|v| obtains(v))
+					.unwrap_or_else(crate::value::value_nil);
+				(run, slot, value)
+			})
+			.collect();
 		for (b, run) in ex.runs.iter().enumerate() {
-			if run.halted.is_none() || self.nodes[0].ex.runs[b].halted.is_some() {
+			if run.halted.is_none() || honest.runs[b].halted.is_some() {
 				continue;
 			}
 			for step in &self.cx.program.runs[b].steps[..run.pc] {
-				let super::program::Event::Recv(d) = step.event else {
+				let Event::Recv(d) = step.event else {
 					continue;
 				};
 				for &(slot, guarded) in &self.cx.program.deliveries[d].slots {
@@ -1190,106 +1174,116 @@ impl<'a, 'b> Search<'a, 'b> {
 					if guarded || held.installed {
 						continue;
 					}
-					let Some(honest) = self.nodes[0].ex.runs[b].held(slot).map(|h| h.value.clone())
-					else {
+					let Some(value) = honest.runs[b].held(slot).map(|h| &h.value) else {
 						continue;
 					};
-					if honest.equivalent(&held.value, true)
-						|| !(ex.knowledge.knows(&honest).is_some()
-							|| crate::theory::obtainable(
-								&honest,
-								self.cx.carrier,
-								&ex.knowledge.state,
-							)) {
+					if value.equivalent(&held.value, true) || !obtains(value) {
 						continue;
 					}
-					fills.push((b, slot, honest));
+					fills.push((b, slot, value.clone()));
 				}
 			}
 		}
-		let accepted = self.settle(installs.clone(), ex);
-		if !fills.is_empty() && !self.done() {
-			let mut filled = installs;
-			filled.extend(fills);
-			let filled = normalize(filled);
-			let family = std::mem::replace(&mut self.family, "fill");
-			let (filled_accepted, filled_halts) = self.consider_derived_halts(filled);
-			self.family = family;
-			if !filled_halts.is_empty() {
-				return (accepted.or(filled_accepted), filled_halts);
-			}
-		}
-		(accepted, halts)
+		fills
 	}
 
-	fn tally(&mut self, accepted: bool) {
-		let key = self.family.as_ptr() as u64;
-		let entry = self.stats.entry(key).or_insert((self.family, 0, 0));
-		entry.1 += 1;
-		if accepted {
-			entry.2 += 1;
+	fn probe(&mut self, installs: Installs) {
+		let installs = normalize(installs);
+		if !self.probed.insert(&installs) {
+			return;
 		}
+		let ex = self.execute_counted(&installs);
+		self.tally("shared", false);
+		if self.debug {
+			eprintln!(
+				"[search]   probe [{}] stuck={}",
+				self.shown(&installs),
+				ex.stuck.len()
+			);
+		}
+		if ex.stuck.is_empty() {
+			super::judge(self.ctx, self.cx, &ex, &installs, &self.nodes[0].ex);
+		}
+	}
+
+	fn shown(&self, installs: &Installs) -> String {
+		installs
+			.iter()
+			.map(|(run, slot, v)| {
+				format!(
+					"{}.{}={}",
+					self.cx.program.runs[*run].name, self.cx.km.slots[*slot].constant, v
+				)
+			})
+			.collect::<Vec<String>>()
+			.join(" ")
+	}
+
+	fn tally(&mut self, family: &'static str, accepted: bool) {
+		let at = match self.stats.iter().position(|(seen, _, _)| *seen == family) {
+			Some(at) => at,
+			None => {
+				self.stats.push((family, 0, 0));
+				self.stats.len() - 1
+			}
+		};
+		self.stats[at].1 += 1;
+		self.stats[at].2 += usize::from(accepted);
 	}
 
 	pub(crate) fn report_stats(&self) {
 		if !self.debug {
 			return;
 		}
-		for (family, tried, accepted) in self.stats.values() {
+		for (family, tried, accepted) in &self.stats {
 			eprintln!("[search] family {family}: tried {tried}, accepted {accepted}");
 		}
 	}
 
-	fn settle(&mut self, installs: Installs, ex: Execution) -> Option<usize> {
-		let accepted = self.settle_inner(installs, ex);
-		self.tally(accepted.is_some());
+	fn settle(&mut self, installs: Installs, ex: Execution) -> bool {
+		let accepted = self.accept(installs, ex);
+		self.tally(self.family, accepted);
 		accepted
 	}
 
-	fn settle_inner(&mut self, installs: Installs, ex: Execution) -> Option<usize> {
+	fn accept(&mut self, installs: Installs, ex: Execution) -> bool {
 		if self.debug {
-			let shown: Vec<String> = installs
-				.iter()
-				.map(|(run, slot, v)| {
-					format!(
-						"{}.{}={}",
-						self.cx.program.runs[*run].name, self.cx.km.slots[*slot].constant.name, v
-					)
-				})
-				.collect();
 			eprintln!(
 				"[search]   try [{}] stuck={} known={}",
-				shown.join(" "),
+				self.shown(&installs),
 				ex.stuck.len(),
 				ex.knowledge.len()
 			);
 		}
 		if !ex.stuck.is_empty() {
-			self.stuck
-				.push((installs.clone(), ex.stuck.clone(), Vec::new()));
-			let at = self.stuck.len() - 1;
-			self.retry_stuck(at);
 			let admitted: Installs = installs
 				.iter()
 				.filter(|(run, slot, _)| !ex.stuck.contains(&(*run, *slot)))
 				.cloned()
 				.collect();
-			if admitted.is_empty() || admitted.len() == installs.len() {
-				return None;
+			let unchanged = admitted.len() == installs.len();
+			self.stuck.push(Stuck {
+				installs,
+				slots: ex.stuck,
+				tried_with: Vec::new(),
+			});
+			self.retry_stuck(self.stuck.len() - 1);
+			if admitted.is_empty() || unchanged {
+				return false;
 			}
-			let family = std::mem::replace(&mut self.family, "admitted");
-			let out = self.consider_derived(admitted);
-			self.family = family;
-			return out;
+			return self
+				.as_family("admitted", |search| search.consider_derived(admitted))
+				.is_some_and(|settled| settled.accepted);
 		}
 		let honest = &self.nodes[0].ex;
-		super::judge(self.ctx, self.cx, &ex, &installs, honest, self.states);
+		super::judge(self.ctx, self.cx, &ex, &installs, honest);
 		let novel = self.novel_terms(&ex);
-		let reuse = ex.knowledge.state.reused.iter().any(|pair| {
-			!self.union.state.reused.iter().any(|held| {
-				held[0].equivalent(&pair[0], true) && held[1].equivalent(&pair[1], true)
-			})
-		});
+		let reuse = ex
+			.knowledge
+			.state
+			.reused
+			.iter()
+			.any(|pair| !self.union.has_reused(pair));
 		if novel.is_empty() && !reuse {
 			let alternative = ex.knowledge.state.known.iter().any(|v| {
 				self.union
@@ -1303,11 +1297,9 @@ impl<'a, 'b> Search<'a, 'b> {
 			} else {
 				self.nodes.pop();
 			}
-			return None;
+			return false;
 		}
-		let mut runs: Vec<usize> = installs.iter().map(|(run, _, _)| *run).collect();
-		runs.dedup();
-		if self.family != "drop" && runs.len() == 1 && installs.len() > 1 {
+		if self.family != "drop" && runs_of(&installs).len() == 1 && installs.len() > 1 {
 			self.drops.push(installs.clone());
 		}
 		self.nodes.push(Node { installs, ex });
@@ -1315,6 +1307,10 @@ impl<'a, 'b> Search<'a, 'b> {
 		self.note_fresh(at);
 		self.absorb(at, novel);
 		self.transfer(at);
-		Some(at)
+		true
 	}
+}
+
+fn halts_of(ex: &Execution) -> Vec<Option<usize>> {
+	ex.runs.iter().map(|run| run.halted).collect()
 }

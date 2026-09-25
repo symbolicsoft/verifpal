@@ -2,25 +2,20 @@
  * SPDX-License-Identifier: GPL-3.0-only */
 
 use lsp_types::{
-	Diagnostic, DiagnosticRelatedInformation, DiagnosticSeverity, Location, NumberOrString, Uri,
+	Diagnostic, DiagnosticRelatedInformation, DiagnosticSeverity, Location, NumberOrString,
 };
 
 use crate::lsp::line::LineIndex;
 use crate::lsp::state::Document;
 use crate::types::VerifpalError;
 
-pub(crate) fn for_document(doc: &Document, uri: &Uri) -> Vec<Diagnostic> {
-	if let Err(e) = &doc.model {
-		return vec![of_error(e, &doc.text, &doc.line, uri)];
-	}
-	match &doc.sanity {
-		Some(e) => vec![of_error(e, &doc.text, &doc.line, uri)],
-		None => Vec::new(),
-	}
+pub(crate) fn for_document(doc: &Document) -> Vec<Diagnostic> {
+	doc.error.iter().map(|e| of_error(doc, e)).collect()
 }
 
-pub(crate) fn of_error(e: &VerifpalError, source: &str, line: &LineIndex, uri: &Uri) -> Diagnostic {
-	let range = match e.narrowed_span(source) {
+fn of_error(doc: &Document, e: &VerifpalError) -> Diagnostic {
+	let line = &doc.line;
+	let range = match e.narrowed_span(doc.text()) {
 		Some(span) if span.end > span.start => line.range(span),
 		Some(span) => {
 			let start = line.position(span.start);
@@ -42,7 +37,7 @@ pub(crate) fn of_error(e: &VerifpalError, source: &str, line: &LineIndex, uri: &
 		.iter()
 		.map(|(span, text)| DiagnosticRelatedInformation {
 			location: Location {
-				uri: uri.clone(),
+				uri: doc.uri.clone(),
 				range: line.range(*span),
 			},
 			message: text.to_string(),
@@ -102,24 +97,13 @@ pub(crate) fn of_verdicts(analysis: &crate::report::Analysis, line: &LineIndex) 
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::lsp::state::Documents;
-	use lsp_types::PositionEncodingKind;
+	use lsp_types::{PositionEncodingKind, Uri};
 	use std::str::FromStr;
 
-	fn uri() -> Uri {
-		Uri::from_str("file:///d.vp").expect("a uri")
-	}
-
 	fn diagnose(src: &str) -> Vec<Diagnostic> {
-		let mut docs = Documents::new(PositionEncodingKind::UTF8);
-		docs.open(
-			"file:///d.vp".to_string(),
-			"d.vp".to_string(),
-			1,
-			src.to_string(),
-		);
-		let doc = docs.get("file:///d.vp").expect("open");
-		for_document(doc, &uri())
+		let uri = Uri::from_str("file:///d.vp").expect("a uri");
+		let doc = Document::new(uri, 1, src.to_string(), &PositionEncodingKind::UTF8);
+		for_document(&doc)
 	}
 
 	#[test]

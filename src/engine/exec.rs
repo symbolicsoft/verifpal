@@ -55,33 +55,16 @@ impl Execution {
 			.and_then(|phase| self.barriers.get(phase))
 			.unwrap_or(self)
 	}
-
-	fn configuration(&self) -> Execution {
-		Execution {
-			runs: self.runs.clone(),
-			knowledge: self.knowledge.clone(),
-			sent: self.sent.clone(),
-			order: self.order.clone(),
-			stuck: self.stuck.clone(),
-			withheld: self.withheld.clone(),
-			barriers: Vec::new(),
-		}
-	}
 }
 
 pub(crate) struct Context<'a> {
 	pub(crate) program: &'a Program,
 	pub(crate) km: &'a ProtocolTrace,
-	pub(crate) carrier: &'a PrincipalState,
 	pub(crate) initial: Knowledge,
 }
 
 impl<'a> Context<'a> {
-	pub(crate) fn new(
-		program: &'a Program,
-		km: &'a ProtocolTrace,
-		carrier: &'a PrincipalState,
-	) -> Context<'a> {
+	pub(crate) fn new(program: &'a Program, km: &'a ProtocolTrace) -> Context<'a> {
 		let mut initial = Knowledge::new(0);
 		initial.learn(&crate::value::value_nil(), Origin::Initial);
 		for slot in &km.slots {
@@ -93,7 +76,6 @@ impl<'a> Context<'a> {
 		Context {
 			program,
 			km,
-			carrier,
 			initial,
 		}
 	}
@@ -132,26 +114,16 @@ fn deliverable(v: &Value) -> bool {
 	crate::primitive::admissible(v)
 		&& !crate::value::subterms(v).any(|term| {
 			matches!(term, Value::Primitive(p) if p.instance_check
-				&& crate::primitive::primitive_get(p.id).is_ok_and(|spec| spec.rewrite.is_some())
+				&& crate::primitive::rewrite_rule(p.id).is_some()
 				&& !can_rewrite(p).0)
 		})
 }
 
-pub(crate) fn evaluate(pre: &Value) -> (Value, bool) {
-	match pre {
-		Value::Primitive(p) => {
-			let (ok, reduced) = can_rewrite(p);
-			let failed = !ok && p.instance_check;
-			(reduced, failed)
-		}
-		Value::Constant(_) => (pre.clone(), false),
-	}
-}
-
-enum Outcome {
-	Done,
-	Blocked,
-	Halted,
+pub(crate) fn install_at(installs: &Installs, run: usize, slot: usize) -> Option<&Value> {
+	installs
+		.iter()
+		.find(|(r, s, _)| *r == run && *s == slot)
+		.map(|(_, _, v)| v)
 }
 
 pub(crate) fn execute(cx: &Context, installs: &Installs) -> Execution {
@@ -176,13 +148,8 @@ pub(crate) fn execute(cx: &Context, installs: &Installs) -> Execution {
 		withheld: Vec::new(),
 		barriers: Vec::new(),
 	};
-	let install_of = |run: usize, slot: usize| -> Option<&Value> {
-		installs
-			.iter()
-			.find(|(r, s, _)| *r == run && *s == slot)
-			.map(|(_, _, v)| v)
-	};
-	for phase in 0..=program.max_phase {
+	let mut barriers = Vec::new();
+	for phase in 0..=km.max_phase {
 		ex.knowledge.set_phase(phase);
 		let mut early = false;
 		loop {
@@ -201,25 +168,16 @@ pub(crate) fn execute(cx: &Context, installs: &Installs) -> Execution {
 					}
 					let pc = state.pc;
 					let before = ex.knowledge.len();
-					let outcome = step_run(cx, &mut ex, r, step.event, &install_of, early);
+					if !step_run(cx, &mut ex, r, step.event, installs, early) {
+						break;
+					}
 					let known = match step.event {
 						Event::Recv(_) => ex.knowledge.len(),
 						_ => before,
 					};
-					match outcome {
-						Outcome::Done => {
-							ex.order.push((r, pc, known));
-							ex.runs[r].pc += 1;
-							progress = true;
-						}
-						Outcome::Halted => {
-							ex.order.push((r, pc, known));
-							ex.runs[r].pc += 1;
-							progress = true;
-							break;
-						}
-						Outcome::Blocked => break,
-					}
+					ex.order.push((r, pc, known));
+					ex.runs[r].pc += 1;
+					progress = true;
 					if early {
 						break;
 					}
@@ -238,56 +196,45 @@ pub(crate) fn execute(cx: &Context, installs: &Installs) -> Execution {
 			if state.halted.is_some() || state.frozen {
 				continue;
 			}
-			if let Some(step) = program.runs[r].steps.get(state.pc)
-				&& step.phase <= phase
-				&& let Event::Recv(d) = step.event
-			{
-				let delivery = &program.deliveries[d];
-				if ex.sent[d].is_none() {
-					for &(slot, guarded) in &delivery.slots {
-						if !guarded && install_of(r, slot).is_none() {
-							ex.withheld.push((r, slot));
-						}
-					}
-				}
-				for &(slot, guarded) in &program.deliveries[d].slots {
-					if !guarded && install_of(r, slot).is_some() && !ex.stuck.contains(&(r, slot)) {
-						ex.stuck.push((r, slot));
-					}
-				}
-			}
-		}
-		for r in 0..program.runs.len() {
-			let state = &ex.runs[r];
-			if state.halted.is_some() || state.frozen {
+			let Some(step) = program.runs[r].steps.get(state.pc) else {
+				continue;
+			};
+			if step.phase > phase {
 				continue;
 			}
-			if program.runs[r]
-				.steps
-				.get(state.pc)
-				.is_some_and(|step| step.phase <= phase)
-			{
-				ex.runs[r].frozen = true;
+			ex.runs[r].frozen = true;
+			let Event::Recv(d) = step.event else {
+				continue;
+			};
+			for &(slot, guarded) in &program.deliveries[d].slots {
+				if guarded {
+					continue;
+				}
+				match install_at(installs, r, slot) {
+					None if ex.sent[d].is_none() => ex.withheld.push((r, slot)),
+					Some(_) if !ex.stuck.contains(&(r, slot)) => ex.stuck.push((r, slot)),
+					_ => {}
+				}
 			}
 		}
-		if phase < program.max_phase {
-			ex.knowledge.close(cx.carrier);
-			let configuration = ex.configuration();
-			ex.barriers.push(configuration);
+		if phase < km.max_phase {
+			ex.knowledge.close(&cx.km.capabilities);
+			barriers.push(ex.clone());
 		}
 	}
-	ex.knowledge.close(cx.carrier);
+	ex.knowledge.close(&cx.km.capabilities);
+	ex.barriers = barriers;
 	ex
 }
 
-fn step_run<'i>(
+fn step_run(
 	cx: &Context,
 	ex: &mut Execution,
 	r: usize,
 	event: Event,
-	install_of: &impl Fn(usize, usize) -> Option<&'i Value>,
+	installs: &Installs,
 	early: bool,
-) -> Outcome {
+) -> bool {
 	let km = cx.km;
 	match event {
 		Event::Hold(slot) => {
@@ -299,7 +246,6 @@ fn step_run<'i>(
 				installed: false,
 				authored: false,
 			});
-			Outcome::Done
 		}
 		Event::Assign(slot) => {
 			let mut memo = IdMap::default();
@@ -309,7 +255,13 @@ fn step_run<'i>(
 				km,
 				&mut memo,
 			);
-			let (value, failed) = evaluate(&pre);
+			let (value, failed) = match &pre {
+				Value::Primitive(p) => {
+					let (ok, reduced) = can_rewrite(p);
+					(reduced, !ok && p.instance_check)
+				}
+				Value::Constant(_) => (pre.clone(), false),
+			};
 			ex.knowledge.note_protocol(&value, &pre, true);
 			ex.knowledge
 				.note_computed(&km.slots[slot].initial_value, &pre, &value);
@@ -322,16 +274,13 @@ fn step_run<'i>(
 			});
 			if failed {
 				ex.runs[r].halted = Some(slot);
-				return Outcome::Halted;
 			}
-			Outcome::Done
 		}
 		Event::Leak(slot) => {
 			if let Some(h) = ex.runs[r].held(slot) {
 				let v = h.value.clone();
 				ex.knowledge.learn(&v, Origin::Leak { run: r, slot });
 			}
-			Outcome::Done
 		}
 		Event::Send(d) => {
 			let delivery = &cx.program.deliveries[d];
@@ -339,39 +288,35 @@ fn step_run<'i>(
 			for &(slot, _) in &delivery.slots {
 				let v = ex.runs[r]
 					.held(slot)
-					.map(|h| h.value.clone())
-					.unwrap_or_else(|| km.slots[slot].initial_value.clone());
+					.map_or_else(|| km.slots[slot].initial_value.clone(), |h| h.value.clone());
+				ex.knowledge.learn(&v, Origin::Wire { run: r, slot });
 				values.push(v);
 			}
-			for (&(slot, _), v) in delivery.slots.iter().zip(values.iter()) {
-				ex.knowledge.learn(v, Origin::Wire { run: r, slot });
-			}
 			ex.sent[d] = Some(values);
-			Outcome::Done
 		}
 		Event::Recv(d) => {
 			let delivery = &cx.program.deliveries[d];
 			let sent = ex.sent[d].clone();
 			if sent.is_none() != early {
-				return Outcome::Blocked;
+				return false;
 			}
 			let mut received: Vec<(usize, Value, bool)> = Vec::with_capacity(delivery.slots.len());
 			for (k, &(slot, guarded)) in delivery.slots.iter().enumerate() {
 				let forwarded = sent.as_ref().map(|values| values[k].clone());
-				let install = (!guarded).then(|| install_of(r, slot)).flatten();
+				let install = (!guarded).then(|| install_at(installs, r, slot)).flatten();
 				match (install, forwarded) {
 					(Some(t), forwarded) => {
 						if forwarded.as_ref().is_some_and(|f| f.equivalent(t, true)) {
 							received.push((slot, t.clone(), false));
 							continue;
 						}
-						if !deliverable(t) || !ex.knowledge.derivable(t, cx.carrier) {
-							return Outcome::Blocked;
+						if !deliverable(t) || !ex.knowledge.derivable(t, &cx.km.capabilities) {
+							return false;
 						}
 						received.push((slot, t.clone(), true));
 					}
 					(None, Some(f)) => received.push((slot, f, false)),
-					(None, None) => return Outcome::Blocked,
+					(None, None) => return false,
 				}
 			}
 			for (slot, value, installed) in received {
@@ -388,7 +333,7 @@ fn step_run<'i>(
 					authored: installed || relayed,
 				});
 			}
-			Outcome::Done
 		}
 	}
+	true
 }

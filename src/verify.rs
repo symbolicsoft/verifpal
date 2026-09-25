@@ -5,6 +5,8 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
 use crate::context::VerifyContext;
+use crate::engine::exec::Execution;
+use crate::engine::program::Program;
 use crate::info::info_message;
 use crate::parser::parse_file;
 use crate::sanity::*;
@@ -15,104 +17,42 @@ pub(crate) fn analyze(m: &Model) -> VResult<VerifyContext> {
 	analyze_sessions(m, crate::sessions::DEFAULT_SESSIONS)
 }
 
-#[cfg_attr(not(any(test, feature = "wasm")), allow(dead_code))]
 pub(crate) fn analyze_sessions(m: &Model, sessions: u8) -> VResult<VerifyContext> {
-	analyze_sessions_traced(m, sessions).map(|(ctx, _)| ctx)
+	analyze_sessions_cancellable(m, sessions, Arc::new(AtomicBool::new(false)))
 }
 
-#[cfg_attr(not(any(test, feature = "lsp")), allow(dead_code))]
+pub(crate) struct Expansion {
+	pub(crate) model: Model,
+	pub(crate) corrupt_from: Option<IdMap<PrincipalId, i32>>,
+	pub(crate) scenarios: Vec<ScenarioSummary>,
+	pub(crate) variants: Vec<Vec<Query>>,
+	pub(crate) siblings: IdMap<ValueId, Arc<Vec<ValueId>>>,
+	pub(crate) interchangeable: IdMap<PrincipalId, PrincipalId>,
+	pub(crate) actors: IdMap<PrincipalId, PrincipalId>,
+	pub(crate) bound: IdSet<ValueId>,
+}
+
+pub(crate) fn expand(m: &Model, sessions: u8) -> VResult<Expansion> {
+	let sessions = sessions.max(1);
+	let e = crate::scenario::expand_scenarios(m, sessions)?;
+	if sessions == 1 {
+		return Ok(e);
+	}
+	crate::sessions::expand_sessions(e, sessions)
+}
+
 pub(crate) fn analyze_sessions_cancellable(
 	m: &Model,
 	sessions: u8,
 	cancel: Arc<AtomicBool>,
 ) -> VResult<VerifyContext> {
-	analyze_sessions_traced_cancellable(m, sessions, cancel).map(|(ctx, _)| ctx)
-}
-
-pub(crate) fn analyze_sessions_traced(
-	m: &Model,
-	sessions: u8,
-) -> VResult<(VerifyContext, ProtocolTrace)> {
-	analyze_sessions_traced_cancellable(m, sessions, Arc::new(AtomicBool::new(false)))
-}
-
-pub(crate) struct Expansion {
-	pub(crate) model: Model,
-	honest: Option<IdMap<PrincipalId, i32>>,
-	scenarios: Vec<ScenarioSummary>,
-	variants: Vec<Vec<Query>>,
-	siblings: IdMap<ValueId, Arc<Vec<ValueId>>>,
-	interchangeable: IdMap<PrincipalId, PrincipalId>,
-	actors: IdMap<PrincipalId, PrincipalId>,
-	bound: IdSet<ValueId>,
-}
-
-pub(crate) fn expand(m: &Model, sessions: u8) -> VResult<Expansion> {
-	let sessions = sessions.max(1);
-	let mut e = if m.scenarios.is_empty() {
-		Expansion {
-			model: m.clone(),
-			honest: None,
-			scenarios: Vec::new(),
-			variants: Vec::new(),
-			siblings: IdMap::default(),
-			interchangeable: IdMap::default(),
-			actors: IdMap::default(),
-			bound: IdSet::default(),
-		}
-	} else {
-		let e = crate::scenario::expand_scenarios(m, sessions)?;
-		Expansion {
-			model: e.model,
-			honest: Some(e.honest),
-			scenarios: e.summaries,
-			variants: e.query_variants,
-			siblings: IdMap::default(),
-			interchangeable: e.interchangeable.into_iter().collect(),
-			actors: e.actors.into_iter().collect(),
-			bound: e.bound.into_iter().collect(),
-		}
-	};
-	if sessions > 1 {
-		let s = crate::sessions::expand_sessions(&e.model, sessions, &e.variants)?;
-		if let Some(honest) = e.honest.as_mut() {
-			for &(original, clone) in &s.principal_clones {
-				if let Some(&corrupt_from) = honest.get(&original) {
-					honest.insert(clone, corrupt_from);
-				}
-			}
-		}
-		for &(original, clone) in &s.principal_clones {
-			let canonical = e
-				.interchangeable
-				.get(&original)
-				.copied()
-				.unwrap_or(original);
-			e.interchangeable.insert(clone, canonical);
-			e.interchangeable.entry(original).or_insert(canonical);
-			let actor = e.actors.get(&original).copied().unwrap_or(original);
-			e.actors.insert(clone, actor);
-			e.actors.entry(original).or_insert(actor);
-		}
-		e.model = s.model;
-		e.variants = s.query_variants;
-		e.siblings = s.siblings;
-	}
-	Ok(e)
-}
-
-fn analyze_sessions_traced_cancellable(
-	m: &Model,
-	sessions: u8,
-	cancel: Arc<AtomicBool>,
-) -> VResult<(VerifyContext, ProtocolTrace)> {
 	let sessions = sessions.max(1);
 	let _generation = crate::context::GenerationGuard::enter();
 	crate::info::info_reset_deductions();
 	let assumptions = crate::capability::declared_assumptions(m);
 	let Expansion {
 		model,
-		honest,
+		corrupt_from,
 		scenarios,
 		variants,
 		siblings,
@@ -121,7 +61,7 @@ fn analyze_sessions_traced_cancellable(
 		bound,
 	} = expand(m, sessions)?;
 	let m = &model;
-	let (mut trace, states) = sanity(m)?;
+	let mut trace = sanity(m)?;
 	trace.session_siblings = siblings;
 	trace.copy_siblings = copy_sibling_groups(&trace.slots);
 	trace.interchangeable = interchangeable;
@@ -129,31 +69,20 @@ fn analyze_sessions_traced_cancellable(
 	trace.scenario_bound = bound;
 	trace.equivalence_queried =
 		equivalence_queried(m.queries.iter().chain(variants.iter().flatten()));
-	capability_reach_notice(&trace, &states);
-	let mut ctx = VerifyContext::new(
-		m,
-		&states,
-		variants,
-		sessions,
-		honest,
-		scenarios,
-		assumptions,
-	);
+	capability_reach_notice(&trace);
+	let mut ctx = VerifyContext::new(m, variants, sessions, corrupt_from, scenarios, assumptions);
 	ctx.set_cancel(cancel);
 	let ctx = ctx;
-	crate::engine::verify(&ctx, m, &trace, &states)?;
+	crate::engine::verify(&ctx, m, &trace)?;
 	if ctx.cancelled() {
 		return Err(VerifpalError::cancelled());
 	}
 	ctx.finalize_envelopes();
-	Ok((ctx, trace))
+	Ok(ctx)
 }
 
-fn capability_reach_notice(trace: &ProtocolTrace, states: &[PrincipalState]) {
-	let Some(index) = states.first().map(|ps| &ps.capabilities) else {
-		return;
-	};
-	let governed = index.governed_occurrences(&trace.slots);
+fn capability_reach_notice(trace: &ProtocolTrace) {
+	let governed = trace.capabilities.governed_occurrences(&trace.slots);
 	if governed.is_empty() {
 		return;
 	}
@@ -176,7 +105,7 @@ fn capability_reach_notice(trace: &ProtocolTrace, states: &[PrincipalState]) {
 				 able to produce {slot} too."
 			),
 		};
-		info_message(&message, InfoLevel::Info, false);
+		info_message(&message, InfoLevel::Info);
 	}
 }
 
@@ -189,12 +118,29 @@ pub struct VerifyReport {
 	pub elapsed: Option<std::time::Duration>,
 	pub assumptions: Vec<(Value, Capability, i32)>,
 	pub scenarios: Vec<ScenarioSummary>,
-	pub provenance: Provenance,
+	pub auto_queries: bool,
 }
 
-#[derive(Clone, Copy, Debug, Default)]
-pub struct Provenance {
-	pub auto_queries: bool,
+impl VerifyReport {
+	pub(crate) fn of(
+		m: &Model,
+		ctx: &VerifyContext,
+		sessions: u8,
+		elapsed: Option<std::time::Duration>,
+	) -> VerifyReport {
+		let results = ctx.results_get();
+		VerifyReport {
+			file_name: ctx.results_file_name().to_string(),
+			sessions,
+			attacker: m.attacker,
+			code: VerifyResult::results_code(&results),
+			results,
+			elapsed,
+			assumptions: ctx.assumptions().to_vec(),
+			scenarios: ctx.scenarios().to_vec(),
+			auto_queries: false,
+		}
+	}
 }
 
 pub fn verify(file_path: &str) -> VResult<(Vec<VerifyResult>, String)> {
@@ -224,11 +170,11 @@ pub(crate) fn verify_parsed(
 ) -> VResult<(VerifyReport, String)> {
 	let source = m.source.to_string();
 	if auto_queries {
-		let (km, ps) = sanity(&m).map_err(|e| e.located(&m.file_name, &m.source))?;
-		m.queries = crate::autoquery::auto_queries(&m, &km, &ps);
+		let km = sanity(&m).map_err(|e| e.located(&m.file_name, &m.source))?;
+		m.queries = crate::autoquery::auto_queries(&m, &km);
 	}
 	let mut report = verify_model(&m, sessions).map_err(|e| e.located(&m.file_name, &m.source))?;
-	report.provenance.auto_queries = auto_queries;
+	report.auto_queries = auto_queries;
 	Ok((report, source))
 }
 
@@ -251,67 +197,41 @@ fn verify_model(m: &Model, sessions: u8) -> VResult<VerifyReport> {
 			chrono_time_string(),
 		),
 		InfoLevel::Verifpal,
-		false,
 	);
-	let analyzed = analyze_sessions_traced(m, sessions);
+	let analyzed = analyze_sessions(m, sessions);
 	let elapsed = crate::info::info_status_elapsed();
 	crate::info::info_status_end();
-	let (ctx, _) = analyzed?;
-	let (results, code) = verify_end(&ctx, elapsed)?;
-	Ok(VerifyReport {
-		file_name: ctx.results_file_name().to_string(),
-		sessions,
-		attacker: m.attacker,
-		results,
-		code,
-		elapsed,
-		assumptions: ctx.assumptions().to_vec(),
-		scenarios: ctx.scenarios().to_vec(),
-		provenance: Provenance::default(),
-	})
+	let report = VerifyReport::of(m, &analyzed?, sessions, elapsed);
+	verify_end(&report);
+	Ok(report)
 }
-
-type Failures = Vec<(Primitive, usize)>;
 
 pub(crate) fn check_honest_run(
 	ctx: &VerifyContext,
 	km: &ProtocolTrace,
-	ps: &PrincipalState,
-	reached: impl Fn(usize) -> bool,
-	phase_of: impl Fn(usize) -> i32,
+	program: &Program,
+	root: &Execution,
 ) -> VResult<()> {
-	let mut ps_resolved = ps.clone_for_depth(false);
-	ps_resolved.resolve_all_values()?;
-
-	let failures: Failures = ps_resolved
-		.perform_all_rewrites()
-		.into_iter()
-		.filter(|&(_, slot)| {
-			km.slots
-				.get(slot)
-				.is_none_or(|s| ctx.is_honest_at(s.creator, phase_of(slot)))
+	let located = |e: VerifpalError, slot: usize| e.or_span(km.slots[slot].declared_span);
+	let failed = root
+		.runs
+		.iter()
+		.filter_map(|run| run.halted.map(|slot| (slot, run)))
+		.filter(|&(slot, _)| {
+			let creator = km.slots[slot].creator;
+			ctx.is_honest_at(creator, program.phase_of(creator, slot))
 		})
-		.collect();
-	if let Err(e) = sanity_fail_on_failed_checked_primitive_rewrite(&failures) {
-		let span = failures
-			.iter()
-			.find(|(p, _)| p.instance_check)
-			.and_then(|(_, slot)| km.slots.get(*slot))
-			.map(|slot| slot.declared_span);
-		return Err(match span {
-			Some(span) => e.or_span(span),
-			None => e,
-		});
+		.min_by_key(|&(slot, _)| slot);
+	if let Some((slot, run)) = failed
+		&& let Some(Value::Primitive(p)) = run.held(slot).map(|held| &held.value)
+	{
+		return Err(located(honest_check_failure(p), slot));
 	}
-	for (index, sv) in ps_resolved.values.iter().enumerate() {
-		if !reached(index) {
-			continue;
-		}
-		if let Err(e) = sanity_check_argument_restrictions(&sv.value) {
-			return Err(match km.slots.get(index) {
-				Some(slot) => e.or_span(slot.declared_span),
-				None => e,
-			});
+	for run in &root.runs {
+		for (slot, held) in run.env.iter().enumerate() {
+			if let Some(held) = held {
+				sanity_check_argument_restrictions(&held.value).map_err(|e| located(e, slot))?;
+			}
 		}
 	}
 	Ok(())
@@ -336,71 +256,64 @@ pub(crate) fn status_line(
 	)
 }
 
-fn verify_end(
-	ctx: &VerifyContext,
-	elapsed: Option<std::time::Duration>,
-) -> VResult<(Vec<VerifyResult>, String)> {
-	let results = ctx.results_get();
-	let file_name = ctx.results_file_name();
+fn verify_end(report: &VerifyReport) {
+	let results = &report.results;
 	let fail_count = results.iter().filter(|r| r.resolved).count();
 	let total = results.len();
 
 	crate::info::info_blank_line();
 	crate::info::info_separator();
-	let took = elapsed
+	let took = report
+		.elapsed
 		.map(|d| format!(" in {}", crate::info::info_elapsed_text(d)))
 		.unwrap_or_default();
 	info_message(
 		&format!(
 			"Verification completed for '{}' at {}{}.",
-			file_name,
+			report.file_name,
 			chrono_time_string(),
 			took,
 		),
 		InfoLevel::Verifpal,
-		false,
 	);
 	crate::info::info_blank_line();
 
-	let scenarios = ctx.scenarios();
+	let scenarios = &report.scenarios;
 	if !scenarios.is_empty() {
 		info_message(
 			&format!(
 				"Analysis performed over {} declared peer scenario{}:",
 				scenarios.len(),
-				if scenarios.len() == 1 { "" } else { "s" },
+				crate::util::plural(scenarios.len()),
 			),
 			InfoLevel::Warning,
-			false,
 		);
 		for scenario in scenarios {
 			info_message(
-				&format!("{scenario} ({})", scenario.peer()),
+				&format!("{scenario} ({})", peer_description(scenario.corrupt_from)),
 				InfoLevel::Warning,
-				false,
 			);
 		}
 		crate::info::info_blank_line();
 	}
 
-	let assumptions = ctx.assumptions();
+	let assumptions = &report.assumptions;
 	if !assumptions.is_empty() {
 		info_message(
 			&format!(
 				"Analysis performed under {} declared weakening assumption{}:",
 				assumptions.len(),
-				if assumptions.len() == 1 { "" } else { "s" },
+				crate::util::plural(assumptions.len()),
 			),
 			InfoLevel::Warning,
-			false,
 		);
 		for (term, _, _) in assumptions {
-			info_message(&term.to_string(), InfoLevel::Warning, false);
+			info_message(&term.to_string(), InfoLevel::Warning);
 		}
 		crate::info::info_blank_line();
 	}
 
-	for r in &results {
+	for r in results {
 		if r.resolved {
 			info_message(
 				&format!(
@@ -410,7 +323,6 @@ fn verify_end(
 					r.summary
 				),
 				InfoLevel::Result,
-				false,
 			);
 		} else {
 			info_message(
@@ -420,7 +332,6 @@ fn verify_end(
 					r.envelope.qualifier()
 				),
 				InfoLevel::Pass,
-				false,
 			);
 		}
 	}
@@ -433,29 +344,19 @@ fn verify_end(
 		info_message(
 			&format!("{} further deductions were not shown.", suppressed),
 			InfoLevel::Info,
-			false,
 		);
 	}
 
 	if fail_count == 0 {
-		info_message(
-			&format!("All {} queries pass.", total),
-			InfoLevel::Pass,
-			false,
-		);
+		info_message(&format!("All {} queries pass.", total), InfoLevel::Pass);
 	} else {
 		info_message(
 			&format!("{} of {} queries failed.", fail_count, total),
 			InfoLevel::Result,
-			false,
 		);
 	}
 
-	info_message("Thank you for using Verifpal.", InfoLevel::Verifpal, false);
-
-	let results_code = VerifyResult::results_code(&results);
-
-	Ok((results, results_code))
+	info_message("Thank you for using Verifpal.", InfoLevel::Verifpal);
 }
 
 fn chrono_time_string() -> String {
@@ -522,7 +423,7 @@ mod tests {
 		let second = parse_string("second.vp", &model("bbb")).expect("parse");
 
 		let ids = |m: &crate::types::Model| {
-			let (km, _) = crate::sanity::sanity(m).expect("sanity");
+			let km = crate::sanity::sanity(m).expect("sanity");
 			let mut v: Vec<_> = km.slots.iter().map(|s| s.constant.id).collect();
 			v.sort_unstable();
 			v

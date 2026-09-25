@@ -35,41 +35,25 @@
 //! session resolves it. Variants that map to themselves (all-shared
 //! constants, no principals) are dropped.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::info::info_message;
 use crate::sanity::MAX_PRINCIPALS;
 use crate::types::*;
 use crate::value::{copy_index_of, copy_value_id};
+use crate::verify::Expansion;
 
 pub(crate) const MAX_SESSIONS: u8 = 16;
 
 pub(crate) const DEFAULT_SESSIONS: u8 = 2;
 
-#[derive(Debug)]
-pub(crate) struct SessionExpansion {
-	pub(crate) model: Model,
-	pub(crate) query_variants: Vec<Vec<Query>>,
-	pub(crate) siblings: IdMap<ValueId, Arc<Vec<ValueId>>>,
-	pub(crate) principal_clones: Vec<(PrincipalId, PrincipalId)>,
-}
-
-fn session_value_id(base: ValueId, s: u8) -> ValueId {
-	let (scenario_copy, root) = copy_index_of(base);
-	copy_value_id(root, scenario_copy + s as u32 - 1)
-}
-
-pub(crate) fn expand_sessions(
-	m: &Model,
-	sessions: u8,
-	seeded: &[Vec<Query>],
-) -> VResult<SessionExpansion> {
+pub(crate) fn expand_sessions(mut e: Expansion, sessions: u8) -> VResult<Expansion> {
 	if !(2..=MAX_SESSIONS).contains(&sessions) {
 		return Err(VerifpalError::sanity(
 			format!("session expansion supports 2 to {MAX_SESSIONS} sessions").into(),
 		));
 	}
+	let m = &e.model;
 	let principals = m.declared_principals();
 	let expanded_count = principals.len() * sessions as usize;
 	if expanded_count > MAX_PRINCIPALS {
@@ -92,38 +76,38 @@ pub(crate) fn expand_sessions(
 	}
 
 	let freshen = m.freshened_constants();
-	let pids = clone_principal_ids(&principals, sessions, m.highest_referenced_principal())?;
-	let principal_clones: Vec<(PrincipalId, PrincipalId)> = pids
-		.iter()
-		.map(|(&(original, _), (clone, _))| (original, *clone))
-		.collect();
+	let copies = ModelCopy::numbered(
+		m,
+		&freshen,
+		(2..=sessions).map(|s| (format!("#{s}"), s as u32 - 1)),
+		"session",
+	)?;
 
 	let mut blocks: Vec<Block> = Vec::with_capacity(m.blocks.len() * sessions as usize);
 	for block in &m.blocks {
+		blocks.push(block.clone());
 		match block {
 			Block::Principal(p) => {
-				blocks.push(Block::Principal(p.clone()));
-				for s in 2..=sessions {
-					blocks.push(Block::Principal(clone_principal(p, s, &freshen, &pids)));
-				}
+				blocks.extend(
+					copies
+						.iter()
+						.map(|copy| Block::Principal(copy.principal(p))),
+				);
 			}
 			Block::Message(msg) => {
-				blocks.push(Block::Message(msg.clone()));
-				for s in 2..=sessions {
-					blocks.push(Block::Message(clone_message(msg, s, &freshen, &pids)));
-				}
+				blocks.extend(copies.iter().map(|copy| Block::Message(copy.message(msg))));
 			}
-			Block::Phase(p) => blocks.push(Block::Phase(p.clone())),
+			Block::Phase(_) => {}
 		}
 	}
 
 	let mut query_variants: Vec<Vec<Query>> = Vec::with_capacity(m.queries.len());
 	for (i, query) in m.queries.iter().enumerate() {
-		let scenarios: &[Query] = seeded.get(i).map(Vec::as_slice).unwrap_or(&[]);
+		let scenarios: &[Query] = e.variants.get(i).map(Vec::as_slice).unwrap_or(&[]);
 		let mut variants: Vec<Query> = scenarios.to_vec();
 		for seed in std::iter::once(query).chain(scenarios.iter()) {
-			for s in 2..=sessions {
-				let variant = clone_query(seed, s, &freshen, &pids);
+			for copy in &copies {
+				let variant = copy.query(seed);
 				if !seed.same_shape(&variant) && !variants.iter().any(|v| v.same_shape(&variant)) {
 					variants.push(variant);
 				}
@@ -134,21 +118,15 @@ pub(crate) fn expand_sessions(
 
 	let mut siblings: IdMap<ValueId, Arc<Vec<ValueId>>> = IdMap::default();
 	for &base in &freshen {
-		let mut group = Vec::with_capacity(sessions as usize);
-		group.push(base);
-		for s in 2..=sessions {
-			group.push(session_value_id(base, s));
-		}
-		let group = Arc::new(group);
+		let group: Arc<Vec<ValueId>> = Arc::new(
+			std::iter::once(base)
+				.chain(copies.iter().map(|copy| copy.value_id(base)))
+				.collect(),
+		);
 		for &member in group.iter() {
 			siblings.insert(member, Arc::clone(&group));
 		}
 	}
-
-	let model = Model {
-		blocks,
-		..m.clone()
-	};
 
 	let naming = if sessions == 2 {
 		"suffixed #2".to_string()
@@ -161,160 +139,155 @@ pub(crate) fn expand_sessions(
 			 per-session values and principals are {naming}.",
 		),
 		InfoLevel::Info,
-		false,
 	);
 
-	Ok(SessionExpansion {
-		model,
-		query_variants,
-		siblings,
-		principal_clones,
-	})
+	for (&original, &(clone, _)) in copies.iter().flat_map(|copy| copy.principals.iter()) {
+		if let Some(corrupt_from) = e.corrupt_from.as_mut()
+			&& let Some(&from) = corrupt_from.get(&original)
+		{
+			corrupt_from.insert(clone, from);
+		}
+		let canonical = e
+			.interchangeable
+			.get(&original)
+			.copied()
+			.unwrap_or(original);
+		e.interchangeable.insert(clone, canonical);
+		e.interchangeable.entry(original).or_insert(canonical);
+		let actor = e.actors.get(&original).copied().unwrap_or(original);
+		e.actors.insert(clone, actor);
+		e.actors.entry(original).or_insert(actor);
+	}
+	e.model.blocks = blocks;
+	e.variants = query_variants;
+	e.siblings = siblings;
+	Ok(e)
 }
 
-fn clone_principal_ids(
-	principals: &[(PrincipalId, String)],
-	sessions: u8,
-	highest: PrincipalId,
-) -> VResult<HashMap<(PrincipalId, u8), (PrincipalId, String)>> {
-	let mut next = principals
-		.iter()
-		.map(|&(id, _)| id)
-		.max()
-		.unwrap_or(0)
-		.max(highest);
-	let mut out = HashMap::new();
-	for s in 2..=sessions {
-		for (id, name) in principals {
-			next = next.checked_add(1).ok_or_else(|| {
-				VerifpalError::internal("session expansion exhausted principal ids".into())
-			})?;
-			out.insert((*id, s), (next, format!("{name}#{s}")));
+pub(crate) struct ModelCopy<'a> {
+	freshen: &'a IdSet<ValueId>,
+	suffix: String,
+	offset: u32,
+	principals: IdMap<PrincipalId, (PrincipalId, String)>,
+}
+
+impl<'a> ModelCopy<'a> {
+	pub(crate) fn original(freshen: &'a IdSet<ValueId>) -> Self {
+		ModelCopy {
+			freshen,
+			suffix: String::new(),
+			offset: 0,
+			principals: IdMap::default(),
 		}
 	}
-	Ok(out)
-}
 
-fn map_constant(c: &Constant, s: u8, freshen: &IdSet<ValueId>) -> Constant {
-	if !freshen.contains(&c.id) {
-		return c.clone();
-	}
-	Constant {
-		name: Arc::from(format!("{}#{s}", c.name)),
-		id: session_value_id(c.id, s),
-		..c.clone()
-	}
-}
-
-fn map_value(v: &Value, s: u8, freshen: &IdSet<ValueId>) -> Value {
-	match v {
-		Value::Constant(c) => Value::Constant(map_constant(c, s, freshen)),
-		Value::Primitive(p) => {
-			let arguments = p
-				.arguments
-				.iter()
-				.map(|a| map_value(a, s, freshen))
-				.collect();
-			Value::Primitive(Arc::new(p.with_arguments(arguments)))
-		}
-	}
-}
-
-fn clone_principal(
-	p: &Principal,
-	s: u8,
-	freshen: &IdSet<ValueId>,
-	pids: &HashMap<(PrincipalId, u8), (PrincipalId, String)>,
-) -> Principal {
-	let (id, name) = pids
-		.get(&(p.id, s))
-		.cloned()
-		.unwrap_or((p.id, p.name.clone()));
-	Principal {
-		name,
-		id,
-		span: p.span,
-		expressions: p
-			.expressions
-			.iter()
-			.map(|expr| Expression {
-				span: expr.span,
-				kind: expr.kind,
-				qualifier: expr.qualifier,
-				constants: expr
-					.constants
+	pub(crate) fn numbered(
+		m: &Model,
+		freshen: &'a IdSet<ValueId>,
+		labels: impl Iterator<Item = (String, u32)>,
+		expansion: &str,
+	) -> VResult<Vec<Self>> {
+		let principals = m.declared_principals();
+		let mut next = m.highest_referenced_principal();
+		labels
+			.map(|(suffix, offset)| {
+				let principals = principals
 					.iter()
-					.map(|c| map_constant(c, s, freshen))
-					.collect(),
-				assigned: expr.assigned.as_ref().map(|v| map_value(v, s, freshen)),
-				leading_comments: Vec::new(),
-				trailing_comment: None,
+					.map(|(id, name)| {
+						next = next.checked_add(1).ok_or_else(|| {
+							VerifpalError::internal(
+								format!("{expansion} expansion exhausted principal ids").into(),
+							)
+						})?;
+						Ok((*id, (next, format!("{name}{suffix}"))))
+					})
+					.collect::<VResult<_>>()?;
+				Ok(ModelCopy {
+					freshen,
+					suffix,
+					offset,
+					principals,
+				})
 			})
-			.collect(),
-		leading_comments: Vec::new(),
-		header_trailing: None,
-		tail_comments: Vec::new(),
-		closing_trailing: None,
+			.collect()
+	}
+
+	pub(crate) fn principal_id(&self, id: PrincipalId) -> PrincipalId {
+		self.principals.get(&id).map_or(id, |&(copy, _)| copy)
+	}
+
+	fn value_id(&self, id: ValueId) -> ValueId {
+		let (copy, root) = copy_index_of(id);
+		copy_value_id(root, copy + self.offset)
+	}
+
+	fn constant(&self, c: &Constant) -> Constant {
+		if self.offset == 0 || !self.freshen.contains(&c.id) {
+			return c.clone();
+		}
+		Constant {
+			name: Arc::from(format!("{}{}", c.name, self.suffix)),
+			id: self.value_id(c.id),
+			..c.clone()
+		}
+	}
+
+	fn rename(&self, constants: &mut [Constant]) {
+		for c in constants {
+			*c = self.constant(c);
+		}
+	}
+
+	fn readdress(&self, msg: &mut Message) {
+		if let Some((id, name)) = self.principals.get(&msg.sender) {
+			msg.sender = *id;
+			msg.sender_name = Arc::from(name.as_str());
+		}
+		if let Some((id, name)) = self.principals.get(&msg.recipient) {
+			msg.recipient = *id;
+			msg.recipient_name = Arc::from(name.as_str());
+		}
+		self.rename(&mut msg.constants);
+	}
+
+	pub(crate) fn principal(&self, p: &Principal) -> Principal {
+		let mut copy = p.clone();
+		if let Some((id, name)) = self.principals.get(&p.id) {
+			copy.id = *id;
+			copy.name = name.clone();
+		}
+		for expr in &mut copy.expressions {
+			self.rename(&mut expr.constants);
+			if let Some(value) = &mut expr.assigned {
+				*value = map_constants(value, &|c| self.constant(c));
+			}
+		}
+		copy
+	}
+
+	pub(crate) fn message(&self, msg: &Message) -> Message {
+		let mut copy = msg.clone();
+		self.readdress(&mut copy);
+		copy
+	}
+
+	pub(crate) fn query(&self, q: &Query) -> Query {
+		let mut copy = q.clone();
+		self.rename(&mut copy.constants);
+		self.readdress(&mut copy.message);
+		for option in &mut copy.options {
+			self.readdress(&mut option.message);
+		}
+		copy
 	}
 }
 
-fn clone_message(
-	msg: &Message,
-	s: u8,
-	freshen: &IdSet<ValueId>,
-	pids: &HashMap<(PrincipalId, u8), (PrincipalId, String)>,
-) -> Message {
-	let (sender, sender_name) = pids
-		.get(&(msg.sender, s))
-		.map(|(id, name)| (*id, Arc::<str>::from(name.as_str())))
-		.unwrap_or((msg.sender, Arc::clone(&msg.sender_name)));
-	let (recipient, recipient_name) = pids
-		.get(&(msg.recipient, s))
-		.map(|(id, name)| (*id, Arc::<str>::from(name.as_str())))
-		.unwrap_or((msg.recipient, Arc::clone(&msg.recipient_name)));
-	Message {
-		span: msg.span,
-		sender,
-		sender_name,
-		recipient,
-		recipient_name,
-		constants: msg
-			.constants
-			.iter()
-			.map(|c| map_constant(c, s, freshen))
-			.collect(),
-		leading_comments: Vec::new(),
-		trailing_comment: None,
-	}
-}
-
-fn clone_query(
-	q: &Query,
-	s: u8,
-	freshen: &IdSet<ValueId>,
-	pids: &HashMap<(PrincipalId, u8), (PrincipalId, String)>,
-) -> Query {
-	Query {
-		span: q.span,
-		kind: q.kind,
-		constants: q
-			.constants
-			.iter()
-			.map(|c| map_constant(c, s, freshen))
-			.collect(),
-		message: clone_message(&q.message, s, freshen, pids),
-		options: q
-			.options
-			.iter()
-			.map(|o| QueryOption {
-				kind: o.kind,
-				message: clone_message(&o.message, s, freshen, pids),
-				leading_comments: Vec::new(),
-				trailing_comment: None,
-			})
-			.collect(),
-		leading_comments: Vec::new(),
-		trailing_comment: None,
+pub(crate) fn map_constants(v: &Value, f: &impl Fn(&Constant) -> Constant) -> Value {
+	match v {
+		Value::Constant(c) => Value::Constant(f(c)),
+		Value::Primitive(p) => Value::Primitive(Arc::new(
+			p.with_arguments(p.arguments.iter().map(|a| map_constants(a, f)).collect()),
+		)),
 	}
 }
 
@@ -341,12 +314,12 @@ mod tests {
 		authentication? Alice -> Bob: se_e1\n\
 		]\n";
 
-	fn expanded() -> SessionExpansion {
+	fn expanded() -> Expansion {
 		let m = parse_string("sessions.vp", SRC).expect("parse");
-		expand_sessions(&m, 2, &[]).expect("expand")
+		crate::verify::expand(&m, 2).expect("expand")
 	}
 
-	fn principal<'e>(e: &'e SessionExpansion, name: &str) -> &'e Principal {
+	fn principal<'e>(e: &'e Expansion, name: &str) -> &'e Principal {
 		e.model
 			.blocks
 			.iter()
@@ -440,7 +413,7 @@ mod tests {
 		let e = expanded();
 		crate::sanity::sanity(&e.model).expect("expanded model is a legal model");
 		let mut with_variants = e.model.clone();
-		with_variants.queries = e.query_variants.concat();
+		with_variants.queries = e.variants.concat();
 		crate::sanity::sanity(&with_variants).expect("variants are legal queries");
 	}
 
@@ -448,13 +421,13 @@ mod tests {
 	fn variants_map_sessions_and_drop_identities() {
 		let e = expanded();
 		assert!(
-			e.query_variants[0].is_empty(),
+			e.variants[0].is_empty(),
 			"confidentiality? psk is all-shared: no variant"
 		);
-		assert_eq!(e.query_variants[1].len(), 1);
-		assert_eq!(&*e.query_variants[1][0].constants[0].name, "na#2");
-		assert_eq!(e.query_variants[2].len(), 1);
-		let auth = &e.query_variants[2][0];
+		assert_eq!(e.variants[1].len(), 1);
+		assert_eq!(&*e.variants[1][0].constants[0].name, "na#2");
+		assert_eq!(e.variants[2].len(), 1);
+		let auth = &e.variants[2][0];
 		assert_eq!(&*auth.message.sender_name, "Alice#2");
 		assert_eq!(&*auth.message.recipient_name, "Bob#2");
 		assert_eq!(&*auth.message.constants[0].name, "se_e1#2");
@@ -478,7 +451,7 @@ mod tests {
 			.expect("na");
 		let group = e.siblings.get(&na_id).expect("group for na");
 		assert_eq!(group.len(), 2);
-		let clone_id = session_value_id(na_id, 2);
+		let clone_id = COPY_BASE + na_id;
 		assert!(Arc::ptr_eq(
 			group,
 			e.siblings.get(&clone_id).expect("clone")
@@ -495,7 +468,9 @@ mod tests {
 		}
 		src += "queries[\nconfidentiality? cap_s0\n]\n";
 		let m = parse_string("cap.vp", &src).expect("parse");
-		let err = expand_sessions(&m, 2, &[]).expect_err("65 * 2 > 128");
+		let Err(err) = crate::verify::expand(&m, 2) else {
+			panic!("65 * 2 > 128");
+		};
 		assert!(format!("{err}").contains("--sessions"));
 	}
 }

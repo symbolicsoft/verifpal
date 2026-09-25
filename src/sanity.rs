@@ -6,9 +6,8 @@ use crate::pretty::{pretty_arity, pretty_constants};
 use crate::primitive::*;
 use crate::types::*;
 use crate::util::*;
-use crate::value::*;
 
-pub(crate) fn trace_constant_names(km: &ProtocolTrace) -> Vec<&str> {
+fn trace_constant_names(km: &ProtocolTrace) -> Vec<&str> {
 	let mut names: Vec<&str> = km
 		.slots
 		.iter()
@@ -45,14 +44,13 @@ fn restriction_note(outer: PrimitiveId, inner: PrimitiveId, position: usize) -> 
 	}
 }
 
-pub(crate) fn sanity(m: &Model) -> VResult<(ProtocolTrace, Vec<PrincipalState>)> {
+pub(crate) fn sanity(m: &Model) -> VResult<ProtocolTrace> {
 	sanity_phases(m)?;
 	let (principals, principal_ids) = sanity_declared_principals(m)?;
 	let km = construct_protocol_trace(m, &principals, &principal_ids)?;
 	sanity_capabilities(m, &km)?;
-	let ps = construct_principal_states(m, &km);
-	sanity_queries(m, &km, &ps)?;
-	Ok((km, ps))
+	sanity_queries(m, &km)?;
+	Ok(km)
 }
 
 fn sanity_capabilities(m: &Model, km: &ProtocolTrace) -> VResult<()> {
@@ -160,7 +158,7 @@ pub(crate) fn sanity_assignment_constants(
 			}
 		}
 		Value::Primitive(p) => {
-			let arity = primitive_get_arity(p)?;
+			let arity = crate::primitive::primitive_def(p.id)?.arity();
 			let arg_count = p.arguments.len() as i32;
 			if arg_count == 0 {
 				return Err(VerifpalError::sanity(
@@ -260,12 +258,12 @@ pub(crate) fn sanity_primitive(p: &Primitive, outputs: &[Constant]) -> VResult<(
 	sanity_check_primitive_arguments(p)
 }
 
-fn sanity_queries(m: &Model, km: &ProtocolTrace, states: &[PrincipalState]) -> VResult<()> {
+fn sanity_queries(m: &Model, km: &ProtocolTrace) -> VResult<()> {
 	for query in &m.queries {
 		let located = |e: VerifpalError| e.or_span(query.span);
 		match query.kind {
 			QueryKind::Authentication => {
-				sanity_queries_authentication(query, km, states).map_err(located)?
+				sanity_queries_authentication(query, km).map_err(located)?
 			}
 			QueryKind::Confidentiality | QueryKind::Freshness => {
 				sanity_queries_single_constant(query, km).map_err(located)?
@@ -284,32 +282,25 @@ fn sanity_queries_single_constant(query: &Query, km: &ProtocolTrace) -> VResult<
 	if let Some(e) = crate::construct::builtin_nil_error(subject, "queried") {
 		return Err(e);
 	}
-	if km.index_of(subject).is_none() {
-		return Err(unknown_constant(
-			&subject.name,
-			km,
-			"not declared by any principal".to_string(),
-		));
-	}
-	Ok(())
+	slot_of(subject, km).map(|_| ())
 }
 
-pub(crate) fn unknown_constant(name: &str, km: &ProtocolTrace, context: String) -> VerifpalError {
-	VerifpalError::sanity(format!("unknown constant `{}`", name).into())
-		.narrow(name.to_string())
-		.labelled(context)
+pub(crate) fn unknown_constant(c: &Constant, km: &ProtocolTrace) -> VerifpalError {
+	VerifpalError::sanity(format!("unknown constant `{}`", c.name).into())
+		.narrow(c.name.to_string())
+		.labelled("not declared by any principal")
 		.note(
 			"a constant must be introduced by `knows`, `generates`, or an \
 			 assignment before anything can refer to it",
 		)
-		.suggest(did_you_mean(name, trace_constant_names(km)))
+		.suggest(did_you_mean(&c.name, trace_constant_names(km)))
 }
 
-fn sanity_queries_authentication(
-	query: &Query,
-	km: &ProtocolTrace,
-	states: &[PrincipalState],
-) -> VResult<()> {
+fn slot_of(c: &Constant, km: &ProtocolTrace) -> VResult<usize> {
+	km.index_of(c).ok_or_else(|| unknown_constant(c, km))
+}
+
+fn sanity_queries_authentication(query: &Query, km: &ProtocolTrace) -> VResult<()> {
 	if query.message.constants.is_empty() {
 		return Err(
 			VerifpalError::sanity("authentication query names no constant".into())
@@ -318,13 +309,7 @@ fn sanity_queries_authentication(
 		);
 	}
 	let c = query.message.constant()?;
-	if km.index_of(c).is_none() {
-		return Err(unknown_constant(
-			&c.name,
-			km,
-			"not declared by any principal".to_string(),
-		));
-	}
+	let slot = &km.slots[slot_of(c, km)?];
 	if query.message.constants.len() != 1 {
 		return Err(VerifpalError::sanity(
 			format!(
@@ -342,8 +327,8 @@ fn sanity_queries_authentication(
 			query.message.constants.len()
 		)));
 	}
-	sanity_queries_check_message_principals(&query.message)?;
-	sanity_queries_check_known(&query.message, c, km, states)
+	sanity_message_principals(&query.message)?;
+	sanity_queries_check_known(&query.message, c, slot, km)
 }
 
 fn sanity_queries_multi_constant(query: &Query, km: &ProtocolTrace, kind: &str) -> VResult<()> {
@@ -370,14 +355,8 @@ fn sanity_queries_multi_constant(query: &Query, km: &ProtocolTrace, kind: &str) 
 		.help(format!("write it as `{}? a, b`", kind)));
 	}
 	for (i, c) in query.constants.iter().enumerate() {
-		if km.index_of(c).is_none() {
-			return Err(unknown_constant(
-				&c.name,
-				km,
-				"not declared by any principal".to_string(),
-			));
-		}
-		if find_equivalent_constant(c, &query.constants[..i]).is_some() {
+		slot_of(c, km)?;
+		if query.constants[..i].iter().any(|prior| prior.equivalent(c)) {
 			return Err(VerifpalError::sanity(
 				format!("`{}` is named twice in this {} query", c, kind).into(),
 			)
@@ -412,16 +391,7 @@ fn sanity_query_options(query: &Query, km: &ProtocolTrace) -> VResult<()> {
 			}
 		}
 		let repeated = query.options[..i].iter().any(|earlier| {
-			earlier.kind == option.kind
-				&& earlier.message.sender == option.message.sender
-				&& earlier.message.recipient == option.message.recipient
-				&& earlier.message.constants.len() == option.message.constants.len()
-				&& earlier
-					.message
-					.constants
-					.iter()
-					.zip(option.message.constants.iter())
-					.all(|(a, b)| a.id == b.id)
+			earlier.kind == option.kind && earlier.message.same_shape(&option.message)
 		});
 		if repeated {
 			return Err(located(
@@ -447,15 +417,8 @@ fn sanity_precondition(m: &Message, km: &ProtocolTrace) -> VResult<()> {
 		.help("write it as `precondition[ Bob -> Alice: ack ]`"));
 	}
 	let c = m.constant()?;
-	sanity_queries_check_message_principals(m)?;
-	let Some(idx) = km.index_of(c) else {
-		return Err(unknown_constant(
-			&c.name,
-			km,
-			"not declared by any principal".to_string(),
-		));
-	};
-	let sent = km.slots[idx]
+	sanity_message_principals(m)?;
+	let sent = km.slots[slot_of(c, km)?]
 		.sent_by
 		.iter()
 		.any(|event| event.sender == m.sender && event.recipient == m.recipient);
@@ -481,7 +444,7 @@ fn sanity_precondition(m: &Message, km: &ProtocolTrace) -> VResult<()> {
 	Ok(())
 }
 
-fn sanity_queries_check_message_principals(message: &Message) -> VResult<()> {
+pub(crate) fn sanity_message_principals(message: &Message) -> VResult<()> {
 	if message.sender == message.recipient {
 		return Err(VerifpalError::sanity(
 			format!(
@@ -504,26 +467,10 @@ fn sanity_queries_check_message_principals(message: &Message) -> VResult<()> {
 fn sanity_queries_check_known(
 	m: &Message,
 	c: &Constant,
+	slot: &TraceSlot,
 	km: &ProtocolTrace,
-	states: &[PrincipalState],
 ) -> VResult<()> {
-	let idx = match km.index_of(c) {
-		Some(idx) => idx,
-		None => {
-			return Err(unknown_constant(
-				&c.name,
-				km,
-				"not declared by any principal".to_string(),
-			));
-		}
-	};
-	let sender_knows = km.slots[idx].known_by_principal(m.sender);
-	let received_by_recipient = km.slots[idx]
-		.known_by
-		.iter()
-		.any(|&(recipient, from)| recipient == m.recipient && from != m.recipient);
-	let used = crate::resolution::principal_uses_constant(km, states, m.recipient, c);
-	if !sender_knows {
+	if !slot.known_by_principal(m.sender) {
 		return Err(
 			VerifpalError::sanity(format!("{} never knows `{}`", m.sender_name, c).into())
 				.narrow(c.name.to_string())
@@ -535,7 +482,11 @@ fn sanity_queries_check_known(
 				.help("name the principal that actually produces this value as the sender"),
 		);
 	}
-	if !received_by_recipient {
+	if !slot
+		.known_by
+		.iter()
+		.any(|&(recipient, from)| recipient == m.recipient && from != m.recipient)
+	{
 		return Err(VerifpalError::sanity(
 			format!("{} never receives `{}`", m.recipient_name, c).into(),
 		)
@@ -550,7 +501,7 @@ fn sanity_queries_check_known(
 			c, m.recipient_name
 		)));
 	}
-	if !used {
+	if !crate::resolution::principal_uses_constant(km, m.recipient, c) {
 		return Err(VerifpalError::sanity(
 			format!("{} receives `{}` but never uses it", m.recipient_name, c).into(),
 		)
@@ -716,14 +667,14 @@ fn split_beyond_concat(p: &Primitive) -> Option<VerifpalError> {
 		return None;
 	}
 	let fields = inner.arguments.len();
-	let plural = if fields == 1 { "" } else { "s" };
+	let s = plural(fields);
 	Some(
 		VerifpalError::sanity(
 			format!(
 				"`SPLIT` takes field {} of a `CONCAT` that packs {} field{}",
 				p.output + 1,
 				fields,
-				plural
+				s
 			)
 			.into(),
 		)
@@ -732,41 +683,33 @@ fn split_beyond_concat(p: &Primitive) -> Option<VerifpalError> {
 		.note(format!(
 			"`{}` packs {} field{}, so only that many constants can be bound on \
 			 the left of the `=`; a field that was never packed is not an empty one",
-			inner, fields, plural
+			inner, fields, s
 		))
 		.help(format!(
 			"bind at most {} constant{} on the left, or pack more into the `CONCAT`",
-			fields, plural
+			fields, s
 		)),
 	)
 }
 
-pub(crate) fn sanity_fail_on_failed_checked_primitive_rewrite(
-	failures: &[(Primitive, usize)],
-) -> VResult<()> {
-	for (p, _) in failures {
-		if p.instance_check {
-			if let Some(error) = split_beyond_concat(p) {
-				return Err(error);
-			}
-			return Err(VerifpalError::sanity(
-				format!("`{}` cannot succeed as written", primitive_name(p.id)).into(),
-			)
-			.narrow(primitive_name(p.id))
-			.labelled("this check fails in the honest run")
-			.note(format!(
-				"`{}` is checked with `?`, so the principal halts when it fails; \
-				 here it fails even with no attacker, which makes the model \
-				 describe a protocol that never completes",
-				p
-			))
-			.help(
-				"check that the key, message and any additional data match what \
-				 the other principal used",
-			));
-		}
-	}
-	Ok(())
+pub(crate) fn honest_check_failure(p: &Primitive) -> VerifpalError {
+	split_beyond_concat(p).unwrap_or_else(|| {
+		VerifpalError::sanity(
+			format!("`{}` cannot succeed as written", primitive_name(p.id)).into(),
+		)
+		.narrow(primitive_name(p.id))
+		.labelled("this check fails in the honest run")
+		.note(format!(
+			"`{}` is checked with `?`, so the principal halts when it fails; \
+			 here it fails even with no attacker, which makes the model \
+			 describe a protocol that never completes",
+			p
+		))
+		.help(
+			"check that the key, message and any additional data match what \
+			 the other principal used",
+		)
+	})
 }
 
 fn sanity_check_primitive_arguments(p: &Primitive) -> VResult<()> {

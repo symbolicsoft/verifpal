@@ -1,9 +1,10 @@
 /* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
  * SPDX-License-Identifier: GPL-3.0-only */
 
-use super::exec::{Context, Execution};
+use super::exec::{Context, Execution, Held};
 use super::program::Event;
-use crate::primitive::primitive_has_rewrite_rule;
+use super::unlink::{Link, link};
+use crate::resolution::mentions_across_principals;
 use crate::theory::{can_rewrite, obtainable, reduce_once};
 use crate::types::*;
 
@@ -43,7 +44,7 @@ pub(crate) enum Violation {
 	Linked {
 		a: Constant,
 		b: Constant,
-		link: super::unlink::Link,
+		link: Link,
 		resolved: Vec<(Constant, Value)>,
 	},
 	Differ {
@@ -65,30 +66,10 @@ pub(crate) struct Judge<'a, 'b> {
 	pub(crate) ex: &'a Execution,
 	pub(crate) whole: &'a Execution,
 	pub(crate) honest: &'a Execution,
-	pub(crate) states: &'a [PrincipalState],
 	pub(crate) claims: &'a dyn Fn(PrincipalId) -> bool,
-	pub(crate) views: std::cell::RefCell<Vec<Option<std::rc::Rc<PrincipalState>>>>,
 }
 
 impl Judge<'_, '_> {
-	pub(crate) fn view(&self, r: usize) -> std::rc::Rc<PrincipalState> {
-		let mut views = self.views.borrow_mut();
-		if views.len() <= r {
-			views.resize(self.ex.runs.len(), None);
-		}
-		views[r]
-			.get_or_insert_with(|| {
-				std::rc::Rc::new(super::view::project(
-					self.cx,
-					self.ex,
-					self.honest,
-					&self.states[r],
-					r,
-				))
-			})
-			.clone()
-	}
-
 	fn km(&self) -> &ProtocolTrace {
 		self.cx.km
 	}
@@ -116,43 +97,53 @@ impl Judge<'_, '_> {
 			let Some(slot) = self.km().index_of(c) else {
 				return false;
 			};
-			program.deliveries.iter().enumerate().any(|(d, delivery)| {
-				program.runs[delivery.sender].id == option.message.sender
-					&& program.runs[delivery.recipient].id == option.message.recipient
-					&& delivery.slots.iter().any(|&(s, _)| s == slot)
-					&& self.whole.sent[d].is_some()
-			})
+			program
+				.deliveries
+				.iter()
+				.zip(&self.whole.sent)
+				.any(|(delivery, sent)| {
+					program.runs[delivery.sender].id == option.message.sender
+						&& program.runs[delivery.recipient].id == option.message.recipient
+						&& delivery.slots.iter().any(|&(s, _)| s == slot)
+						&& sent.is_some()
+				})
+		})
+	}
+
+	fn claimed_runs(&self) -> impl Iterator<Item = usize> + '_ {
+		(0..self.ex.runs.len()).filter(|&r| (self.claims)(self.cx.program.runs[r].id))
+	}
+
+	fn creator_run(&self, slot: usize) -> Option<usize> {
+		self.cx.program.run_index(self.km().slots[slot].creator)
+	}
+
+	fn claimed(&self, r: usize, slot: usize) -> Option<&Held> {
+		self.ex.runs[r].held(slot).or_else(|| {
+			let creator = self.creator_run(slot)?;
+			(self.claims)(self.cx.program.runs[creator].id)
+				.then(|| self.ex.runs[creator].held(slot))
+				.flatten()
 		})
 	}
 
 	fn confidentiality(&self, q: &Query) -> Option<Violation> {
 		let c = q.subject().ok()?;
 		let slot = self.km().index_of(c)?;
-		let knowledge = &self.ex.knowledge;
-		for (r, run) in self.ex.runs.iter().enumerate() {
-			if !(self.claims)(self.cx.program.runs[r].id) {
-				continue;
-			}
-			let Some(h) = run.held(slot) else {
-				continue;
-			};
-			if knowledge.knows(&h.value).is_some()
-				|| obtainable(&h.value, self.cx.carrier, &knowledge.state)
-			{
-				return Some(Violation::Disclosed {
-					run: r,
-					slot,
-					value: h.value.clone(),
-				});
-			}
-		}
-		None
+		let attacker = &self.ex.knowledge.state;
+		self.claimed_runs().find_map(|r| {
+			let h = self.ex.runs[r].held(slot)?;
+			obtainable(&h.value, &self.cx.km.capabilities, attacker).then(|| Violation::Disclosed {
+				run: r,
+				slot,
+				value: h.value.clone(),
+			})
+		})
 	}
 
-	pub(crate) fn uses(&self, run: usize, target: ValueId) -> Option<Vec<usize>> {
+	fn uses(&self, run: usize, target: ValueId) -> Option<Vec<usize>> {
 		let km = self.km();
 		let program = &self.cx.program.runs[run];
-		let state = &self.ex.runs[run];
 		let sites = |mentioned: &dyn Fn(&Value) -> bool| -> Vec<(usize, usize)> {
 			program
 				.steps
@@ -171,47 +162,35 @@ impl Judge<'_, '_> {
 		};
 		let mut mentioning = sites(&|v| mentions(km, v, target, program.id, &mut Vec::new()));
 		if mentioning.is_empty() {
-			let ps = &self.states[run];
-			mentioning =
-				sites(&|v| crate::resolution::state_mentions(v, km, ps, program.id, target));
+			mentioning = sites(&|v| mentions_across_principals(v, km, program.id, target));
 		}
+		let (now, eventually) = (&self.ex.runs[run], &self.whole.runs[run]);
 		let mut uses = Vec::new();
-		let eventually = &self.whole.runs[run];
 		for (i, slot) in mentioning {
-			if !state.reached(i) {
+			if !now.reached(i) {
 				if eventually.reached(i) {
 					continue;
 				}
 				return None;
 			}
-			let h = state.held(slot)?;
-			let Value::Primitive(pre) = &h.pre else {
-				continue;
-			};
-			if !primitive_has_rewrite_rule(pre.id) || can_rewrite(pre).0 || !pre.instance_check {
+			if now.halted != Some(slot) {
 				uses.push(slot);
 			}
 		}
 		Some(uses)
 	}
 
-	fn accepted(&self, run: usize, slot: usize) -> bool {
-		let id = self.km().slots[slot].constant.id;
-		self.uses(run, id).is_some_and(|uses| !uses.is_empty())
-	}
-
 	fn siblings(&self, slot: usize) -> Vec<usize> {
 		let km = self.km();
 		let id = km.slots[slot].constant.id;
 		let mut out = vec![slot];
-		for groups in [&km.session_siblings, &km.copy_siblings] {
-			if let Some(group) = groups.get(&id) {
-				for sid in group.iter() {
-					if let Some(&at) = km.index.get(sid)
-						&& !out.contains(&at)
-					{
-						out.push(at);
-					}
+		for group in [&km.session_siblings, &km.copy_siblings]
+			.into_iter()
+			.filter_map(|groups| groups.get(&id))
+		{
+			for &at in group.iter().filter_map(|sid| km.index.get(sid)) {
+				if !out.contains(&at) {
+					out.push(at);
 				}
 			}
 		}
@@ -229,140 +208,130 @@ impl Judge<'_, '_> {
 		}
 		let h = self.ex.runs[b].held(slot)?;
 		let sender = h.sender?;
-		let use_slot = *self.uses(b, km.slots[slot].constant.id)?.first()?;
+		let used = *self.uses(b, c.id)?.first()?;
 		if !h.authored {
-			if program.runs[sender].id == q.message.sender {
-				return None;
-			}
-			return Some(Violation::Substituted {
+			return (program.runs[sender].id != q.message.sender).then_some(
+				Violation::Substituted {
+					run: b,
+					slot,
+					sender,
+					used,
+				},
+			);
+		}
+		let reduct = reduce_once(&h.value);
+		let siblings = self.siblings(slot);
+		let emissions = self.emissions(q, &siblings, &reduct);
+		if emissions == 0 {
+			let honest = self.honest.runs[b]
+				.held(slot)
+				.is_some_and(|honest| reduce_once(&honest.value).equivalent(&reduct, true));
+			return (!honest).then(|| Violation::Forged {
 				run: b,
 				slot,
-				sender,
-				used: use_slot,
+				value: h.value.clone(),
+				used,
 			});
 		}
-		let used = reduce_once(&h.value);
-		let siblings = self.siblings(slot);
-		let mut emissions = 0usize;
-		for (d, delivery) in program.deliveries.iter().enumerate() {
-			let Some(sent) = &self.ex.sent[d] else {
+		let open_leg = program
+			.deliveries
+			.iter()
+			.any(|delivery| delivery.recipient == b && delivery.slots.contains(&(slot, false)));
+		if !h.installed && !open_leg {
+			return None;
+		}
+		let acceptances = self.acceptances(q, &siblings, &reduct);
+		(acceptances > emissions).then(|| Violation::Replayed {
+			run: b,
+			slot,
+			value: h.value.clone(),
+			used,
+			emissions,
+			acceptances,
+		})
+	}
+
+	fn emissions(&self, q: &Query, siblings: &[usize], reduct: &Value) -> usize {
+		let km = self.km();
+		let program = self.cx.program;
+		let mut emissions = 0;
+		for (delivery, sent) in program.deliveries.iter().zip(&self.ex.sent) {
+			let Some(sent) = sent else {
 				continue;
 			};
 			if !km.same_actor(program.runs[delivery.recipient].id, q.message.recipient) {
 				continue;
 			}
-			for (k, &(s, _)) in delivery.slots.iter().enumerate() {
-				if siblings.contains(&s)
-					&& !self.ex.runs[delivery.sender]
-						.held(s)
-						.is_some_and(|h| h.authored)
-					&& km.interchangeable_for(program.runs[delivery.sender].id, q.message.sender, s)
-					&& reduce_once(&sent[k]).equivalent(&used, true)
-				{
-					emissions += 1;
-				}
-			}
+			let from = delivery.sender;
+			emissions += delivery
+				.slots
+				.iter()
+				.zip(sent)
+				.filter(|&(&(s, _), v)| {
+					siblings.contains(&s)
+						&& !self.ex.runs[from].held(s).is_some_and(|h| h.authored)
+						&& km.interchangeable_for(program.runs[from].id, q.message.sender, s)
+						&& reduce_once(v).equivalent(reduct, true)
+				})
+				.count();
 		}
-		if emissions == 0 {
-			if self.honest.runs[b]
-				.held(slot)
-				.is_some_and(|honest| reduce_once(&honest.value).equivalent(&used, true))
-			{
-				return None;
-			}
-			return Some(Violation::Forged {
-				run: b,
-				slot,
-				value: h.value.clone(),
-				used: use_slot,
-			});
-		}
-		let mut acceptances = 0usize;
-		for (r, run) in self.ex.runs.iter().enumerate() {
-			if !km.same_actor(program.runs[r].id, q.message.recipient) {
-				continue;
-			}
-			for &s in &siblings {
-				if let Some(held) = run.held(s)
-					&& held.sender.is_some()
-					&& reduce_once(&held.value).equivalent(&used, true)
-					&& self.accepted(r, s)
-				{
-					acceptances += 1;
-				}
-			}
-		}
-		let open_leg = program.deliveries.iter().any(|delivery| {
-			delivery.recipient == b
-				&& delivery
-					.slots
-					.iter()
-					.any(|&(s, guarded)| s == slot && !guarded)
-		});
-		if (h.installed || open_leg) && acceptances > emissions {
-			return Some(Violation::Replayed {
-				run: b,
-				slot,
-				value: h.value.clone(),
-				used: use_slot,
-				emissions,
-				acceptances,
-			});
-		}
-		None
+		emissions
+	}
+
+	fn acceptances(&self, q: &Query, siblings: &[usize], reduct: &Value) -> usize {
+		let km = self.km();
+		(0..self.ex.runs.len())
+			.filter(|&r| km.same_actor(self.cx.program.runs[r].id, q.message.recipient))
+			.flat_map(|r| siblings.iter().map(move |&s| (r, s)))
+			.filter(|&(r, s)| {
+				self.ex.runs[r].held(s).is_some_and(|held| {
+					held.sender.is_some() && reduce_once(&held.value).equivalent(reduct, true)
+				}) && self
+					.uses(r, km.slots[s].constant.id)
+					.is_some_and(|uses| !uses.is_empty())
+			})
+			.count()
 	}
 
 	fn freshness(&self, q: &Query) -> Option<Violation> {
+		let km = self.km();
 		let c = q.subject().ok()?;
-		let slot = self.km().index_of(c)?;
-		for (r, run) in self.ex.runs.iter().enumerate() {
-			if !(self.claims)(self.cx.program.runs[r].id) {
-				continue;
-			}
-			let Some(h) = run.held(slot) else {
-				continue;
-			};
-			let km = self.km();
+		let slot = km.index_of(c)?;
+		self.claimed_runs().find_map(|r| {
+			let h = self.ex.runs[r].held(slot)?;
 			if h.value.constant_leaves().any(|leaf| {
 				km.index_of(leaf)
 					.is_some_and(|i| km.slots[i].constant.fresh)
 			}) {
-				continue;
+				return None;
 			}
-			if let Some(&used) = self.uses(r, c.id).as_ref().and_then(|uses| uses.first()) {
-				return Some(Violation::Stale {
-					run: r,
-					slot,
-					value: h.value.clone(),
-					used,
-				});
-			}
-		}
-		None
+			let used = *self.uses(r, c.id)?.first()?;
+			Some(Violation::Stale {
+				run: r,
+				slot,
+				value: h.value.clone(),
+				used,
+			})
+		})
 	}
-}
 
-impl Judge<'_, '_> {
 	fn equivalence(&self, q: &Query) -> Option<Violation> {
-		'runs: for r in 0..self.ex.runs.len() {
-			if !(self.claims)(self.cx.program.runs[r].id) {
-				continue;
-			}
-			let ps = self.view(r);
+		let km = self.km();
+		'runs: for r in self.claimed_runs() {
 			let mut resolved: Vec<(Constant, Value)> = Vec::with_capacity(q.constants.len());
 			for c in &q.constants {
-				let (value, slot) = ps.resolve_constant(c, false);
-				let Some(slot) = slot else {
+				let Some(slot) = km.index_of(c) else {
 					continue 'runs;
 				};
-				if !super::view::claimable(self.cx, self.ex, r, slot, self.claims)
-					|| ps.slot_unreached(slot)
-					|| ps.slot_starved(slot)
-					|| check_failed(&value)
-				{
+				let value = match self.claimed(r, slot) {
+					Some(held) => &held.value,
+					None if self.creator_run(slot).is_none() => &km.slots[slot].initial_value,
+					None => continue 'runs,
+				};
+				if check_failed(value) {
 					continue 'runs;
 				}
-				resolved.push((c.clone(), value));
+				resolved.push((c.clone(), value.clone()));
 			}
 			if !resolved
 				.windows(2)
@@ -376,37 +345,28 @@ impl Judge<'_, '_> {
 
 	fn unlinkability(&self, q: &Query) -> Option<Violation> {
 		let km = self.km();
-		for r in 0..self.ex.runs.len() {
-			if !(self.claims)(self.cx.program.runs[r].id) {
-				continue;
-			}
-			let claimable: Vec<(&Constant, usize)> = q
+		for r in self.claimed_runs() {
+			let claimed: Vec<(&Constant, usize, &Held)> = q
 				.constants
 				.iter()
 				.filter_map(|c| {
 					let slot = km.index_of(c)?;
-					super::view::claimable(self.cx, self.ex, r, slot, self.claims)
-						.then_some((c, slot))
+					Some((c, slot, self.claimed(r, slot)?))
 				})
 				.collect();
-			for (i, &(a, sa)) in claimable.iter().enumerate() {
-				for &(b, sb) in &claimable[i + 1..] {
-					let Some(link) = super::unlink::link(self.cx, self.ex, r, sa, sb) else {
-						continue;
-					};
-					let resolved = [(a, sa), (b, sb)]
-						.into_iter()
-						.filter_map(|(c, slot)| {
-							let held = super::view::view_of(self.cx, self.ex, r, slot)?;
-							Some((c.clone(), held.value.clone()))
-						})
-						.collect();
-					return Some(Violation::Linked {
-						a: a.clone(),
-						b: b.clone(),
-						link,
-						resolved,
-					});
+			for (i, &(a, sa, ha)) in claimed.iter().enumerate() {
+				for &(b, sb, hb) in &claimed[i + 1..] {
+					if let Some(link) = link(self.cx, self.ex, [(sa, ha), (sb, hb)]) {
+						return Some(Violation::Linked {
+							a: a.clone(),
+							b: b.clone(),
+							link,
+							resolved: vec![
+								(a.clone(), ha.value.clone()),
+								(b.clone(), hb.value.clone()),
+							],
+						});
+					}
 				}
 			}
 		}

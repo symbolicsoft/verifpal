@@ -1,6 +1,8 @@
 /* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
  * SPDX-License-Identifier: GPL-3.0-only */
 
+use std::sync::Arc;
+
 use crate::info::InfoQuiet;
 use crate::types::*;
 
@@ -28,9 +30,6 @@ enum Sweep {
 impl Sweep {
 	fn skips(self, name: &str) -> bool {
 		self == Sweep::Fast && COSTLY_MODELS.contains(&name)
-	}
-	fn builds_traces(self) -> bool {
-		self == Sweep::Exhaustive
 	}
 }
 
@@ -119,67 +118,38 @@ fn lost_attacks(before: &str, after: &str) -> Vec<usize> {
 		.collect()
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Strength {
+#[derive(Clone, Copy)]
+enum Change {
 	Stronger,
 	Weaker,
+	Invariant(fn(&str) -> String),
 }
 
-fn variants_promoted(model: &Model) -> Vec<Model> {
-	if model.attacker != AttackerKind::Passive {
+fn variants_attacker(model: &Model, attacker: AttackerKind) -> Vec<Model> {
+	if model.attacker == attacker {
 		return Vec::new();
 	}
-	let mut active = model.clone();
-	active.attacker = AttackerKind::Active;
-	vec![active]
+	vec![Model {
+		attacker,
+		..model.clone()
+	}]
 }
 
-fn variants_demoted(model: &Model) -> Vec<Model> {
-	if model.attacker != AttackerKind::Active {
-		return Vec::new();
-	}
-	let mut passive = model.clone();
-	passive.attacker = AttackerKind::Passive;
-	vec![passive]
-}
-
-fn variants_unguarded(model: &Model) -> Vec<Model> {
+fn variants_guard(model: &Model, guard: bool) -> Vec<Model> {
 	let mut out = Vec::new();
 	for (bi, block) in model.blocks.iter().enumerate() {
 		let Block::Message(message) = block else {
 			continue;
 		};
 		for (ci, constant) in message.constants.iter().enumerate() {
-			if !constant.guard {
+			if constant.guard == guard {
 				continue;
 			}
 			let mut variant = model.clone();
 			if let Some(Block::Message(m)) = variant.blocks.get_mut(bi)
 				&& let Some(c) = m.constants.get_mut(ci)
 			{
-				c.guard = false;
-			}
-			out.push(variant);
-		}
-	}
-	out
-}
-
-fn variants_guarded(model: &Model) -> Vec<Model> {
-	let mut out = Vec::new();
-	for (bi, block) in model.blocks.iter().enumerate() {
-		let Block::Message(message) = block else {
-			continue;
-		};
-		for (ci, constant) in message.constants.iter().enumerate() {
-			if constant.guard {
-				continue;
-			}
-			let mut variant = model.clone();
-			if let Some(Block::Message(m)) = variant.blocks.get_mut(bi)
-				&& let Some(c) = m.constants.get_mut(ci)
-			{
-				c.guard = true;
+				c.guard = guard;
 			}
 			out.push(variant);
 		}
@@ -209,8 +179,7 @@ fn variants_leaked(model: &Model) -> Vec<Model> {
 						qualifier: None,
 						constants: vec![constant.clone()],
 						assigned: None,
-						leading_comments: Vec::new(),
-						trailing_comment: None,
+						comments: LineComments::default(),
 					});
 				}
 				out.push(variant);
@@ -230,13 +199,13 @@ fn annotations(value: &Value, cap: Capability) -> Vec<Value> {
 	{
 		let mut updated = (**p).clone();
 		updated.capabilities.set(cap, 0);
-		out.push(Value::Primitive(std::sync::Arc::new(updated)));
+		out.push(Value::Primitive(Arc::new(updated)));
 	}
 	for (i, argument) in p.arguments.iter().enumerate() {
 		for replaced in annotations(argument, cap) {
 			let mut updated = (**p).clone();
 			updated.arguments[i] = replaced;
-			out.push(Value::Primitive(std::sync::Arc::new(updated)));
+			out.push(Value::Primitive(Arc::new(updated)));
 		}
 	}
 	out
@@ -299,20 +268,12 @@ fn variants_rethresholded(model: &Model, delta: i64) -> Vec<Model> {
 			if let Some(Block::Principal(principal)) = variant.blocks.get_mut(bi)
 				&& let Some(e) = principal.expressions.get_mut(ei)
 			{
-				e.assigned = Some(Value::Primitive(std::sync::Arc::new(changed)));
+				e.assigned = Some(Value::Primitive(Arc::new(changed)));
 				out.push(variant);
 			}
 		}
 	}
 	out
-}
-
-fn variants_lowered(model: &Model) -> Vec<Model> {
-	variants_rethresholded(model, -1)
-}
-
-fn variants_raised(model: &Model) -> Vec<Model> {
-	variants_rethresholded(model, 1)
 }
 
 #[derive(Default)]
@@ -329,6 +290,29 @@ impl Report {
 		self.violations.extend(other.violations);
 		self.panicked.extend(other.panicked);
 		self.ran.extend(other.ran);
+	}
+
+	fn tally(
+		&mut self,
+		name: &str,
+		outcomes: impl IntoIterator<Item = Outcome>,
+		violations: impl Fn(&str) -> Vec<String>,
+	) {
+		let mut ran = false;
+		for outcome in outcomes {
+			match outcome {
+				Outcome::Rejected => continue,
+				Outcome::Panicked => self.panicked.push(name.to_string()),
+				Outcome::Code(after) => {
+					self.compared += 1;
+					self.violations.extend(violations(&after));
+				}
+			}
+			ran = true;
+		}
+		if ran {
+			self.ran.push(name.to_string());
+		}
 	}
 }
 
@@ -383,19 +367,23 @@ where
 	collected.into_iter().map(|(_, r)| r).collect()
 }
 
-fn excused<'a>(table: &'a [(&'a str, &'a str, &'a str)], property: &str) -> Vec<&'a str> {
+fn excused<'a>(
+	table: impl IntoIterator<Item = (&'a str, &'a str)>,
+	property: &str,
+) -> Vec<&'a str> {
 	table
-		.iter()
-		.filter(|(_, p, _)| *p == property)
-		.map(|(m, _, _)| *m)
+		.into_iter()
+		.filter(|&(_, p)| p == property)
+		.map(|(m, _)| m)
 		.collect()
 }
 
-fn excused_traces<'a>(table: &'a [(&'a str, &'a str)], property: &str) -> Vec<&'a str> {
-	table
+fn stale<'a>(listed: &[&'a str], report: &Report, holds: impl Fn(&str) -> bool) -> Vec<&'a str> {
+	listed
 		.iter()
-		.filter(|(_, p)| *p == property)
-		.map(|(m, _)| *m)
+		.filter(|m| report.ran.iter().any(|e| e == *m))
+		.filter(|m| holds(m))
+		.copied()
 		.collect()
 }
 
@@ -425,7 +413,9 @@ fn variant_query_rotation(model: &Model) -> Option<Model> {
 	Some(rotated)
 }
 
-const RENAME_SUFFIX: &str = "qq";
+fn renamed(name: &str) -> String {
+	format!("{name}qq")
+}
 
 fn renamed_constant(constant: &Constant) -> Constant {
 	let mut out = constant.clone();
@@ -433,38 +423,28 @@ fn renamed_constant(constant: &Constant) -> Constant {
 	if name == "nil" || crate::parser::check_reserved(name).is_err() {
 		return out;
 	}
-	out.name = std::sync::Arc::from(format!("{name}{RENAME_SUFFIX}").as_str());
+	out.name = Arc::from(renamed(name));
 	out
 }
 
-fn rename_value(value: &Value) -> Value {
-	match value {
-		Value::Constant(c) => Value::Constant(renamed_constant(c)),
-		Value::Primitive(p) => {
-			let mut updated = (**p).clone();
-			updated.arguments = p.arguments.iter().map(rename_value).collect();
-			Value::Primitive(std::sync::Arc::new(updated))
-		}
-	}
-}
-
 fn rename_message(message: &mut Message) {
-	message.sender_name =
-		std::sync::Arc::from(format!("{}{}", message.sender_name, RENAME_SUFFIX).as_str());
-	message.recipient_name =
-		std::sync::Arc::from(format!("{}{}", message.recipient_name, RENAME_SUFFIX).as_str());
+	message.sender_name = Arc::from(renamed(&message.sender_name));
+	message.recipient_name = Arc::from(renamed(&message.recipient_name));
 	message.constants = message.constants.iter().map(renamed_constant).collect();
 }
 
-fn variant_renamed(model: &Model) -> Option<Model> {
+fn variant_renamed(model: &Model) -> Model {
 	let mut out = model.clone();
 	for block in &mut out.blocks {
 		match block {
 			Block::Principal(p) => {
-				p.name = format!("{}{}", p.name, RENAME_SUFFIX);
+				p.name = renamed(&p.name);
 				for e in &mut p.expressions {
 					e.constants = e.constants.iter().map(renamed_constant).collect();
-					e.assigned = e.assigned.as_ref().map(rename_value);
+					e.assigned = e
+						.assigned
+						.as_ref()
+						.map(|v| crate::sessions::map_constants(v, &renamed_constant));
 				}
 			}
 			Block::Message(m) => rename_message(m),
@@ -479,15 +459,14 @@ fn variant_renamed(model: &Model) -> Option<Model> {
 		}
 	}
 	for scenario in &mut out.scenarios {
-		scenario.principal_name =
-			std::sync::Arc::from(format!("{}{}", scenario.principal_name, RENAME_SUFFIX).as_str());
+		scenario.principal_name = Arc::from(renamed(&scenario.principal_name));
 		scenario.bindings = scenario
 			.bindings
 			.iter()
 			.map(|(target, value)| (renamed_constant(target), renamed_constant(value)))
 			.collect();
 	}
-	Some(out)
+	out
 }
 
 fn variant_padded(model: &Model) -> Option<Model> {
@@ -503,7 +482,7 @@ fn variant_padded(model: &Model) -> Option<Model> {
 			kind: Declaration::Knows,
 			qualifier: Some(Qualifier::Private),
 			constants: vec![Constant {
-				name: std::sync::Arc::from("padding_constant_qq"),
+				name: Arc::from("padding_constant_qq"),
 				id: 0,
 				guard: false,
 				fresh: false,
@@ -512,8 +491,7 @@ fn variant_padded(model: &Model) -> Option<Model> {
 				qualifier: Some(Qualifier::Private),
 			}],
 			assigned: None,
-			leading_comments: Vec::new(),
-			trailing_comment: None,
+			comments: LineComments::default(),
 		},
 	);
 	Some(out)
@@ -538,34 +516,19 @@ fn identity_scenarios(model: &Model, copies: usize) -> Option<Model> {
 			.filter(|e| e.kind == Declaration::Knows)
 			.flat_map(|e| e.constants.iter())
 			.find(|c| !travels(c.id))
-			.map(|c| {
-				(
-					p.id,
-					std::sync::Arc::<str>::from(p.name.as_str()),
-					c.clone(),
-				)
-			})
+			.map(|c| (p.id, Arc::<str>::from(p.name.as_str()), c.clone()))
 	})?;
 	let mut out = model.clone();
 	out.scenarios = (0..copies)
 		.map(|_| Scenario {
 			span: Span::default(),
 			principal,
-			principal_name: std::sync::Arc::clone(&name),
+			principal_name: Arc::clone(&name),
 			bindings: vec![(constant.clone(), constant.clone())],
-			leading_comments: Vec::new(),
-			trailing_comment: None,
+			comments: LineComments::default(),
 		})
 		.collect();
 	Some(out)
-}
-
-fn variant_identity_scenario(model: &Model) -> Option<Model> {
-	identity_scenarios(model, 1)
-}
-
-fn variants_duplicated_scenario(model: &Model) -> Vec<Model> {
-	identity_scenarios(model, 2).into_iter().collect()
 }
 
 fn variants_dephased(model: &Model) -> Vec<Model> {
@@ -596,49 +559,34 @@ fn variants_restricted(model: &Model) -> Vec<Model> {
 		query.options.push(QueryOption {
 			kind: QueryOptionKind::Precondition,
 			message: Message {
-				span: Span::default(),
 				sender: message.sender,
 				sender_name: message.sender_name.clone(),
 				recipient: message.recipient,
 				recipient_name: message.recipient_name.clone(),
 				constants: vec![constant.clone()],
-				leading_comments: Vec::new(),
-				trailing_comment: None,
+				..Message::default()
 			},
-			leading_comments: Vec::new(),
-			trailing_comment: None,
+			comments: LineComments::default(),
 		});
 	}
 	vec![variant]
 }
 
-fn check_sessions(property: &str, floor: usize, sweep: Sweep) {
+fn check(
+	property: &str,
+	floor: usize,
+	sweep: Sweep,
+	compare: impl Fn(&str, &Model, &mut Report) + Sync,
+) {
 	let models = corpus();
-	let parts = spread(&models, |(name, model)| {
+	let mut report = Report::default();
+	for part in spread(&models, |(name, model)| {
 		let mut local = Report::default();
-		let Outcome::Code(one) = code_of(model, 1) else {
-			return local;
-		};
-		match code_of(model, 2) {
-			Outcome::Rejected => {}
-			Outcome::Panicked => {
-				local.ran.push(name.clone());
-				local.panicked.push(name.clone());
-			}
-			Outcome::Code(two) => {
-				local.ran.push(name.clone());
-				local.compared += 1;
-				for q in lost_attacks(&one, &two) {
-					local.violations.push(format!(
-						"{name}: sessions=1 {one}, sessions=2 {two}, query {q} lost"
-					));
-				}
-			}
+		if !sweep.skips(name) {
+			compare(name, model, &mut local);
 		}
 		local
-	});
-	let mut report = Report::default();
-	for part in parts {
+	}) {
 		report.absorb(part);
 	}
 	report.panicked.sort();
@@ -646,51 +594,58 @@ fn check_sessions(property: &str, floor: usize, sweep: Sweep) {
 	settle(property, report, floor, sweep);
 }
 
-fn check_invariant(
+fn check_sessions(property: &str, floor: usize, sweep: Sweep) {
+	check(property, floor, sweep, |name, model, report| {
+		let Outcome::Code(one) = code_of(model, 1) else {
+			return;
+		};
+		report.tally(name, [code_of(model, 2)], |two| {
+			lost_attacks(&one, two)
+				.into_iter()
+				.map(|q| format!("{name}: sessions=1 {one}, sessions=2 {two}, query {q} lost"))
+				.collect()
+		});
+	});
+}
+
+fn check_variants<V: IntoIterator<Item = Model>>(
 	property: &str,
-	variant: fn(&Model) -> Option<Model>,
-	expected: fn(&str) -> String,
+	variants: fn(&Model) -> V,
+	change: Change,
 	floor: usize,
 	sweep: Sweep,
 ) {
-	let models = corpus();
-	let parts = spread(&models, |(name, model)| {
-		let mut local = Report::default();
+	check(property, floor, sweep, |name, model, report| {
 		let Outcome::Code(before) = code_of(model, SESSIONS) else {
-			return local;
+			return;
 		};
-		let Some(transformed) = variant(model) else {
-			return local;
-		};
-		if !asks_the_same_question(model, &transformed) {
-			return local;
+		if matches!(change, Change::Stronger) && !before.contains('1') {
+			return;
 		}
-		match code_of(&transformed, SESSIONS) {
-			Outcome::Rejected => {}
-			Outcome::Panicked => {
-				local.ran.push(name.clone());
-				local.panicked.push(name.clone());
-			}
-			Outcome::Code(after) => {
-				local.ran.push(name.clone());
-				local.compared += 1;
-				let want = expected(&before);
-				if after != want {
-					local.violations.push(format!(
-						"{name}: original={before} variant={after} expected={want}"
-					));
+		let outcomes = variants(model)
+			.into_iter()
+			.filter(|variant| asks_the_same_question(model, variant))
+			.map(|variant| code_of(&variant, SESSIONS));
+		report.tally(name, outcomes, |after| {
+			let lost = match change {
+				Change::Stronger => lost_attacks(&before, after),
+				Change::Weaker => lost_attacks(after, &before),
+				Change::Invariant(expected) => {
+					let want = expected(&before);
+					return if after == want {
+						Vec::new()
+					} else {
+						vec![format!(
+							"{name}: original={before} variant={after} expected={want}"
+						)]
+					};
 				}
-			}
-		}
-		local
+			};
+			lost.into_iter()
+				.map(|q| format!("{name}: before={before} after={after}, query {q} lost"))
+				.collect()
+		});
 	});
-	let mut report = Report::default();
-	for part in parts {
-		report.absorb(part);
-	}
-	report.panicked.sort();
-	report.panicked.dedup();
-	settle(property, report, floor, sweep);
 }
 
 fn settle(property: &str, report: Report, floor: usize, sweep: Sweep) {
@@ -705,11 +660,16 @@ fn settle(property: &str, report: Report, floor: usize, sweep: Sweep) {
 		report.compared
 	);
 
-	if sweep.builds_traces() {
+	if sweep == Sweep::Exhaustive {
 		settle_traces(property, &report);
 	}
 
-	let expected = excused(&KNOWN_MISSED_ATTACKS, property);
+	let expected = excused(
+		KNOWN_MISSED_ATTACKS
+			.iter()
+			.map(|&(model, property, _)| (model, property)),
+		property,
+	);
 	let unexpected: Vec<&String> = report
 		.violations
 		.iter()
@@ -726,12 +686,9 @@ fn settle(property: &str, report: Report, floor: usize, sweep: Sweep) {
 			.collect::<Vec<_>>()
 			.join("\n  ")
 	);
-	let stale: Vec<&str> = expected
-		.iter()
-		.filter(|m| report.ran.iter().any(|e| e == *m))
-		.filter(|m| !report.violations.iter().any(|v| v.starts_with(*m)))
-		.copied()
-		.collect();
+	let stale = stale(&expected, &report, |m| {
+		!report.violations.iter().any(|v| v.starts_with(m))
+	});
 	assert!(
 		stale.is_empty(),
 		"KNOWN_MISSED_ATTACKS lists {stale:?} under `{property}`, but the property now holds \
@@ -740,7 +697,7 @@ fn settle(property: &str, report: Report, floor: usize, sweep: Sweep) {
 }
 
 fn settle_traces(property: &str, report: &Report) {
-	let expected_panics = excused_traces(&KNOWN_BAD_TRACES, property);
+	let expected_panics = excused(KNOWN_BAD_TRACES, property);
 	let new_panics: Vec<&String> = report
 		.panicked
 		.iter()
@@ -752,77 +709,15 @@ fn settle_traces(property: &str, report: &Report) {
 		 {new_panics:?}. A transformed model is still a legal model, so an assertion \
 		 firing is an engine bug rather than a harness failure"
 	);
-	let stale_panics: Vec<&str> = expected_panics
-		.iter()
-		.filter(|m| report.ran.iter().any(|e| e == *m))
-		.filter(|m| !report.panicked.iter().any(|p| p == *m))
-		.copied()
-		.collect();
+	let stale_panics = stale(&expected_panics, report, |m| {
+		!report.panicked.iter().any(|p| p == m)
+	});
 	assert!(
 		stale_panics.is_empty(),
 		"KNOWN_BAD_TRACES lists {stale_panics:?} under `{property}`, but nothing fires there \
 		 now. If this was fixed, delete the entry; a stale exception makes the list stop \
 		 meaning anything"
 	);
-}
-
-fn check_monotone(
-	property: &str,
-	variants: fn(&Model) -> Vec<Model>,
-	strength: Strength,
-	floor: usize,
-	sweep: Sweep,
-) {
-	let models = corpus();
-	let parts = spread(&models, |(name, model)| {
-		let mut local = Report::default();
-		if sweep.skips(name) {
-			return local;
-		}
-		let Outcome::Code(before) = code_of(model, SESSIONS) else {
-			return local;
-		};
-		if strength == Strength::Stronger && !before.contains('1') {
-			return local;
-		}
-		let mut ran = false;
-		for variant in variants(model) {
-			if !asks_the_same_question(model, &variant) {
-				continue;
-			}
-			match code_of(&variant, SESSIONS) {
-				Outcome::Rejected => continue,
-				Outcome::Panicked => {
-					ran = true;
-					local.panicked.push(name.clone());
-				}
-				Outcome::Code(after) => {
-					ran = true;
-					local.compared += 1;
-					let lost = match strength {
-						Strength::Stronger => lost_attacks(&before, &after),
-						Strength::Weaker => lost_attacks(&after, &before),
-					};
-					for q in lost {
-						local.violations.push(format!(
-							"{name}: before={before} after={after}, query {q} lost"
-						));
-					}
-				}
-			}
-		}
-		if ran {
-			local.ran.push(name.clone());
-		}
-		local
-	});
-	let mut report = Report::default();
-	for part in parts {
-		report.absorb(part);
-	}
-	report.panicked.sort();
-	report.panicked.dedup();
-	settle(property, report, floor, sweep);
 }
 
 #[cfg(test)]
@@ -880,10 +775,10 @@ mod tests {
 
 	#[test]
 	fn deleting_a_phase_boundary_never_loses_an_attack() {
-		check_monotone(
+		check_variants(
 			"dephase",
 			variants_dephased,
-			Strength::Stronger,
+			Change::Stronger,
 			15,
 			Sweep::Exhaustive,
 		);
@@ -896,10 +791,10 @@ mod tests {
 
 	#[test]
 	fn an_unused_declaration_changes_no_verdict() {
-		check_invariant(
+		check_variants(
 			"pad",
 			variant_padded,
-			|before| before.to_string(),
+			Change::Invariant(str::to_string),
 			300,
 			Sweep::Exhaustive,
 		);
@@ -909,10 +804,9 @@ mod tests {
 	fn renaming_actually_rewrites_the_model() {
 		let mut rewritten = 0usize;
 		for (_, model) in corpus() {
-			let Some(renamed) = variant_renamed(&model) else {
-				continue;
-			};
-			if crate::pretty::pretty_model(&renamed) != crate::pretty::pretty_model(&model) {
+			if crate::pretty::pretty_model(&variant_renamed(&model))
+				!= crate::pretty::pretty_model(&model)
+			{
 				rewritten += 1;
 			}
 		}
@@ -925,10 +819,10 @@ mod tests {
 
 	#[test]
 	fn renaming_every_identifier_changes_no_verdict() {
-		check_invariant(
+		check_variants(
 			"rename",
-			variant_renamed,
-			|before| before.to_string(),
+			|model| Some(variant_renamed(model)),
+			Change::Invariant(str::to_string),
 			300,
 			Sweep::Exhaustive,
 		);
@@ -943,10 +837,10 @@ mod tests {
 
 	#[test]
 	fn a_scenario_that_binds_a_constant_to_itself_changes_no_verdict() {
-		check_invariant(
+		check_variants(
 			"scenario",
-			variant_identity_scenario,
-			|before| before.to_string(),
+			|model| identity_scenarios(model, 1),
+			Change::Invariant(str::to_string),
 			300,
 			Sweep::Exhaustive,
 		);
@@ -954,10 +848,10 @@ mod tests {
 
 	#[test]
 	fn a_second_copy_of_a_scenario_never_loses_an_attack() {
-		check_monotone(
+		check_variants(
 			"scenarios",
-			variants_duplicated_scenario,
-			Strength::Stronger,
+			|model| identity_scenarios(model, 2),
+			Change::Stronger,
 			200,
 			Sweep::Exhaustive,
 		);
@@ -965,10 +859,10 @@ mod tests {
 
 	#[test]
 	fn reordering_the_queries_block_changes_no_verdict() {
-		check_invariant(
+		check_variants(
 			"rotate",
 			variant_query_rotation,
-			|before| rotate_code(before, 1),
+			Change::Invariant(|before| rotate_code(before, 1)),
 			150,
 			Sweep::Exhaustive,
 		);
@@ -995,10 +889,10 @@ mod tests {
 	#[test]
 	#[ignore = "exhaustive sweep; run with cargo test --release -- --include-ignored"]
 	fn leaking_a_secret_never_loses_an_attack_exhaustively() {
-		check_monotone(
+		check_variants(
 			"leaks",
 			variants_leaked,
-			Strength::Stronger,
+			Change::Stronger,
 			250,
 			Sweep::Exhaustive,
 		);
@@ -1006,22 +900,16 @@ mod tests {
 
 	#[test]
 	fn leaking_a_secret_never_loses_an_attack() {
-		check_monotone(
-			"leaks",
-			variants_leaked,
-			Strength::Stronger,
-			800,
-			Sweep::Fast,
-		);
+		check_variants("leaks", variants_leaked, Change::Stronger, 800, Sweep::Fast);
 	}
 
 	#[test]
 	#[ignore = "exhaustive sweep; run with cargo test --release -- --include-ignored"]
 	fn weakening_a_primitive_never_loses_an_attack_exhaustively() {
-		check_monotone(
+		check_variants(
 			"weaken",
 			variants_weakened,
-			Strength::Stronger,
+			Change::Stronger,
 			250,
 			Sweep::Exhaustive,
 		);
@@ -1029,10 +917,10 @@ mod tests {
 
 	#[test]
 	fn weakening_a_primitive_never_loses_an_attack() {
-		check_monotone(
+		check_variants(
 			"weaken",
 			variants_weakened,
-			Strength::Stronger,
+			Change::Stronger,
 			1200,
 			Sweep::Fast,
 		);
@@ -1041,10 +929,10 @@ mod tests {
 	#[test]
 	#[ignore = "exhaustive sweep; run with cargo test --release -- --include-ignored"]
 	fn removing_a_guard_never_loses_an_attack_exhaustively() {
-		check_monotone(
+		check_variants(
 			"unguard",
-			variants_unguarded,
-			Strength::Stronger,
+			|model| variants_guard(model, false),
+			Change::Stronger,
 			250,
 			Sweep::Exhaustive,
 		);
@@ -1052,10 +940,10 @@ mod tests {
 
 	#[test]
 	fn removing_a_guard_never_loses_an_attack() {
-		check_monotone(
+		check_variants(
 			"unguard",
-			variants_unguarded,
-			Strength::Stronger,
+			|model| variants_guard(model, false),
+			Change::Stronger,
 			180,
 			Sweep::Fast,
 		);
@@ -1064,10 +952,10 @@ mod tests {
 	#[test]
 	#[ignore = "exhaustive sweep; run with cargo test --release -- --include-ignored"]
 	fn adding_a_guard_never_adds_an_attack_exhaustively() {
-		check_monotone(
+		check_variants(
 			"guard",
-			variants_guarded,
-			Strength::Weaker,
+			|model| variants_guard(model, true),
+			Change::Weaker,
 			1800,
 			Sweep::Exhaustive,
 		);
@@ -1075,10 +963,10 @@ mod tests {
 
 	#[test]
 	fn adding_a_guard_never_adds_an_attack() {
-		check_monotone(
+		check_variants(
 			"guard",
-			variants_guarded,
-			Strength::Weaker,
+			|model| variants_guard(model, true),
+			Change::Weaker,
 			1700,
 			Sweep::Fast,
 		);
@@ -1086,10 +974,10 @@ mod tests {
 
 	#[test]
 	fn lowering_a_threshold_never_loses_an_attack() {
-		check_monotone(
+		check_variants(
 			"lower",
-			variants_lowered,
-			Strength::Stronger,
+			|model| variants_rethresholded(model, -1),
+			Change::Stronger,
 			4,
 			Sweep::Exhaustive,
 		);
@@ -1097,10 +985,10 @@ mod tests {
 
 	#[test]
 	fn raising_a_threshold_never_adds_an_attack() {
-		check_monotone(
+		check_variants(
 			"raise",
-			variants_raised,
-			Strength::Weaker,
+			|model| variants_rethresholded(model, 1),
+			Change::Weaker,
 			10,
 			Sweep::Exhaustive,
 		);
@@ -1108,10 +996,10 @@ mod tests {
 
 	#[test]
 	fn promoting_a_passive_model_to_active_never_loses_an_attack() {
-		check_monotone(
+		check_variants(
 			"promote",
-			variants_promoted,
-			Strength::Stronger,
+			|model| variants_attacker(model, AttackerKind::Active),
+			Change::Stronger,
 			60,
 			Sweep::Exhaustive,
 		);
@@ -1119,10 +1007,10 @@ mod tests {
 
 	#[test]
 	fn a_passive_run_never_finds_an_attack_the_active_run_misses() {
-		check_monotone(
+		check_variants(
 			"demote",
-			variants_demoted,
-			Strength::Weaker,
+			|model| variants_attacker(model, AttackerKind::Passive),
+			Change::Weaker,
 			200,
 			Sweep::Exhaustive,
 		);
@@ -1130,10 +1018,10 @@ mod tests {
 
 	#[test]
 	fn restricting_a_query_to_executions_with_a_send_never_adds_an_attack() {
-		check_monotone(
+		check_variants(
 			"restrict",
 			variants_restricted,
-			Strength::Weaker,
+			Change::Weaker,
 			250,
 			Sweep::Exhaustive,
 		);

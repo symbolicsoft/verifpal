@@ -11,7 +11,7 @@ pub(crate) fn unifiers(
 	a: &Value,
 	b: &Value,
 	s: &Substitution,
-) -> impl Iterator<Item = Substitution> {
+) -> impl Iterator<Item = Substitution> + use<> {
 	solve_equations::<true>(vec![(a.clone(), b.clone())], s.clone())
 }
 
@@ -19,11 +19,10 @@ pub(crate) fn merge<'a>(
 	a: &Substitution,
 	b: &'a Substitution,
 ) -> impl Iterator<Item = Substitution> + use<'a> {
-	let out = a.clone();
 	let mut pending = Vec::new();
 	let mut overlapping = Vec::new();
 	for (id, value) in b {
-		match out.get(id).cloned() {
+		match a.get(id) {
 			None => {
 				let variable = Value::Constant(Constant {
 					id: *id,
@@ -31,17 +30,15 @@ pub(crate) fn merge<'a>(
 				});
 				pending.push((variable, value.clone()));
 			}
+			Some(existing) if existing.equivalent(value, true) => {}
 			Some(existing) => {
-				if existing.equivalent(value, true) {
-					continue;
-				}
-				pending.push((existing, value.clone()));
+				pending.push((existing.clone(), value.clone()));
 				overlapping.push((*id, value));
 			}
 		}
 	}
 	pending.reverse();
-	solve_equations::<true>(pending, out).filter_map(move |mut out| {
+	solve_equations::<true>(pending, a.clone()).filter_map(move |mut out| {
 		for &(id, value) in &overlapping {
 			let resolved = super::vars::apply(value, &out);
 			if occurs(id, &resolved, &out) {
@@ -181,7 +178,7 @@ pub(crate) fn match_values(
 	pattern: &Value,
 	target: &Value,
 	s: &Substitution,
-) -> impl Iterator<Item = Substitution> {
+) -> impl Iterator<Item = Substitution> + use<> {
 	solve_equations::<false>(vec![(pattern.clone(), target.clone())], s.clone())
 }
 

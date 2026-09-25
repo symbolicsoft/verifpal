@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use crate::types::{ProtocolTrace, Span};
+use crate::types::Span;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum TokenKind {
@@ -24,7 +24,6 @@ pub(crate) enum TokenKind {
 	Comment,
 }
 
-#[cfg_attr(not(any(test, feature = "language")), allow(dead_code))]
 #[derive(Clone, Debug)]
 pub(crate) struct Token {
 	pub span: Span,
@@ -32,14 +31,10 @@ pub(crate) struct Token {
 	pub text: Arc<str>,
 }
 
-#[cfg_attr(not(any(test, feature = "language")), allow(dead_code))]
-#[derive(Clone, Debug)]
-pub(crate) struct Symbol {
-	pub name: Arc<str>,
-	pub creator: Option<Arc<str>>,
-	pub assigned: Option<String>,
-	pub known_by: Vec<(Arc<str>, Arc<str>)>,
-	pub phases: Vec<i32>,
+impl Token {
+	fn names_same(&self, other: &Token) -> bool {
+		self.kind == other.kind && self.text.eq_ignore_ascii_case(&other.text)
+	}
 }
 
 #[derive(Clone, Debug, Default)]
@@ -59,24 +54,15 @@ impl TokenIndex {
 		});
 	}
 
-	#[cfg_attr(not(any(test, feature = "language")), allow(dead_code))]
 	pub(crate) fn tokens(&self) -> &[Token] {
 		&self.tokens
-	}
-
-	pub(crate) fn len(&self) -> usize {
-		self.tokens.len()
-	}
-
-	pub(crate) fn truncate(&mut self, len: usize) {
-		self.tokens.truncate(len);
 	}
 
 	#[cfg_attr(not(any(test, feature = "language")), allow(dead_code))]
 	pub(crate) fn references(&self, token: &Token) -> Vec<Span> {
 		self.tokens
 			.iter()
-			.filter(|t| t.kind == token.kind && t.text.eq_ignore_ascii_case(token.text.as_ref()))
+			.filter(|t| t.names_same(token))
 			.map(|t| t.span)
 			.collect()
 	}
@@ -85,43 +71,17 @@ impl TokenIndex {
 	pub(crate) fn declaration_of(&self, token: &Token) -> Option<Span> {
 		if token.kind == TokenKind::PrincipalName {
 			return self.tokens.windows(2).find_map(|pair| {
-				let keyword = &pair[0];
-				let candidate = &pair[1];
+				let (keyword, candidate) = (&pair[0], &pair[1]);
 				(keyword.kind == TokenKind::Keyword
 					&& keyword.text.eq_ignore_ascii_case("principal")
-					&& candidate.kind == token.kind
-					&& candidate.text.eq_ignore_ascii_case(token.text.as_ref()))
+					&& candidate.names_same(token))
 				.then_some(candidate.span)
 			});
 		}
-		self.references(token).first().copied()
-	}
-
-	#[cfg_attr(not(any(test, feature = "language")), allow(dead_code))]
-	pub(crate) fn resolve(&self, token: &Token, trace: &ProtocolTrace) -> Option<Symbol> {
-		if token.kind != TokenKind::ConstantName && token.kind != TokenKind::Anonymous {
-			return None;
-		}
-		let slot = trace
-			.slots
+		self.tokens
 			.iter()
-			.find(|slot| slot.constant.name.eq_ignore_ascii_case(token.text.as_ref()))?;
-		Some(Symbol {
-			name: Arc::clone(&slot.constant.name),
-			creator: Some(Arc::from(trace.principal_name(slot.creator))),
-			assigned: Some(slot.initial_value.to_string()),
-			known_by: slot
-				.known_by
-				.iter()
-				.map(|&(recipient, sender)| {
-					(
-						Arc::from(trace.principal_name(recipient)),
-						Arc::from(trace.principal_name(sender)),
-					)
-				})
-				.collect(),
-			phases: slot.phases.clone(),
-		})
+			.find(|t| t.names_same(token))
+			.map(|t| t.span)
 	}
 
 	#[cfg_attr(not(any(test, feature = "language")), allow(dead_code))]
@@ -216,16 +176,9 @@ mod tests {
 		\tconfidentiality? tr_a\n\
 		]\n";
 
-	fn resolve_fixture() -> (crate::types::ProtocolTrace, TokenIndex) {
-		let (model, index) = crate::parser::parse_string_indexed("tr.vp", RESOLVE_SRC);
-		let model = model.expect("parses");
-		let (trace, _) = crate::sanity::sanity(&model).expect("passes sanity");
-		(trace, index)
-	}
-
 	#[test]
 	fn a_constants_declaration_is_where_it_was_assigned() {
-		let (_, index) = resolve_fixture();
+		let index = index_of(RESOLVE_SRC);
 		let at = RESOLVE_SRC
 			.find("tr_ga = PUBKEY")
 			.expect("the assignment is in the source");
@@ -236,7 +189,7 @@ mod tests {
 
 	#[test]
 	fn a_knowns_declaration_is_the_knows_line() {
-		let (_, index) = resolve_fixture();
+		let index = index_of(RESOLVE_SRC);
 		let at = RESOLVE_SRC
 			.find("tr_a\n")
 			.expect("the knows line is in the source");
@@ -247,7 +200,7 @@ mod tests {
 
 	#[test]
 	fn a_principals_declaration_is_its_block_not_its_first_reference() {
-		let (_, index) = resolve_fixture();
+		let index = index_of(RESOLVE_SRC);
 		let reference = RESOLVE_SRC.find("Bob: tr_ga").expect("Bob is a recipient");
 		let token = index.at(reference).expect("Bob is indexed");
 		let declaration = index.declaration_of(token).expect("Bob is declared");
@@ -259,7 +212,7 @@ mod tests {
 
 	#[test]
 	fn references_finds_every_occurrence_including_the_declaration() {
-		let (_, index) = resolve_fixture();
+		let index = index_of(RESOLVE_SRC);
 		let tr_ga = index
 			.at(RESOLVE_SRC.find("tr_ga").expect("tr_ga is present"))
 			.expect("tr_ga is indexed");
@@ -272,41 +225,13 @@ mod tests {
 
 	#[test]
 	fn references_is_case_insensitive_because_the_language_is() {
-		let (_, index) = resolve_fixture();
+		let index = index_of(RESOLVE_SRC);
 		let mut token = index
 			.at(RESOLVE_SRC.find("tr_ga").expect("tr_ga is present"))
 			.expect("tr_ga is indexed")
 			.clone();
 		token.text = Arc::from("TR_GA");
 		assert_eq!(index.references(&token).len(), 3);
-	}
-
-	#[test]
-	fn resolving_a_constant_names_its_creator_and_assignment() {
-		let (trace, index) = resolve_fixture();
-		let at = RESOLVE_SRC.find("HASH(tr_ga)").expect("in the source") + "HASH(".len();
-		let token = index.at(at).expect("a token at the HASH argument");
-		let symbol = index.resolve(token, &trace).expect("resolves");
-
-		assert_eq!(&*symbol.name, "tr_ga");
-		assert_eq!(symbol.creator.as_deref(), Some("Alice"));
-		assert_eq!(symbol.assigned.as_deref(), Some("PUBKEY(tr_a)"));
-		assert!(
-			symbol
-				.known_by
-				.iter()
-				.any(|(recipient, sender)| &**recipient == "Bob" && &**sender == "Alice"),
-			"Bob knows tr_ga from Alice: {:?}",
-			symbol.known_by
-		);
-	}
-
-	#[test]
-	fn a_primitive_token_resolves_to_nothing() {
-		let (trace, index) = resolve_fixture();
-		let at = RESOLVE_SRC.find("PUBKEY").expect("in the source");
-		let token = index.at(at).expect("a token at PUBKEY");
-		assert!(index.resolve(token, &trace).is_none());
 	}
 
 	#[test]

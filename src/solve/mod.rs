@@ -25,25 +25,23 @@ pub(crate) enum Pass {
 	Constructed,
 }
 
-pub(crate) fn directly_unguarded(km: &ProtocolTrace, ps: &PrincipalState, slot: usize) -> bool {
+pub(crate) fn directly_unguarded(km: &ProtocolTrace, principal: PrincipalId, slot: usize) -> bool {
 	km.slots.get(slot).is_some_and(|trace_slot| {
 		trace_slot
 			.sent_by
 			.iter()
-			.any(|event| event.recipient == ps.id && !event.guarded)
+			.any(|event| event.recipient == principal && !event.guarded)
 	})
 }
 
-pub(crate) fn split_delivered(km: &ProtocolTrace, ps: &PrincipalState, slot: usize) -> bool {
+pub(crate) fn split_delivered(km: &ProtocolTrace, principal: PrincipalId, slot: usize) -> bool {
 	km.slots.get(slot).is_some_and(|trace_slot| {
 		trace_slot
 			.sent_by
 			.iter()
-			.any(|event| event.recipient != ps.id && event.sender != ps.id)
-	}) && ps
-		.meta
-		.get(slot)
-		.is_some_and(|meta| meta.mutatable_to.iter().any(|&who| who != ps.id))
+			.any(|event| event.recipient != principal && event.sender != principal)
+			&& trace_slot.mutatable_to.iter().any(|&who| who != principal)
+	})
 }
 
 pub(crate) fn slots_blocking_reduction(sym: &SymbolicState) -> Vec<Vec<usize>> {
@@ -64,9 +62,7 @@ fn collect_blocking_slots(v: &Value, out: &mut Vec<Vec<usize>>, seen: &mut IdSet
 	if !seen.insert(Arc::as_ptr(p) as usize) {
 		return;
 	}
-	if let Some(rule) = crate::primitive::primitive_get(p.id)
-		.ok()
-		.and_then(|s| s.rewrite.as_ref())
+	if let Some(rule) = crate::primitive::rewrite_rule(p.id)
 		&& !crate::theory::can_rewrite(p).0
 	{
 		let mut group = Vec::new();
@@ -103,7 +99,7 @@ fn collect_blocking_slots(v: &Value, out: &mut Vec<Vec<usize>>, seen: &mut IdSet
 pub(crate) fn propose(
 	ctx: &VerifyContext,
 	km: &ProtocolTrace,
-	ps: &PrincipalState,
+	principal: PrincipalId,
 	pass: Pass,
 	attacker: &AttackerState,
 	sym: &SymbolicState,
@@ -130,13 +126,15 @@ pub(crate) fn propose(
 			observed(lanes(pending.len()), |(lane, range)| {
 				let deducer = in_lane(lane);
 				range
-					.flat_map(|at| goals_for_query(pending[at], km, ps, sym, &deducer, &empty))
+					.flat_map(|at| {
+						goals_for_query(pending[at], km, principal, sym, &deducer, &empty)
+					})
 					.collect::<Vec<_>>()
 			})
 		};
 		proposals.extend(goals.into_iter().flatten());
-		proposals.extend(deducer.constraint_goals(ctx, km, ps, sym));
-		proposals.extend(oracle_input_goals(ctx, km, ps, sym, attacker));
+		proposals.extend(deducer.constraint_goals(ctx, km, sym));
+		proposals.extend(oracle_input_goals(km, principal, sym, attacker));
 	}
 
 	let blanket = blanket_substitution(sym);
@@ -152,17 +150,17 @@ pub(crate) fn propose(
 	}
 
 	if pass == Pass::Constructed {
-		proposals.extend(sibling_flight_substitutions(km, ps, sym));
+		proposals.extend(sibling_flight_substitutions(km, sym));
 		let in_lane = deducer.lane_factory();
 		let candidates = observed(lanes(sym.var_slots.len()), |(lane, range)| {
 			let deducer = in_lane(lane);
 			range
 				.map(|at| {
 					let slot = sym.var_slots[at];
-					let Some(meta) = ps.meta.get(slot) else {
+					let Some(trace_slot) = km.slots.get(slot) else {
 						return Vec::new();
 					};
-					let honest = resolve_trace_constant(&meta.constant, km);
+					let honest = resolve_trace_constant(&trace_slot.constant, km);
 					slot_candidates(attacker, sym, &deducer, protocol, &honest, &blanket, slot)
 				})
 				.collect::<Vec<_>>()
@@ -182,7 +180,7 @@ pub(crate) fn propose(
 		}
 	}
 
-	let honest = honest_slot_terms(km, ps, sym);
+	let honest = honest_slot_terms(km, sym);
 	let keyed: Vec<Substitution> = observed((0..proposals.len()).collect(), |at| {
 		let proposal = &proposals[at];
 		[
@@ -215,7 +213,7 @@ pub(crate) fn propose(
 
 	let (replays, others): (Vec<Substitution>, Vec<Substitution>) = proposals
 		.into_iter()
-		.partition(|proposal| sibling_replay(km, ps, sym, proposal));
+		.partition(|proposal| sibling_replay(km, sym, proposal));
 	let mut proposals = others;
 	match pass {
 		Pass::Targeted => (
@@ -238,16 +236,15 @@ pub(crate) fn propose(
 }
 
 fn oracle_input_goals(
-	ctx: &VerifyContext,
 	km: &ProtocolTrace,
-	ps: &PrincipalState,
+	principal: PrincipalId,
 	sym: &SymbolicState,
 	attacker: &AttackerState,
 ) -> Vec<Substitution> {
-	let emissions: Vec<&Value> = (0..ps.values.len())
+	let emissions: Vec<&Value> = (0..km.slots.len())
 		.filter(|&e| {
-			ps.values[e].provenance.creator == ps.id
-				&& (ps.meta[e].sent_at.is_some() || ps.meta[e].constant.leaked)
+			let slot = &km.slots[e];
+			slot.creator == principal && (slot.sent_from(principal) || slot.constant.leaked)
 		})
 		.map(|e| &sym.terms[e])
 		.filter(|term| vars::contains_var(term))
@@ -259,14 +256,14 @@ fn oracle_input_goals(
 	let mut wanted: Vec<(Value, Option<ValueId>)> = Vec::new();
 	let mut foreign: Substitution = Substitution::default();
 	let slot_var = |v: &Value| vars::as_var(v).filter(|&id| vars::is_slot_var_id(id));
-	for state in ctx.principal_states() {
-		let controllable = crate::solve::control::Controllable::of(km, state, attacker);
-		let other = symbolic::build(&controllable, state, attacker);
+	for &other_principal in &km.principal_ids {
+		let controllable = crate::solve::control::Controllable::of(km, other_principal, attacker);
+		let other = symbolic::build(&controllable, km, other_principal, attacker);
 		for &slot in &other.var_slots {
 			if sym.var_slots.contains(&slot) {
 				continue;
 			}
-			let honest = resolve_trace_constant(&state.meta[slot].constant, km);
+			let honest = resolve_trace_constant(&km.slots[slot].constant, km);
 			let filler = if crate::primitive::value_is_key_derivation(&honest) {
 				crate::primitive::attacker_public_key()
 			} else {
@@ -274,8 +271,8 @@ fn oracle_input_goals(
 			};
 			foreign.insert(vars::attacker_var_id(slot), filler);
 		}
-		for c in 0..state.values.len() {
-			if state.values[c].provenance.creator != state.id {
+		for c in 0..km.slots.len() {
+			if km.slots[c].creator != other_principal {
 				continue;
 			}
 			let Value::Primitive(prim) = &other.terms[c] else {
@@ -285,32 +282,27 @@ fn oracle_input_goals(
 				continue;
 			}
 			let shapes: Vec<(Value, Option<ValueId>)> =
-				match crate::primitive::primitive_get(prim.id) {
-					Ok(spec) => match spec.rewrite.as_ref() {
-						Some(rule) => {
-							let target = prim.arguments.get(rule.from).and_then(slot_var);
-							deduce::build_rewrite_shapes_with(prim, rule, |_| {
-								let v = vars::free_var(fresh);
-								fresh += 1;
-								v
-							})
-							.into_iter()
-							.map(|shape| (shape, target))
-							.collect()
-						}
-						None => Vec::new(),
-					},
-					Err(_) => {
-						if crate::primitive::primitive_is_core(prim.id) && prim.arguments.len() == 2
-						{
-							vec![
-								(prim.arguments[0].clone(), slot_var(&prim.arguments[1])),
-								(prim.arguments[1].clone(), slot_var(&prim.arguments[0])),
-							]
-						} else {
-							Vec::new()
-						}
+				match crate::primitive::rewrite_rule(prim.id) {
+					Some(rule) => {
+						let target = prim.arguments.get(rule.from).and_then(slot_var);
+						deduce::build_rewrite_shapes_with(prim, rule, |_| {
+							let v = vars::free_var(fresh);
+							fresh += 1;
+							v
+						})
+						.into_iter()
+						.map(|shape| (shape, target))
+						.collect()
 					}
+					None if crate::primitive::primitive_is_core(prim.id)
+						&& prim.arguments.len() == 2 =>
+					{
+						vec![
+							(prim.arguments[0].clone(), slot_var(&prim.arguments[1])),
+							(prim.arguments[1].clone(), slot_var(&prim.arguments[0])),
+						]
+					}
+					None => Vec::new(),
 				};
 			for (shape, target) in shapes {
 				if vars::contains_var(&shape)
@@ -393,26 +385,21 @@ fn oracle_input_goals(
 	out
 }
 
-fn sibling_replay(
-	km: &ProtocolTrace,
-	ps: &PrincipalState,
-	sym: &SymbolicState,
-	proposal: &Substitution,
-) -> bool {
+fn sibling_replay(km: &ProtocolTrace, sym: &SymbolicState, proposal: &Substitution) -> bool {
 	let mut slots = 0usize;
 	for (id, value) in proposal.iter() {
 		if !vars::is_slot_var_id(*id) {
 			continue;
 		}
 		let slot = vars::slot_of_var_id(*id);
-		let Some(meta) = ps.meta.get(slot) else {
+		let Some(trace_slot) = km.slots.get(slot) else {
 			return false;
 		};
 		let installed = match sym.var_terms.get(slot) {
 			Some(Some(term)) => vars::apply(term, proposal),
 			_ => value.clone(),
 		};
-		let siblings = crate::query::session_sibling_values(&meta.constant, km);
+		let siblings = crate::query::session_sibling_values(&trace_slot.constant, km);
 		if !siblings
 			.iter()
 			.any(|sibling| sibling.equivalent(&installed, true))
@@ -425,15 +412,13 @@ fn sibling_replay(
 }
 
 pub(crate) fn emissions_under(
-	ps: &PrincipalState,
+	km: &ProtocolTrace,
 	sym: &SymbolicState,
 	binding: &Substitution,
 ) -> Vec<Value> {
-	(0..ps.values.len())
+	(0..km.slots.len())
 		.filter(|&e| {
-			!sym.is_var_slot(e)
-				&& (!ps.meta[e].wire.is_empty() || ps.meta[e].constant.leaked)
-				&& vars::contains_var(&sym.terms[e])
+			!sym.is_var_slot(e) && km.slots[e].disclosed() && vars::contains_var(&sym.terms[e])
 		})
 		.map(|e| {
 			crate::theory::reduce_once(&vars::ground_free(&vars::apply(&sym.terms[e], binding)))
@@ -616,15 +601,11 @@ fn aligned_free_positions<'a>(
 /// called for every proposal and, for the aligned family, for every held term
 /// besides, so resolving the whole trace inside that loop is the difference
 /// between a constant factor and a multiplicative one.
-pub(crate) fn honest_slot_terms(
-	km: &ProtocolTrace,
-	ps: &PrincipalState,
-	sym: &SymbolicState,
-) -> Vec<Value> {
+pub(crate) fn honest_slot_terms(km: &ProtocolTrace, sym: &SymbolicState) -> Vec<Value> {
 	sym.var_slots
 		.iter()
-		.map(|&slot| match ps.meta.get(slot) {
-			Some(meta) => resolve_trace_constant(&meta.constant, km),
+		.map(|&slot| match km.slots.get(slot) {
+			Some(trace_slot) => resolve_trace_constant(&trace_slot.constant, km),
 			None => crate::value::value_nil(),
 		})
 		.collect()
@@ -673,7 +654,6 @@ fn fill_free_positions(
 
 pub(crate) fn leave_honest_slots(
 	km: &ProtocolTrace,
-	ps: &PrincipalState,
 	sym: &SymbolicState,
 	proposal: Substitution,
 ) -> Substitution {
@@ -683,12 +663,12 @@ pub(crate) fn leave_honest_slots(
 		let Some(term) = &sym.var_terms[slot] else {
 			continue;
 		};
-		if !proposal.contains_key(&id) || slot >= ps.values.len() {
+		if !proposal.contains_key(&id) || slot >= km.slots.len() {
 			continue;
 		}
 		let ground = vars::ground_free(&vars::apply(term, &proposal));
 		if vars::contains_var(&ground)
-			|| crate::solve::control::attacker_authored(&ground, slot, km, ps)
+			|| crate::solve::control::attacker_authored(&ground, slot, km)
 		{
 			continue;
 		}
@@ -753,21 +733,21 @@ pub(crate) fn signature_hash(signature: &[(usize, Value)]) -> u64 {
 fn goals_for_query(
 	query: &Query,
 	km: &ProtocolTrace,
-	ps: &PrincipalState,
+	principal: PrincipalId,
 	sym: &SymbolicState,
 	deducer: &Deducer,
 	base: &Substitution,
 ) -> Vec<Substitution> {
 	match query.kind {
-		QueryKind::Confidentiality => match slot_term(query.constants.first(), ps, sym) {
+		QueryKind::Confidentiality => match slot_term(query.constants.first(), km, sym) {
 			Some(term) => deducer.solve(&term, base),
 			None => Vec::new(),
 		},
-		QueryKind::Authentication => authentication_goals(query, km, ps, sym, deducer, base),
+		QueryKind::Authentication => authentication_goals(query, km, principal, sym, deducer, base),
 		QueryKind::Unlinkability => {
 			let mut out = Vec::new();
 			for c in &query.constants {
-				let Some(term) = slot_term(Some(c), ps, sym) else {
+				let Some(term) = slot_term(Some(c), km, sym) else {
 					continue;
 				};
 				let Value::Primitive(p) = &term else {
@@ -787,7 +767,7 @@ fn goals_for_query(
 			let terms: Vec<Value> = query
 				.constants
 				.iter()
-				.filter_map(|c| slot_term(Some(c), ps, sym))
+				.filter_map(|c| slot_term(Some(c), km, sym))
 				.collect();
 			for pair in terms.windows(2) {
 				out.extend(diverge::solve_divergent(&pair[0], &pair[1], base));
@@ -801,18 +781,18 @@ fn goals_for_query(
 fn authentication_goals(
 	query: &Query,
 	km: &ProtocolTrace,
-	ps: &PrincipalState,
+	principal: PrincipalId,
 	sym: &SymbolicState,
 	deducer: &Deducer,
 	base: &Substitution,
 ) -> Vec<Substitution> {
-	if query.message.recipient != ps.id {
+	if query.message.recipient != principal {
 		return Vec::new();
 	}
 	let Some(c) = query.message.constants.first() else {
 		return Vec::new();
 	};
-	let Some(slot) = ps.index_of(c) else {
+	let Some(slot) = km.index_of(c) else {
 		return Vec::new();
 	};
 	if !sym.is_var_slot(slot) {
@@ -864,25 +844,22 @@ fn observed<T: Send, R: Send>(items: Vec<T>, f: impl Fn(T) -> R + Sync + Send) -
 	crate::parallel::map_ordered(items, f)
 }
 
-fn sibling_flight_substitutions(
-	km: &ProtocolTrace,
-	ps: &PrincipalState,
-	sym: &SymbolicState,
-) -> Vec<Substitution> {
+fn sibling_flight_substitutions(km: &ProtocolTrace, sym: &SymbolicState) -> Vec<Substitution> {
 	let mut widest = 0;
 	for &slot in &sym.var_slots {
-		if let Some(meta) = ps.meta.get(slot) {
-			widest = widest.max(crate::query::session_sibling_values(&meta.constant, km).len());
+		if let Some(trace_slot) = km.slots.get(slot) {
+			widest =
+				widest.max(crate::query::session_sibling_values(&trace_slot.constant, km).len());
 		}
 	}
 	let mut out = Vec::new();
 	for i in 0..widest {
 		let mut flight = Substitution::default();
 		for &slot in &sym.var_slots {
-			let Some(meta) = ps.meta.get(slot) else {
+			let Some(trace_slot) = km.slots.get(slot) else {
 				continue;
 			};
-			let siblings = crate::query::session_sibling_values(&meta.constant, km);
+			let siblings = crate::query::session_sibling_values(&trace_slot.constant, km);
 			if let Some(v) = siblings.get(i) {
 				flight.insert(vars::attacker_var_id(slot), v.clone());
 			}
@@ -950,9 +927,9 @@ fn slot_candidates(
 	out
 }
 
-fn slot_term(c: Option<&Constant>, ps: &PrincipalState, sym: &SymbolicState) -> Option<Value> {
+fn slot_term(c: Option<&Constant>, km: &ProtocolTrace, sym: &SymbolicState) -> Option<Value> {
 	let c = c?;
-	let slot = ps.index_of(c)?;
+	let slot = km.index_of(c)?;
 	sym.terms.get(slot).cloned()
 }
 
@@ -1031,7 +1008,7 @@ mod tests {
 		let sym = SymbolicState {
 			terms: vec![term.clone(), check, term],
 			var_slots: vec![0, 1],
-			var_terms: vec![],
+			..SymbolicState::default()
 		};
 		assert_eq!(slots_blocking_reduction(&sym), vec![vec![0, 1]]);
 	}

@@ -1,0 +1,37 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: e1 at one session and at two.
+//
+// Alice, the first to declare k, halts before her declaration of it. Bob
+// holds k through his own knows and his y differs from it, but k was marked
+// unreached because its creator halted first, which hid the difference at
+// one session.
+attacker[active]
+
+principal Carol[
+	generates m
+	mm = HASH(m)
+]
+
+Carol -> Alice: m, [mm]
+
+principal Alice[
+	generates dummy
+]
+
+Alice -> Bob: [m], [mm]
+
+principal Alice[
+	_ = ASSERT(HASH(m), mm)?
+	knows private k
+]
+
+principal Bob[
+	knows private k
+	c = ENC(mm, k)
+	y = DEC(HASH(m), c)
+]
+
+queries[
+	equivalence? k, y
+]

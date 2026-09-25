@@ -2,7 +2,7 @@
      SPDX-License-Identifier: GPL-3.0-only -->
 <section class="model" id="m{{index}}" data-failing="{{failing}}">
 <div class="panel">
-<div class="panelHead"><span class="paneLabel"><span class="paneMark"></span>{{file}}</span><span class="meta">{{#analysed}}<span class="attackerKind {{attacker_class}}">{{attacker}} attacker</span> &middot; {{sessions}} session{{plural}} &middot; {{elapsed}} ms &middot; <span class="code">{{#code}}<span class="{{pclass}}">{{pair}}</span>{{/code}}</span>{{/analysed}}{{^analysed}}<span class="fail">not analysed</span>{{/analysed}}</span></div>
+<div class="panelHead"><span class="paneLabel"><span class="paneMark"></span>{{file}}</span><span class="meta">{{#analysed}}<span class="attackerKind {{attacker}}">{{attacker}} attacker</span> &middot; {{sessions}} session{{plural}} &middot; {{elapsed}} ms &middot; <span class="code">{{#code}}<span class="{{pclass}}">{{pair}}</span>{{/code}}</span>{{/analysed}}{{^analysed}}<span class="fail">not analysed</span>{{/analysed}}</span></div>
 {{#error}}{{>error}}{{/error}}
 {{#diagram}}<div class="panelSection"><span class="eyebrow">Protocol</span>{{>diagram}}</div>{{/diagram}}
 {{#verdicts}}{{>verdicts}}{{/verdicts}}

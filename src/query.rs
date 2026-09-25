@@ -36,7 +36,6 @@ fn note_origin_only(query: &Query) {
 				.unwrap_or_default(),
 		),
 		InfoLevel::Info,
-		false,
 	);
 }
 
@@ -272,7 +271,7 @@ mod tcb_tests {
 		let exec = engine_source("engine/exec.rs");
 		let body = block_lines(&exec, |header| header.starts_with("fn step_run"));
 		let receive = body_hits(&body, "Event::Recv(d) =>");
-		let gate = body_hits(&body, ".derivable(t, cx.carrier)");
+		let gate = body_hits(&body, ".derivable(t, &cx.km.capabilities)");
 		assert!(
 			!receive.is_empty() && !gate.is_empty(),
 			"the receive arm must gate installs"

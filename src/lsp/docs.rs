@@ -9,7 +9,13 @@ pub(crate) struct Entry {
 	pub help: &'static str,
 }
 
-pub(crate) static PRIMITIVES: LazyLock<Vec<Entry>> = LazyLock::new(|| {
+impl Entry {
+	pub(crate) fn markdown(&self) -> String {
+		format!("```verifpal\n{}\n```\n\n{}", self.eg, self.help)
+	}
+}
+
+static PRIMITIVES: LazyLock<Vec<Entry>> = LazyLock::new(|| {
 	crate::primitive::primitive_docs()
 		.into_iter()
 		.map(|(name, doc)| Entry {
@@ -29,11 +35,10 @@ fn capability_entries() -> Vec<Entry> {
 		Box::leak(text.into_boxed_str())
 	}
 	fn list(names: Vec<&str>) -> String {
-		match names.len() {
-			0 => "no primitive".to_string(),
-			1 => names[0].to_string(),
-			n => format!("{} and {}", names[..n - 1].join(", "), names[n - 1]),
+		if names.is_empty() {
+			return "no primitive".to_string();
 		}
+		crate::util::and_list(&names)
 	}
 	let supporting =
 		|cap: Capability| primitives_supporting(|id| crate::capability::supports(id, cap));
@@ -257,14 +262,12 @@ mod tests {
 
 	#[test]
 	fn every_query_kind_is_documented() {
-		for kind in [
-			"confidentiality",
-			"authentication",
-			"freshness",
-			"unlinkability",
-			"equivalence",
-		] {
-			assert!(query(kind).is_some(), "{kind} has no documentation entry");
+		for kind in crate::types::QueryKind::ALL {
+			assert!(
+				query(kind.name()).is_some(),
+				"{} has no documentation entry",
+				kind.name()
+			);
 		}
 	}
 

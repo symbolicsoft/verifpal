@@ -1,6 +1,7 @@
 /* SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
  * SPDX-License-Identifier: GPL-3.0-only */
 
+use std::collections::{HashMap, HashSet};
 use std::error::Error;
 
 use lsp_server::{Connection, Message, Notification, Request, RequestId, Response};
@@ -14,7 +15,9 @@ use lsp_types::{
 	TextDocumentSyncKind, TextDocumentSyncOptions, TextDocumentSyncSaveOptions, TextEdit,
 };
 
+use crate::lsp::language;
 use crate::lsp::proto;
+use crate::lsp::state::Document;
 
 type Fallible = Result<(), Box<dyn Error + Sync + Send>>;
 
@@ -28,7 +31,7 @@ pub fn run() -> Fallible {
 	outcome
 }
 
-pub(crate) fn serve(connection: &Connection) -> Fallible {
+fn serve(connection: &Connection) -> Fallible {
 	crate::info::set_verbosity(crate::info::Verbosity::Silent);
 	let (id, params) = connection.initialize_start()?;
 	let params: InitializeParams = serde_json::from_value(params)?;
@@ -81,7 +84,6 @@ fn capabilities(encoding: &PositionEncodingKind) -> ServerCapabilities {
 			TextDocumentSyncOptions {
 				open_close: Some(true),
 				change: Some(TextDocumentSyncKind::FULL),
-				// A save is when diagnostics are published once `verifpal.validateOnType` is off.
 				save: Some(TextDocumentSyncSaveOptions::Supported(true)),
 				..Default::default()
 			},
@@ -110,11 +112,11 @@ fn capabilities(encoding: &PositionEncodingKind) -> ServerCapabilities {
 			lsp_types::SemanticTokensServerCapabilities::SemanticTokensOptions(
 				lsp_types::SemanticTokensOptions {
 					legend: lsp_types::SemanticTokensLegend {
-						token_types: crate::lsp::language::TOKEN_TYPES
+						token_types: language::TOKEN_TYPES
 							.iter()
 							.map(|t| lsp_types::SemanticTokenType::new(t))
 							.collect(),
-						token_modifiers: crate::lsp::language::TOKEN_MODIFIERS
+						token_modifiers: language::TOKEN_MODIFIERS
 							.iter()
 							.map(|m| lsp_types::SemanticTokenModifier::new(m))
 							.collect(),
@@ -143,11 +145,11 @@ fn capabilities(encoding: &PositionEncodingKind) -> ServerCapabilities {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct Settings {
-	pub validate_on_type: bool,
-	pub passing: bool,
-	pub inlay_hints: bool,
-	pub code_lens: bool,
+struct Settings {
+	validate_on_type: bool,
+	passing: bool,
+	inlay_hints: bool,
+	code_lens: bool,
 }
 
 impl Default for Settings {
@@ -180,10 +182,10 @@ impl Settings {
 	}
 }
 
-pub(crate) struct Server {
+struct Server {
 	sender: crossbeam_channel::Sender<Message>,
-	docs: crate::lsp::state::Documents,
-	dirty: std::collections::HashSet<String>,
+	docs: HashMap<String, Document>,
+	dirty: HashSet<String>,
 	runner: crate::lsp::analysis::Runner,
 	next_token: u64,
 	next_request_id: i32,
@@ -200,8 +202,8 @@ impl Server {
 	fn new(sender: crossbeam_channel::Sender<Message>, encoding: PositionEncodingKind) -> Server {
 		Server {
 			sender: sender.clone(),
-			docs: crate::lsp::state::Documents::new(encoding.clone()),
-			dirty: std::collections::HashSet::new(),
+			docs: HashMap::new(),
+			dirty: HashSet::new(),
 			runner: crate::lsp::analysis::Runner::new(sender),
 			next_token: 0,
 			next_request_id: 0,
@@ -274,143 +276,72 @@ impl Server {
 	fn on_request(&mut self, req: Request) {
 		match req.method.as_str() {
 			"textDocument/formatting" => {
-				let response = match serde_json::from_value::<DocumentFormattingParams>(req.params)
-				{
-					Ok(p) => Response::new_ok(req.id, self.format(p.text_document.uri.as_str())),
-					Err(e) => Response::new_err(
-						req.id,
-						lsp_server::ErrorCode::InvalidParams as i32,
-						e.to_string(),
-					),
-				};
-				self.respond(response);
+				self.on_document(req, |_, doc, _: DocumentFormattingParams| format(doc))
 			}
-			"textDocument/hover" => self.answer::<TextDocumentPositionParams, _>(req, |s, p| {
-				s.with_doc(p.text_document.uri.as_str(), |doc| {
-					crate::lsp::language::hover(doc, p.position)
+			"textDocument/hover" => self
+				.on_document(req, |_, doc, p: TextDocumentPositionParams| {
+					language::hover(doc, p.position)
+				}),
+			"textDocument/definition" => {
+				self.on_document(req, |_, doc, p: GotoDefinitionParams| {
+					language::definition(doc, p.text_document_position_params.position)
 				})
-				.flatten()
-			}),
-			"textDocument/definition" => self.answer::<GotoDefinitionParams, _>(req, |s, p| {
-				let uri = p.text_document_position_params.text_document.uri.clone();
-				s.with_doc(uri.as_str(), |doc| {
-					crate::lsp::language::definition(
-						doc,
-						p.text_document_position_params.position,
-						&uri,
-					)
-				})
-				.flatten()
-			}),
-			"textDocument/references" => self.answer::<ReferenceParams, _>(req, |s, p| {
-				let uri = p.text_document_position.text_document.uri.clone();
-				s.with_doc(uri.as_str(), |doc| {
-					crate::lsp::language::references(doc, p.text_document_position.position, &uri)
-				})
-				.unwrap_or_default()
+			}
+			"textDocument/references" => self.on_document(req, |_, doc, p: ReferenceParams| {
+				language::references(doc, p.text_document_position.position)
 			}),
 			"textDocument/documentHighlight" => {
-				self.answer::<DocumentHighlightParams, _>(req, |s, p| {
-					s.with_doc(
-						p.text_document_position_params.text_document.uri.as_str(),
-						|doc| {
-							crate::lsp::language::highlights(
-								doc,
-								p.text_document_position_params.position,
-							)
-						},
-					)
-					.unwrap_or_default()
+				self.on_document(req, |_, doc, p: DocumentHighlightParams| {
+					language::highlights(doc, p.text_document_position_params.position)
 				})
 			}
-			"textDocument/documentSymbol" => self.answer::<DocumentSymbolParams, _>(req, |s, p| {
-				s.with_doc(p.text_document.uri.as_str(), |doc| {
-					crate::lsp::language::document_symbols(doc)
-				})
-				.unwrap_or_default()
+			"textDocument/documentSymbol" => self
+				.on_document(req, |_, doc, _: DocumentSymbolParams| {
+					language::document_symbols(doc)
+				}),
+			"textDocument/foldingRange" => self
+				.on_document(req, |_, doc, _: FoldingRangeParams| {
+					language::folding_ranges(doc)
+				}),
+			"textDocument/completion" => self.on_document(req, |_, doc, p: CompletionParams| {
+				language::completions(doc, p.text_document_position.position)
 			}),
-			"textDocument/foldingRange" => self.answer::<FoldingRangeParams, _>(req, |s, p| {
-				s.with_doc(p.text_document.uri.as_str(), |doc| {
-					crate::lsp::language::folding_ranges(doc)
-				})
-				.unwrap_or_default()
-			}),
-			"textDocument/completion" => self.answer::<CompletionParams, _>(req, |s, p| {
-				s.with_doc(p.text_document_position.text_document.uri.as_str(), |doc| {
-					crate::lsp::language::completions(doc, p.text_document_position.position)
-				})
-				.unwrap_or_default()
-			}),
-			"textDocument/signatureHelp" => self.answer::<SignatureHelpParams, _>(req, |s, p| {
-				s.with_doc(
-					p.text_document_position_params.text_document.uri.as_str(),
-					|doc| {
-						crate::lsp::language::signature_help(
-							doc,
-							p.text_document_position_params.position,
-						)
-					},
-				)
-				.flatten()
-			}),
-			"textDocument/semanticTokens/full" => {
-				self.answer::<SemanticTokensParams, _>(req, |s, p| {
-					s.with_doc(
-						p.text_document.uri.as_str(),
-						|doc| serde_json::json!({"data": crate::lsp::language::semantic_tokens(doc)}),
-					)
-					.unwrap_or(serde_json::Value::Null)
+			"textDocument/signatureHelp" => {
+				self.on_document(req, |_, doc, p: SignatureHelpParams| {
+					language::signature_help(doc, p.text_document_position_params.position)
 				})
 			}
-			"textDocument/inlayHint" => self.answer::<InlayHintParams, _>(req, |s, p| {
-				if !s.settings.inlay_hints {
-					return Vec::new();
+			"textDocument/semanticTokens/full" => self.on_document(
+				req,
+				|_, doc, _: SemanticTokensParams| serde_json::json!({"data": language::semantic_tokens(doc)}),
+			),
+			"textDocument/inlayHint" => self.on_document(req, |s, doc, p: InlayHintParams| {
+				if s.settings.inlay_hints {
+					language::inlay_hints(doc, p.range)
+				} else {
+					Vec::new()
 				}
-				s.with_doc(p.text_document.uri.as_str(), |doc| {
-					crate::lsp::language::inlay_hints(doc, p.range)
-				})
-				.unwrap_or_default()
 			}),
-			"textDocument/prepareRename" => {
-				self.answer::<TextDocumentPositionParams, _>(req, |s, p| {
-					s.with_doc(p.text_document.uri.as_str(), |doc| {
-						crate::lsp::language::prepare_rename(doc, p.position)
-					})
-					.flatten()
-				})
-			}
-			"textDocument/rename" => self.answer::<RenameParams, _>(req, |s, p| {
-				let uri = p.text_document_position.text_document.uri.clone();
-				let edits = s
-					.with_doc(uri.as_str(), |doc| {
-						crate::lsp::language::rename(
-							doc,
-							p.text_document_position.position,
-							&p.new_name,
-						)
-					})
-					.flatten();
-				edits.map(|edits| lsp_types::WorkspaceEdit {
-					changes: Some(std::collections::HashMap::from([(uri, edits)])),
-					..Default::default()
-				})
+			"textDocument/prepareRename" => self
+				.on_document(req, |_, doc, p: TextDocumentPositionParams| {
+					language::prepare_rename(doc, p.position)
+				}),
+			"textDocument/rename" => self.on_document(req, |_, doc, p: RenameParams| {
+				language::rename(doc, p.text_document_position.position, &p.new_name)
+					.map(|edits| workspace_edit(doc, edits))
 			}),
-			"textDocument/codeLens" => self.answer::<CodeLensParams, _>(req, |s, p| {
-				s.code_lenses(p.text_document.uri.as_str())
+			"textDocument/codeLens" => self.on_document(req, |s, doc, _: CodeLensParams| {
+				if s.settings.code_lens {
+					code_lenses(doc)
+				} else {
+					Vec::new()
+				}
 			}),
 			"textDocument/codeAction" => {
-				self.answer::<CodeActionParams, _>(req, |s, p| s.code_actions(&p))
+				self.on_document(req, |_, doc, p: CodeActionParams| code_actions(doc, &p))
 			}
 			"workspace/executeCommand" => {
-				let response = match serde_json::from_value::<ExecuteCommandParams>(req.params) {
-					Ok(p) => Response::new_ok(req.id, self.command(&p)),
-					Err(e) => Response::new_err(
-						req.id,
-						lsp_server::ErrorCode::InvalidParams as i32,
-						e.to_string(),
-					),
-				};
-				self.respond(response);
+				self.answer(req, |s, p: ExecuteCommandParams| s.command(&p))
 			}
 			method => {
 				let message = format!("unhandled request: {method}");
@@ -428,49 +359,53 @@ impl Server {
 			"textDocument/didOpen" => {
 				if let Ok(p) = serde_json::from_value::<DidOpenTextDocumentParams>(note.params) {
 					let uri = p.text_document.uri.as_str().to_string();
-					let name = crate::lsp::state::file_name(&p.text_document.uri);
-					self.docs.open(
-						uri.clone(),
-						name,
+					let doc = Document::new(
+						p.text_document.uri,
 						p.text_document.version,
 						p.text_document.text,
+						&self.encoding,
 					);
+					self.docs.insert(uri.clone(), doc);
 					self.mark_dirty(uri);
 				}
 			}
 			"textDocument/didChange" => {
-				if let Ok(p) = serde_json::from_value::<DidChangeTextDocumentParams>(note.params) {
+				if let Ok(p) = serde_json::from_value::<DidChangeTextDocumentParams>(note.params)
+					&& let Some(change) = p.content_changes.into_iter().next_back()
+				{
 					let uri = p.text_document.uri.as_str().to_string();
-					if let Some(change) = p.content_changes.into_iter().next_back() {
-						self.runner.cancel(&uri);
-						self.runner.forget(&uri);
-						self.docs.change(&uri, p.text_document.version, change.text);
-						if self.settings.validate_on_type {
-							self.mark_dirty(uri);
-						}
+					self.runner.discard(&uri);
+					if let Some(doc) = self.docs.get_mut(&uri) {
+						*doc = Document::new(
+							p.text_document.uri,
+							p.text_document.version,
+							change.text,
+							&self.encoding,
+						);
+					}
+					if self.settings.validate_on_type {
+						self.mark_dirty(uri);
 					}
 				}
 			}
 			"textDocument/didSave" => {
 				if let Ok(p) = serde_json::from_value::<DidSaveTextDocumentParams>(note.params) {
 					let uri = p.text_document.uri.as_str().to_string();
-					if !self.settings.validate_on_type && self.docs.get(&uri).is_some() {
+					if !self.settings.validate_on_type && self.docs.contains_key(&uri) {
 						self.mark_dirty(uri);
 					}
 				}
 			}
 			"textDocument/didClose" => {
 				if let Ok(p) = serde_json::from_value::<DidCloseTextDocumentParams>(note.params) {
-					let parsed = p.text_document.uri;
-					let uri = parsed.as_str();
-					self.runner.cancel(uri);
-					self.runner.forget(uri);
-					self.dirty.remove(uri);
-					self.docs.close(uri);
+					let uri = p.text_document.uri;
+					self.runner.discard(uri.as_str());
+					self.dirty.remove(uri.as_str());
+					self.docs.remove(uri.as_str());
 					self.notify(
 						"textDocument/publishDiagnostics",
 						lsp_types::PublishDiagnosticsParams {
-							uri: parsed,
+							uri,
 							diagnostics: Vec::new(),
 							version: None,
 						},
@@ -494,8 +429,8 @@ impl Server {
 		}
 		let previous = std::mem::replace(&mut self.settings, next);
 		if previous.passing != next.passing {
-			// Republish, so the verdicts that hold appear or disappear.
-			for uri in self.docs.uris() {
+			let open: Vec<String> = self.docs.keys().cloned().collect();
+			for uri in open {
 				self.mark_dirty(uri);
 			}
 		}
@@ -509,9 +444,6 @@ impl Server {
 
 	fn on_tick(&mut self) {
 		self.dirty_since = None;
-		if self.dirty.is_empty() {
-			return;
-		}
 		for uri in std::mem::take(&mut self.dirty) {
 			self.publish(&uri);
 		}
@@ -521,13 +453,7 @@ impl Server {
 		let Some(doc) = self.docs.get(uri) else {
 			return;
 		};
-		let Ok(parsed) = <lsp_types::Uri as std::str::FromStr>::from_str(uri) else {
-			return;
-		};
-		let mut diagnostics = crate::lsp::diagnostics::for_document(doc, &parsed);
-		// A publish replaces everything the client shows for the document, so
-		// the verdicts of an analysis of this same text ride along; otherwise
-		// the debounce tick would wipe them.
+		let mut diagnostics = crate::lsp::diagnostics::for_document(doc);
 		if let Some(verdicts) = self.runner.verdicts(uri, doc.version) {
 			diagnostics.extend(crate::lsp::diagnostics::shown(
 				&verdicts,
@@ -537,7 +463,7 @@ impl Server {
 		self.notify(
 			"textDocument/publishDiagnostics",
 			lsp_types::PublishDiagnosticsParams {
-				uri: parsed,
+				uri: doc.uri.clone(),
 				diagnostics,
 				version: Some(doc.version),
 			},
@@ -560,80 +486,19 @@ impl Server {
 		self.respond(response);
 	}
 
-	fn with_doc<R>(
-		&self,
-		uri: &str,
-		f: impl FnOnce(&crate::lsp::state::Document) -> R,
-	) -> Option<R> {
-		self.docs.get(uri).map(f)
-	}
-
-	fn code_lenses(&self, uri: &str) -> Vec<lsp_types::CodeLens> {
-		if !self.settings.code_lens {
-			return Vec::new();
-		}
-		let Some(doc) = self.docs.get(uri) else {
-			return Vec::new();
-		};
-		let Ok(model) = &doc.model else {
-			return Vec::new();
-		};
-		let Some(first) = model.queries.first() else {
-			return Vec::new();
-		};
-		vec![lsp_types::CodeLens {
-			range: doc
-				.line
-				.range(crate::types::Span::new(first.span.start, first.span.start)),
-			command: Some(lsp_types::Command {
-				title: "Run attacker analysis".to_string(),
-				command: "verifpal.analyze".to_string(),
-				arguments: Some(vec![serde_json::json!({"uri": uri})]),
-			}),
-			data: None,
-		}]
-	}
-
-	fn code_actions(&self, params: &CodeActionParams) -> Vec<lsp_types::CodeActionOrCommand> {
-		let uri = params.text_document.uri.as_str();
-		let Some(doc) = self.docs.get(uri) else {
-			return Vec::new();
-		};
-		let wanted = params.context.only.as_ref().is_none_or(|only| {
-			only.iter().any(|kind| {
-				kind.as_str().is_empty()
-					|| lsp_types::CodeActionKind::QUICKFIX
-						.as_str()
-						.starts_with(kind.as_str())
-			})
-		});
-		let needs_queries = params
-			.context
-			.diagnostics
-			.iter()
-			.any(|d| d.message.contains("no `queries` block"));
-		if !wanted || !needs_queries {
-			return Vec::new();
-		}
-		let end = doc.line.end();
-		let edit = TextEdit {
-			range: lsp_types::Range::new(end, end),
-			new_text: "\nqueries[\n\t\n]\n".to_string(),
-		};
-		vec![lsp_types::CodeActionOrCommand::CodeAction(
-			lsp_types::CodeAction {
-				title: "Add a queries block".to_string(),
-				kind: Some(lsp_types::CodeActionKind::QUICKFIX),
-				edit: Some(lsp_types::WorkspaceEdit {
-					changes: Some(std::collections::HashMap::from([(
-						params.text_document.uri.clone(),
-						vec![edit],
-					)])),
-					..Default::default()
-				}),
-				..Default::default()
-			},
-		)]
+	fn on_document<P, R>(&mut self, req: Request, f: impl FnOnce(&Server, &Document, P) -> R)
+	where
+		P: serde::de::DeserializeOwned,
+		R: serde::Serialize + Default,
+	{
+		let uri = req.params["textDocument"]["uri"]
+			.as_str()
+			.unwrap_or_default()
+			.to_string();
+		self.answer(req, |s, p| match s.docs.get(&uri) {
+			Some(doc) => f(s, doc, p),
+			None => R::default(),
+		})
 	}
 
 	fn command(&mut self, params: &ExecuteCommandParams) -> serde_json::Value {
@@ -650,7 +515,7 @@ impl Server {
 				Err(_) => serde_json::json!(proto::Cancelled { cancelled: false }),
 			},
 			"verifpal.diagram" => match serde_json::from_value::<proto::UriArg>(first) {
-				Ok(args) => self.diagram(&args.uri),
+				Ok(args) => serde_json::json!(self.docs.get(&args.uri).and_then(diagram)),
 				Err(_) => serde_json::Value::Null,
 			},
 			_ => serde_json::Value::Null,
@@ -670,19 +535,15 @@ impl Server {
 					.clamp(1.0, f64::from(crate::sessions::MAX_SESSIONS)) as u8
 			});
 		let job = crate::lsp::analysis::Job {
-			uri: args.uri.clone(),
-			name: doc.name.clone(),
-			text: doc.text.clone(),
+			uri: doc.uri.clone(),
 			version: doc.version,
+			line: doc.line.clone(),
 			sessions,
 			token: token.clone(),
-			encoding: self.encoding.clone(),
 			progress: self.progress_supported,
 			passing: self.settings.passing,
 		};
 		if self.progress_supported {
-			// The client discards `$/progress` for a token it was not asked to
-			// create, so the request goes out before the worker can report.
 			self.request(
 				"window/workDoneProgress/create",
 				serde_json::json!({"token": token}),
@@ -694,44 +555,6 @@ impl Server {
 			token,
 			reason: None,
 		})
-	}
-
-	fn diagram(&self, uri: &str) -> serde_json::Value {
-		let Some(doc) = self.docs.get(uri) else {
-			return serde_json::Value::Null;
-		};
-		let Ok(model) = &doc.model else {
-			return serde_json::Value::Null;
-		};
-		let Ok(readable) = crate::pretty::pretty_diagram(model) else {
-			return serde_json::Value::Null;
-		};
-		let Ok(mermaid) = crate::pretty::mermaid_of(model) else {
-			return serde_json::Value::Null;
-		};
-		serde_json::json!(proto::DiagramResult { mermaid, readable })
-	}
-
-	fn format(&self, uri: &str) -> Vec<TextEdit> {
-		let Some(doc) = self.docs.get(uri) else {
-			return Vec::new();
-		};
-		let Ok(model) = &doc.model else {
-			return Vec::new();
-		};
-		let mut text = crate::pretty::pretty_model(model).replace("\r\n", "\n");
-		if doc.text.contains("\r\n") {
-			// Keep the document's line endings, or a formatted CRLF file would
-			// be rewritten whole on every save.
-			text = text.replace('\n', "\r\n");
-		}
-		if text == doc.text {
-			return Vec::new();
-		}
-		vec![TextEdit {
-			range: lsp_types::Range::new(lsp_types::Position::new(0, 0), doc.line.end()),
-			new_text: text,
-		}]
 	}
 
 	fn respond(&self, response: Response) {
@@ -748,11 +571,89 @@ impl Server {
 	}
 
 	fn notify(&self, method: &str, params: impl serde::Serialize) {
-		let _ = self.sender.send(Message::Notification(Notification::new(
-			method.to_string(),
-			params,
-		)));
+		proto::notify(&self.sender, method, params);
 	}
+}
+
+fn format(doc: &Document) -> Vec<TextEdit> {
+	let Some(model) = &doc.model else {
+		return Vec::new();
+	};
+	let mut text = crate::pretty::pretty_model(model).replace("\r\n", "\n");
+	if doc.text().contains("\r\n") {
+		text = text.replace('\n', "\r\n");
+	}
+	if text == doc.text() {
+		return Vec::new();
+	}
+	vec![TextEdit {
+		range: lsp_types::Range::new(lsp_types::Position::new(0, 0), doc.line.end()),
+		new_text: text,
+	}]
+}
+
+fn workspace_edit(doc: &Document, edits: Vec<TextEdit>) -> lsp_types::WorkspaceEdit {
+	lsp_types::WorkspaceEdit {
+		changes: Some(HashMap::from([(doc.uri.clone(), edits)])),
+		..Default::default()
+	}
+}
+
+fn code_lenses(doc: &Document) -> Vec<lsp_types::CodeLens> {
+	let Some(first) = doc.model.as_ref().and_then(|m| m.queries.first()) else {
+		return Vec::new();
+	};
+	vec![lsp_types::CodeLens {
+		range: doc
+			.line
+			.range(crate::types::Span::new(first.span.start, first.span.start)),
+		command: Some(lsp_types::Command {
+			title: "Run attacker analysis".to_string(),
+			command: "verifpal.analyze".to_string(),
+			arguments: Some(vec![serde_json::json!({"uri": doc.uri.as_str()})]),
+		}),
+		data: None,
+	}]
+}
+
+fn code_actions(doc: &Document, params: &CodeActionParams) -> Vec<lsp_types::CodeActionOrCommand> {
+	let wanted = params.context.only.as_ref().is_none_or(|only| {
+		only.iter().any(|kind| {
+			kind.as_str().is_empty()
+				|| lsp_types::CodeActionKind::QUICKFIX
+					.as_str()
+					.starts_with(kind.as_str())
+		})
+	});
+	let needs_queries = params
+		.context
+		.diagnostics
+		.iter()
+		.any(|d| d.message.contains("no `queries` block"));
+	if !wanted || !needs_queries {
+		return Vec::new();
+	}
+	let end = doc.line.end();
+	let edit = TextEdit {
+		range: lsp_types::Range::new(end, end),
+		new_text: "\nqueries[\n\t\n]\n".to_string(),
+	};
+	vec![lsp_types::CodeActionOrCommand::CodeAction(
+		lsp_types::CodeAction {
+			title: "Add a queries block".to_string(),
+			kind: Some(lsp_types::CodeActionKind::QUICKFIX),
+			edit: Some(workspace_edit(doc, vec![edit])),
+			..Default::default()
+		},
+	)]
+}
+
+fn diagram(doc: &Document) -> Option<proto::DiagramResult> {
+	let model = doc.model.as_ref()?;
+	Some(proto::DiagramResult {
+		mermaid: crate::pretty::mermaid_of(model),
+		readable: crate::pretty::pretty_diagram(model),
+	})
 }
 
 fn declined(reason: String) -> serde_json::Value {
@@ -768,7 +669,7 @@ mod tests {
 	use super::*;
 	use lsp_types::{ClientCapabilities, GeneralClientCapabilities};
 
-	pub(crate) fn start(
+	fn start(
 		client_caps: ClientCapabilities,
 	) -> (Connection, std::thread::JoinHandle<()>, serde_json::Value) {
 		let (server, client) = Connection::memory();
@@ -801,7 +702,7 @@ mod tests {
 		(client, handle, result)
 	}
 
-	pub(crate) fn stop(client: Connection, handle: std::thread::JoinHandle<()>) {
+	fn stop(client: Connection, handle: std::thread::JoinHandle<()>) {
 		client
 			.sender
 			.send(Message::Request(Request::new(
@@ -821,7 +722,7 @@ mod tests {
 		handle.join().expect("the server exits cleanly");
 	}
 
-	pub(crate) fn open(client: &Connection, uri: &str, text: &str) {
+	fn open(client: &Connection, uri: &str, text: &str) {
 		client
 			.sender
 			.send(Message::Notification(Notification::new(
@@ -838,7 +739,7 @@ mod tests {
 			.expect("sends didOpen");
 	}
 
-	pub(crate) fn await_notification(client: &Connection, method: &str) -> serde_json::Value {
+	fn await_notification(client: &Connection, method: &str) -> serde_json::Value {
 		loop {
 			match client
 				.receiver
@@ -851,7 +752,7 @@ mod tests {
 		}
 	}
 
-	pub(crate) fn request(
+	fn request(
 		client: &Connection,
 		id: i32,
 		method: &str,
@@ -931,13 +832,13 @@ mod tests {
 				}
 			}),
 		));
-		assert!(server.docs.get("file:///closed.vp").is_some());
+		assert!(server.docs.contains_key("file:///closed.vp"));
 		assert!(server.dirty.contains("file:///closed.vp"));
 		server.on_notification(Notification::new(
 			"textDocument/didClose".to_string(),
 			serde_json::json!({"textDocument": {"uri": "file:///closed.vp"}}),
 		));
-		assert!(server.docs.get("file:///closed.vp").is_none());
+		assert!(!server.docs.contains_key("file:///closed.vp"));
 		assert!(!server.dirty.contains("file:///closed.vp"));
 		let Message::Notification(cleared) = receiver.recv().expect("diagnostics are cleared")
 		else {
@@ -1141,8 +1042,6 @@ mod tests {
 		assert_eq!(accepted["accepted"], true, "{accepted}");
 		let report = await_report_here(&receiver);
 		assert_eq!(report["token"], accepted["token"], "{report}");
-		// The debounce tick fires for the same version afterwards; the publish
-		// it sends replaces the client's list, so the verdict must be in it.
 		server.on_tick();
 		let Message::Notification(published) = receiver.recv().expect("the tick publishes") else {
 			panic!("expected a notification");
@@ -1186,7 +1085,7 @@ mod tests {
 		server.inlay_refresh = true;
 		server.code_lens_refresh = true;
 		open_here(&mut server, "file:///cfg.vp", VALID);
-		assert_eq!(server.code_lenses("file:///cfg.vp").len(), 1);
+		assert_eq!(code_lenses(&server.docs["file:///cfg.vp"]).len(), 1);
 		server.on_notification(Notification::new(
 			"workspace/didChangeConfiguration".to_string(),
 			serde_json::json!({"settings": {"verifpal": {
@@ -1205,7 +1104,11 @@ mod tests {
 				code_lens: false,
 			}
 		);
-		assert!(server.code_lenses("file:///cfg.vp").is_empty());
+		server.on_request(Request::new(
+			RequestId::from(8),
+			"textDocument/codeLens".to_string(),
+			serde_json::json!({"textDocument": {"uri": "file:///cfg.vp"}}),
+		));
 		server.on_request(Request::new(
 			RequestId::from(7),
 			"textDocument/inlayHint".to_string(),
@@ -1216,16 +1119,21 @@ mod tests {
 		));
 		let mut refreshes = Vec::new();
 		let mut hints = None;
+		let mut lenses = None;
 		for message in receiver.try_iter() {
 			match message {
 				Message::Request(r) => refreshes.push(r.method),
 				Message::Response(r) if r.id == RequestId::from(7) => {
 					hints = r.response_result.ok();
 				}
+				Message::Response(r) if r.id == RequestId::from(8) => {
+					lenses = r.response_result.ok();
+				}
 				_ => {}
 			}
 		}
 		assert_eq!(hints, Some(serde_json::json!([])));
+		assert_eq!(lenses, Some(serde_json::json!([])));
 		assert!(
 			refreshes.contains(&"workspace/inlayHint/refresh".to_string()),
 			"{refreshes:?}"
@@ -1234,7 +1142,6 @@ mod tests {
 			refreshes.contains(&"workspace/codeLens/refresh".to_string()),
 			"{refreshes:?}"
 		);
-		// A notification that says nothing about a setting leaves it alone.
 		server.on_notification(Notification::new(
 			"workspace/didChangeConfiguration".to_string(),
 			serde_json::json!({"settings": {"verifpal": {"codeLens": true}}}),
@@ -1322,9 +1229,9 @@ mod tests {
 		let model = crate::parser::parse_string("crlf.vp", VALID).expect("parses");
 		let canonical = crate::pretty::pretty_model(&model).replace('\n', "\r\n");
 		open_here(&mut server, "file:///crlf.vp", &canonical);
-		assert!(server.format("file:///crlf.vp").is_empty());
+		assert!(format(&server.docs["file:///crlf.vp"]).is_empty());
 		open_here(&mut server, "file:///ugly.vp", &VALID.replace('\n', "\r\n"));
-		let edits = server.format("file:///ugly.vp");
+		let edits = format(&server.docs["file:///ugly.vp"]);
 		assert_eq!(edits.len(), 1);
 		assert!(edits[0].new_text.contains("\r\n"));
 		assert!(!edits[0].new_text.contains("\r\r"));
@@ -1358,7 +1265,6 @@ mod tests {
 			{
 				Message::Request(r) => {
 					order.push(r.method.clone());
-					// Answer as a client would, so nothing waits on us.
 					client
 						.sender
 						.send(Message::Response(Response::new_ok(

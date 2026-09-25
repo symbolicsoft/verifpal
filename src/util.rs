@@ -1,16 +1,13 @@
 /* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
  * SPDX-License-Identifier: GPL-3.0-only */
 
-pub(crate) fn append_unique<T: PartialEq>(vec: &mut Vec<T>, value: T) -> bool {
+pub(crate) fn append_unique<T: PartialEq>(vec: &mut Vec<T>, value: T) {
 	if !vec.contains(&value) {
 		vec.push(value);
-		true
-	} else {
-		false
 	}
 }
 
-pub(crate) fn edit_distance(left: &str, right: &str) -> usize {
+fn edit_distance(left: &str, right: &str) -> usize {
 	let left: Vec<char> = left.chars().collect();
 	let right: Vec<char> = right.chars().collect();
 	if left.is_empty() {
@@ -76,6 +73,14 @@ pub(crate) fn is_anonymous_name(name: &str) -> bool {
 	copy_base_name(name).starts_with(ANONYMOUS_PREFIX)
 }
 
+pub(crate) fn and_list(items: &[&str]) -> String {
+	match items {
+		[] => String::new(),
+		[only] => only.to_string(),
+		[init @ .., last] => format!("{} and {last}", init.join(", ")),
+	}
+}
+
 pub(crate) fn quoted_list(items: &[String]) -> String {
 	items
 		.iter()
@@ -85,7 +90,7 @@ pub(crate) fn quoted_list(items: &[String]) -> String {
 }
 
 #[cfg(feature = "cli")]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
 pub enum ColorChoice {
 	Auto,
 	Always,
@@ -181,8 +186,8 @@ mod tests {
 	#[test]
 	fn append_unique_keeps_the_first_of_each() {
 		let mut v = vec![1, 2];
-		assert!(append_unique(&mut v, 3));
-		assert!(!append_unique(&mut v, 2));
+		append_unique(&mut v, 3);
+		append_unique(&mut v, 2);
 		assert_eq!(v, vec![1, 2, 3]);
 	}
 

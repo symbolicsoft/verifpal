@@ -1,6 +1,8 @@
 /* SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
  * SPDX-License-Identifier: GPL-3.0-only */
 
+use lsp_server::{Message, Notification};
+use lsp_types::Uri;
 use serde::{Deserialize, Serialize};
 
 use crate::report::Analysis;
@@ -9,7 +11,6 @@ use crate::report::Analysis;
 #[serde(rename_all = "camelCase")]
 pub(crate) struct AnalyzeArgs {
 	pub uri: String,
-	#[serde(default)]
 	pub sessions: Option<f64>,
 }
 
@@ -43,7 +44,7 @@ pub(crate) struct DiagramResult {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct AnalysisReport {
-	pub uri: String,
+	pub uri: Uri,
 	pub version: i32,
 	pub token: String,
 	pub ok: bool,
@@ -52,4 +53,15 @@ pub(crate) struct AnalysisReport {
 	pub error: Option<String>,
 	#[serde(flatten, skip_serializing_if = "Option::is_none")]
 	pub analysis: Option<Analysis>,
+}
+
+pub(crate) fn notify(
+	sender: &crossbeam_channel::Sender<Message>,
+	method: &str,
+	params: impl Serialize,
+) {
+	let _ = sender.send(Message::Notification(Notification::new(
+		method.to_string(),
+		params,
+	)));
 }

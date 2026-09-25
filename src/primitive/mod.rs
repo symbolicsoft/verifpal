@@ -163,8 +163,7 @@ pub(crate) struct PrimitiveSpec {
 	pub key_derivation: bool,
 	pub distinct_per_assignment: bool,
 	pub identifying_positions: Vec<usize>,
-	pub weak_reveals: Vec<usize>,
-	pub weak_reveals_output: Option<usize>,
+	pub weak_reveals: Vec<Reveal>,
 	pub forgeable_secret: Option<usize>,
 	pub malleable_vary: Vec<usize>,
 	pub reuse: Option<ReuseRule>,
@@ -194,6 +193,14 @@ static PRIM_SPECS: LazyLock<[Option<PrimitiveSpec>; 256]> = LazyLock::new(|| {
 	table
 });
 
+fn core_spec(id: PrimitiveId) -> Option<&'static PrimitiveCoreSpec> {
+	CORE_SPECS[id as usize].as_ref()
+}
+
+fn prim_spec(id: PrimitiveId) -> Option<&'static PrimitiveSpec> {
+	PRIM_SPECS[id as usize].as_ref()
+}
+
 fn core_specs() -> impl Iterator<Item = &'static PrimitiveCoreSpec> {
 	CORE_SPECS.iter().flatten()
 }
@@ -207,7 +214,6 @@ pub(crate) trait PrimitiveDefinition {
 	fn arity(&self) -> &[i32];
 	fn output(&self) -> &[i32];
 	fn definition_check(&self) -> bool;
-	fn has_rewrite_rule(&self) -> bool;
 	fn arg_names(&self) -> &[&'static str];
 	fn has_single_output(&self) -> bool {
 		self.output().len() == 1 && self.output()[0] == 1
@@ -227,9 +233,6 @@ impl PrimitiveDefinition for PrimitiveCoreSpec {
 	fn definition_check(&self) -> bool {
 		self.definition_check
 	}
-	fn has_rewrite_rule(&self) -> bool {
-		self.core_rule.is_some()
-	}
 	fn arg_names(&self) -> &[&'static str] {
 		&self.arg_names
 	}
@@ -248,54 +251,45 @@ impl PrimitiveDefinition for PrimitiveSpec {
 	fn definition_check(&self) -> bool {
 		self.definition_check
 	}
-	fn has_rewrite_rule(&self) -> bool {
-		self.rewrite.is_some()
-	}
 	fn arg_names(&self) -> &[&'static str] {
 		&self.arg_names
 	}
 }
 
 pub(crate) fn primitive_def(id: PrimitiveId) -> VResult<&'static dyn PrimitiveDefinition> {
-	if primitive_is_core(id) {
-		Ok(primitive_core_get(id)? as &dyn PrimitiveDefinition)
-	} else {
-		Ok(primitive_get(id)? as &dyn PrimitiveDefinition)
+	match core_spec(id) {
+		Some(core) => Ok(core),
+		None => Ok(primitive_get(id)?),
 	}
 }
 
 pub(crate) fn primitive_is_core(id: PrimitiveId) -> bool {
-	CORE_SPECS[id as usize].is_some()
+	core_spec(id).is_some()
 }
 
 pub(crate) fn primitive_core_get(id: PrimitiveId) -> VResult<&'static PrimitiveCoreSpec> {
-	CORE_SPECS[id as usize]
-		.as_ref()
-		.ok_or_else(|| VerifpalError::internal("unknown primitive".into()))
+	core_spec(id).ok_or_else(|| VerifpalError::internal("unknown primitive".into()))
 }
 
 pub(crate) fn primitive_get(id: PrimitiveId) -> VResult<&'static PrimitiveSpec> {
-	PRIM_SPECS[id as usize]
-		.as_ref()
-		.ok_or_else(|| VerifpalError::internal("unknown primitive".into()))
+	prim_spec(id).ok_or_else(|| VerifpalError::internal("unknown primitive".into()))
 }
 
-pub(crate) fn primitive_check_undoing(id: PrimitiveId) -> Option<&'static PrimitiveSpec> {
-	prim_specs()
-		.filter(|s| s.definition_check && s.rewrite.as_ref().is_some_and(|r| r.id == id))
-		.min_by_key(|s| s.id)
+pub(crate) fn primitive_check_undoing(
+	id: PrimitiveId,
+) -> Option<(&'static PrimitiveSpec, &'static RewriteRule)> {
+	primitives_rewriting(id)
+		.filter(|(spec, _)| spec.definition_check)
+		.min_by_key(|(spec, _)| spec.id)
 }
 
 pub(crate) fn primitives_rewriting(
 	id: PrimitiveId,
-) -> impl Iterator<Item = &'static PrimitiveSpec> {
-	prim_specs().filter(move |s| s.rewrite.as_ref().is_some_and(|r| r.id == id))
-}
-
-pub(crate) fn primitive_has_rewrite_rule(id: PrimitiveId) -> bool {
-	primitive_def(id)
-		.map(|d| d.has_rewrite_rule())
-		.unwrap_or(false)
+) -> impl Iterator<Item = (&'static PrimitiveSpec, &'static RewriteRule)> {
+	prim_specs().filter_map(move |spec| {
+		let rule = spec.rewrite.as_ref().filter(|rule| rule.id == id)?;
+		Some((spec, rule))
+	})
 }
 
 pub(crate) fn primitive_name(id: PrimitiveId) -> &'static str {
@@ -362,12 +356,8 @@ pub(crate) fn primitive_get_enum(name: &str) -> VResult<PrimitiveId> {
 		.ok_or_else(|| VerifpalError::internal("unknown primitive".into()))
 }
 
-pub(crate) fn primitive_get_arity(p: &Primitive) -> VResult<&'static [i32]> {
-	Ok(primitive_def(p.id)?.arity())
-}
-
 pub(crate) fn commutativity_rule(id: PrimitiveId) -> Option<&'static CommutativityRule> {
-	PRIM_SPECS[id as usize].as_ref()?.commutativity.as_ref()
+	prim_spec(id)?.commutativity.as_ref()
 }
 
 pub(crate) fn commutativity_parts_ref(p: &Primitive) -> Option<(&Value, &Value)> {
@@ -393,11 +383,11 @@ pub(crate) fn commutativity_swap(p: &Primitive) -> Option<Primitive> {
 	Some(p.with_arguments(arguments))
 }
 
-static KEY_DERIVATION: std::sync::LazyLock<Option<PrimitiveId>> =
-	std::sync::LazyLock::new(|| prim_specs().find(|s| s.key_derivation).map(|s| s.id));
+static KEY_DERIVATION: LazyLock<Option<PrimitiveId>> =
+	LazyLock::new(|| prim_specs().find(|s| s.key_derivation).map(|s| s.id));
 
 pub(crate) fn secret_positions(id: PrimitiveId) -> Vec<usize> {
-	let Ok(spec) = primitive_get(id) else {
+	let Some(spec) = prim_spec(id) else {
 		return Vec::new();
 	};
 	let mut out: Vec<usize> = Vec::new();
@@ -424,20 +414,26 @@ pub(crate) fn attacker_public_key() -> Value {
 	key_derivation_of(crate::value::value_nil()).unwrap_or_else(crate::value::value_nil)
 }
 
+pub(crate) fn key_derivation_inner(v: &Value) -> Option<&Value> {
+	match v {
+		Value::Primitive(p) if primitive_is_key_derivation(p.id) && p.arguments.len() == 1 => {
+			p.arguments.first()
+		}
+		_ => None,
+	}
+}
+
 pub(crate) fn value_is_key_derivation(v: &Value) -> bool {
 	matches!(v, Value::Primitive(p) if primitive_is_key_derivation(p.id))
 }
 
 pub(crate) fn normalise_arguments(id: PrimitiveId, mut arguments: Vec<Value>) -> Vec<Value> {
 	for restriction in argument_restrictions(id) {
-		while let Some(Value::Primitive(inner)) = arguments.get(restriction.position) {
-			if !restriction.banned.contains(&inner.id)
-				|| !primitive_is_key_derivation(inner.id)
-				|| inner.arguments.len() != 1
-			{
-				break;
-			}
-			let unwrapped = inner.arguments[0].clone();
+		while let Some(argument @ Value::Primitive(inner)) = arguments.get(restriction.position)
+			&& restriction.banned.contains(&inner.id)
+			&& let Some(unwrapped) = key_derivation_inner(argument)
+		{
+			let unwrapped = unwrapped.clone();
 			arguments[restriction.position] = unwrapped;
 		}
 	}
@@ -461,25 +457,19 @@ pub(crate) fn admissible(v: &Value) -> bool {
 }
 
 pub(crate) fn argument_restrictions(id: PrimitiveId) -> &'static [ArgumentRestriction] {
-	primitive_get(id)
-		.map(|s| s.argument_restrictions.as_slice())
-		.unwrap_or(&[])
+	prim_spec(id).map_or(&[], |s| s.argument_restrictions.as_slice())
 }
 
 pub(crate) fn primitive_is_key_derivation(id: PrimitiveId) -> bool {
-	PRIM_SPECS[id as usize]
-		.as_ref()
-		.is_some_and(|s| s.key_derivation)
+	prim_spec(id).is_some_and(|s| s.key_derivation)
 }
 
 pub(crate) fn primitive_core_reveals_args(id: PrimitiveId) -> bool {
-	CORE_SPECS[id as usize]
-		.as_ref()
-		.is_some_and(|s| s.reveals_args)
+	core_spec(id).is_some_and(|s| s.reveals_args)
 }
 
 pub(crate) fn primitive_projects(id: PrimitiveId) -> Option<PrimitiveId> {
-	CORE_SPECS[id as usize].as_ref()?.projection_of
+	core_spec(id)?.projection_of
 }
 
 pub(crate) fn primitive_is_projection(id: PrimitiveId) -> bool {
@@ -487,17 +477,13 @@ pub(crate) fn primitive_is_projection(id: PrimitiveId) -> bool {
 }
 
 pub(crate) fn primitive_is_equality(id: PrimitiveId) -> bool {
-	CORE_SPECS[id as usize].as_ref().is_some_and(|s| s.equality)
+	core_spec(id).is_some_and(|s| s.equality)
 }
 
 pub(crate) fn primitive_unwraps(id: PrimitiveId) -> Option<usize> {
-	match CORE_SPECS[id as usize].as_ref() {
+	match core_spec(id) {
 		Some(core) => core.unwraps,
-		None => PRIM_SPECS[id as usize]
-			.as_ref()?
-			.rewrite
-			.as_ref()
-			.map(|rule| rule.from),
+		None => rewrite_rule(id).map(|rule| rule.from),
 	}
 }
 
@@ -506,9 +492,7 @@ pub(crate) fn filler_primitive() -> Option<PrimitiveId> {
 }
 
 pub(crate) fn combine_rules(id: PrimitiveId) -> &'static [CombineRule] {
-	primitive_get(id)
-		.map(|s| s.combine.as_slice())
-		.unwrap_or(&[])
+	prim_spec(id).map_or(&[], |s| s.combine.as_slice())
 }
 
 pub(crate) fn combines_into(
@@ -523,7 +507,7 @@ pub(crate) fn combines_into(
 }
 
 pub(crate) fn primitive_threshold(id: PrimitiveId) -> Option<ThresholdSpec> {
-	primitive_get(id).ok().and_then(|s| s.threshold)
+	prim_spec(id)?.threshold
 }
 
 pub(crate) fn primitives_with_threshold() -> Vec<&'static str> {
@@ -541,14 +525,22 @@ pub(crate) fn primitive_renamed(name: &str) -> Option<&'static str> {
 }
 
 pub(crate) fn reuse_rule(id: PrimitiveId) -> Option<&'static ReuseRule> {
-	PRIM_SPECS[id as usize].as_ref()?.reuse.as_ref()
+	prim_spec(id)?.reuse.as_ref()
+}
+
+pub(crate) fn rewrite_rule(id: PrimitiveId) -> Option<&'static RewriteRule> {
+	prim_spec(id)?.rewrite.as_ref()
+}
+
+pub(crate) fn recompose_rule(id: PrimitiveId) -> Option<&'static RecomposeRule> {
+	prim_spec(id)?.recompose.as_ref()
 }
 
 pub(crate) fn reuse_fixed_names(v: &Value) -> String {
 	let Value::Primitive(p) = v else {
 		return String::new();
 	};
-	let (Some(rule), Ok(spec)) = (reuse_rule(p.id), primitive_get(p.id)) else {
+	let (Some(rule), Some(spec)) = (reuse_rule(p.id), prim_spec(p.id)) else {
 		return String::new();
 	};
 	let names: Vec<&str> = rule
@@ -556,15 +548,11 @@ pub(crate) fn reuse_fixed_names(v: &Value) -> String {
 		.iter()
 		.filter_map(|&at| spec.arg_names.get(at).copied())
 		.collect();
-	match names.len() {
-		0 => String::new(),
-		1 => names[0].to_string(),
-		n => format!("{} and {}", names[..n - 1].join(", "), names[n - 1]),
-	}
+	crate::util::and_list(&names)
 }
 
 pub(crate) fn primitive_arity_help(id: PrimitiveId, given: i32) -> Option<&'static str> {
-	let (arity, help) = PRIM_SPECS[id as usize].as_ref()?.arity_help?;
+	let (arity, help) = prim_spec(id)?.arity_help?;
 	(arity == given).then_some(help)
 }
 
@@ -584,11 +572,7 @@ pub(crate) fn primitives_supporting(
 }
 
 pub(crate) fn primitive_extract_check_key(prim: &Primitive) -> Option<Value> {
-	if primitive_is_core(prim.id) {
-		return None;
-	}
-	let spec = primitive_get(prim.id).ok()?;
-	match spec.check_key {
+	match prim_spec(prim.id)?.check_key {
 		Some(CheckKeyKind::Direct(i)) => Some(prim.arguments[i].clone()),
 		Some(CheckKeyKind::Derived { arg, constructor }) => match &prim.arguments[arg] {
 			Value::Primitive(p) if p.id == constructor && p.arguments.len() == 1 => {
@@ -678,7 +662,6 @@ mod tests {
 		let def = primitive_def(PRIM_ASSERT).unwrap();
 		assert_eq!(def.name(), "ASSERT");
 		assert!(def.definition_check());
-		assert!(def.has_rewrite_rule());
 	}
 
 	#[test]
@@ -686,7 +669,6 @@ mod tests {
 		let def = primitive_def(PRIM_AEAD_ENC).unwrap();
 		assert_eq!(def.name(), "AEAD_ENC");
 		assert!(!def.definition_check());
-		assert!(!def.has_rewrite_rule());
 	}
 
 	#[test]
@@ -804,6 +786,25 @@ mod tests {
 			assert!(
 				spec.check_key.is_none() || spec.definition_check,
 				"{} declares a checking key but cannot take `?`",
+				spec.name
+			);
+		}
+	}
+
+	#[test]
+	fn a_checkable_primitive_fails_only_through_its_declared_rule() {
+		for spec in prim_specs().filter(|spec| spec.definition_check) {
+			assert!(
+				spec.rewrite.is_some(),
+				"{} can take `?` but declares no rewrite rule; the judge reads a failed check \
+				 as the run halting at that slot, which only a rule can cause",
+				spec.name
+			);
+		}
+		for spec in core_specs().filter(|spec| spec.definition_check) {
+			assert!(
+				spec.core_rule.is_some(),
+				"{} can take `?` but declares no core rule",
 				spec.name
 			);
 		}
@@ -984,11 +985,11 @@ mod tests {
 				);
 			}
 
-			for &i in &spec.weak_reveals {
-				may("weak_reveals", i);
-			}
-			if let Some(i) = spec.weak_reveals_output {
-				out("weak_reveals_output", i);
+			for reveal in &spec.weak_reveals {
+				match *reveal {
+					Reveal::Argument(i) => may("weak_reveals", i),
+					Reveal::Output(i) => out("weak_reveals_output", i),
+				}
 			}
 			if let Some(i) = spec.forgeable_secret {
 				may("forgeable_secret", i);
@@ -1051,25 +1052,10 @@ mod tests {
 		}
 	}
 
-	#[test]
-	fn primitive_has_rewrite_rule_checks() {
-		assert!(primitive_has_rewrite_rule(PRIM_AEAD_DEC));
-		assert!(primitive_has_rewrite_rule(PRIM_DEC));
-		assert!(primitive_has_rewrite_rule(PRIM_SIGNVERIF));
-		assert!(primitive_has_rewrite_rule(PRIM_PKE_DEC));
-		assert!(primitive_has_rewrite_rule(PRIM_ASSERT));
-		assert!(primitive_has_rewrite_rule(PRIM_SPLIT));
-		assert!(!primitive_has_rewrite_rule(PRIM_HASH));
-		assert!(!primitive_has_rewrite_rule(PRIM_ENC));
-		assert!(!primitive_has_rewrite_rule(PRIM_SIGN));
-		assert!(!primitive_has_rewrite_rule(PRIM_MAC));
-	}
-
 	const TEST_ONLY: &[&str] = &[
 		"metamorphic.rs",
 		"model_tests.rs",
 		"testutil.rs",
-		"tracecheck.rs",
 		"tex/tests.rs",
 	];
 

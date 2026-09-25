@@ -11,6 +11,7 @@ enum Units {
 	Utf16,
 }
 
+#[derive(Clone)]
 pub(crate) struct LineIndex {
 	starts: Vec<usize>,
 	text: String,
@@ -34,6 +35,10 @@ impl LineIndex {
 				Units::Utf16
 			},
 		}
+	}
+
+	pub(crate) fn text(&self) -> &str {
+		&self.text
 	}
 
 	pub(crate) fn position(&self, offset: usize) -> Position {

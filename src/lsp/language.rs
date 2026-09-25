@@ -5,13 +5,14 @@ use lsp_types::{
 	CompletionItem, CompletionItemKind, DocumentHighlight, DocumentHighlightKind, DocumentSymbol,
 	Documentation, FoldingRange, FoldingRangeKind, InlayHint, InlayHintLabel, Location,
 	MarkupContent, MarkupKind, ParameterInformation, ParameterLabel, Position, Range,
-	SignatureHelp, SignatureInformation, SymbolKind, TextEdit, Uri,
+	SignatureHelp, SignatureInformation, SymbolKind, TextEdit,
 };
 
 use crate::lsp::docs;
 use crate::lsp::state::Document;
+use crate::primitive::PrimitiveDefinition;
 use crate::tokens::{Token, TokenKind};
-use crate::types::{Block, Declaration, Span};
+use crate::types::{Block, Declaration, PrimitiveId, Span};
 
 pub(crate) const TOKEN_TYPES: &[&str] = &[
 	"namespace",
@@ -71,9 +72,7 @@ pub(crate) fn semantic_tokens(doc: &Document) -> Vec<u32> {
 		{
 			modifiers |= 1 << 0;
 		}
-		// A semantic token cannot span lines, so a block comment that does is
-		// emitted one line at a time.
-		for (from, to) in line_segments(&doc.text, token.span) {
+		for (from, to) in line_segments(doc.text(), token.span) {
 			let start = doc.line.position(from);
 			let end = doc.line.position(to);
 			if start.line != end.line {
@@ -117,41 +116,62 @@ fn is_nil(text: &str) -> bool {
 	text.eq_ignore_ascii_case("nil")
 }
 
-pub(crate) fn token_at(doc: &Document, position: Position) -> Option<&Token> {
+fn is_word_char(c: char) -> bool {
+	c.is_alphanumeric() || c == '_'
+}
+
+fn leading_word(text: &str) -> &str {
+	&text[..text.len() - text.trim_start_matches(is_word_char).len()]
+}
+
+fn trailing_word(text: &str) -> &str {
+	&text[text.trim_end_matches(is_word_char).len()..]
+}
+
+fn token_at(doc: &Document, position: Position) -> Option<&Token> {
 	doc.tokens.at(doc.line.offset(position))
 }
 
-fn markdown(value: String) -> Documentation {
+fn symbol_at(doc: &Document, position: Position) -> Option<&Token> {
+	token_at(doc, position).filter(|token| {
+		matches!(
+			token.kind,
+			TokenKind::ConstantName | TokenKind::PrincipalName
+		)
+	})
+}
+
+fn text_before(doc: &Document, position: Position) -> &str {
+	let text = doc.text();
+	&text[..doc.line.offset(position).min(text.len())]
+}
+
+fn primitive(name: &str) -> Option<(PrimitiveId, &'static dyn PrimitiveDefinition)> {
+	let id = crate::primitive::primitive_get_enum(&name.to_uppercase()).ok()?;
+	Some((id, crate::primitive::primitive_def(id).ok()?))
+}
+
+fn documentation(value: String) -> Documentation {
 	Documentation::MarkupContent(MarkupContent {
 		kind: MarkupKind::Markdown,
 		value,
 	})
 }
 
+fn counted(counts: &[i32], noun: &str) -> String {
+	match counts {
+		[n] => format!("{n} {noun}{}", crate::util::plural(*n as usize)),
+		_ => format!("{}\u{2013}{} {noun}s", counts[0], counts[counts.len() - 1]),
+	}
+}
+
 fn primitive_facts(name: &str) -> Option<String> {
-	let id = crate::primitive::primitive_get_enum(&name.to_uppercase()).ok()?;
-	let def = crate::primitive::primitive_def(id).ok()?;
-	let arity = def.arity();
-	let output = def.output();
-	let args = if arity.len() == 1 {
-		format!(
-			"{} argument{}",
-			arity[0],
-			if arity[0] == 1 { "" } else { "s" }
-		)
-	} else {
-		format!("{}\u{2013}{} arguments", arity[0], arity[arity.len() - 1])
-	};
-	let outs = if output.len() == 1 {
-		format!(
-			"{} output{}",
-			output[0],
-			if output[0] == 1 { "" } else { "s" }
-		)
-	} else {
-		format!("{}\u{2013}{} outputs", output[0], output[output.len() - 1])
-	};
-	let mut notes = vec![format!("{args}, {outs}")];
+	let (id, def) = primitive(name)?;
+	let mut notes = vec![format!(
+		"{}, {}",
+		counted(def.arity(), "argument"),
+		counted(def.output(), "output")
+	)];
 	if def.definition_check() {
 		notes.push("may be checked with `?`".to_string());
 	}
@@ -168,26 +188,19 @@ fn primitive_facts(name: &str) -> Option<String> {
 
 pub(crate) fn hover(doc: &Document, position: Position) -> Option<lsp_types::Hover> {
 	let token = token_at(doc, position)?;
-	let range = doc.line.range(token.span);
 	let value = match token.kind {
-		TokenKind::ConstantName if is_nil(&token.text) => {
-			let entry = docs::keyword("nil")?;
-			format!("```verifpal\n{}\n```\n\n{}", entry.eg, entry.help)
-		}
+		TokenKind::ConstantName if is_nil(&token.text) => docs::keyword("nil")?.markdown(),
 		TokenKind::ConstantName | TokenKind::Anonymous => constant_hover(doc, token)?,
 		TokenKind::Capability => {
-			// `phase` inside `[weak from phase 1]` is part of the onset, not a phase block.
 			let word = if token.text.eq_ignore_ascii_case("phase") {
 				"from"
 			} else {
 				&token.text
 			};
-			let entry = docs::capability(word)?;
-			format!("```verifpal\n{}\n```\n\n{}", entry.eg, entry.help)
+			docs::capability(word)?.markdown()
 		}
 		TokenKind::PrimitiveName => {
-			let entry = docs::primitive(&token.text)?;
-			let mut out = format!("```verifpal\n{}\n```\n\n{}", entry.eg, entry.help);
+			let mut out = docs::primitive(&token.text)?.markdown();
 			if let Some(facts) = primitive_facts(&token.text) {
 				out.push_str("\n\n");
 				out.push_str(&facts);
@@ -195,95 +208,78 @@ pub(crate) fn hover(doc: &Document, position: Position) -> Option<lsp_types::Hov
 			out
 		}
 		TokenKind::PrincipalName => format!("**{}**\n\nA principal in this model.", token.text),
-		TokenKind::QueryKind => {
-			// The token spans the whole `confidentiality?`; the table is keyed without the `?`.
-			let entry = docs::query(token.text.trim_end_matches('?'))?;
-			format!("```verifpal\n{}\n```\n\n{}", entry.eg, entry.help)
-		}
-		_ => {
-			let entry = docs::any(&token.text)?;
-			format!("```verifpal\n{}\n```\n\n{}", entry.eg, entry.help)
-		}
+		TokenKind::QueryKind => docs::query(token.text.trim_end_matches('?'))?.markdown(),
+		_ => docs::any(&token.text)?.markdown(),
 	};
 	Some(lsp_types::Hover {
 		contents: lsp_types::HoverContents::Markup(MarkupContent {
 			kind: MarkupKind::Markdown,
 			value,
 		}),
-		range: Some(range),
+		range: Some(doc.line.range(token.span)),
 	})
 }
 
 fn constant_hover(doc: &Document, token: &Token) -> Option<String> {
 	let trace = doc.trace.as_ref()?;
-	let symbol = doc.tokens.resolve(token, trace)?;
-	let mut out = format!("```verifpal\n{}\n```", symbol.name);
-	if let Some(assigned) = &symbol.assigned {
-		out.push_str(&format!("\n\nAssigned: `{assigned}`"));
-	}
-	if let Some(creator) = &symbol.creator {
-		out.push_str(&format!("\n\nCreated by **{creator}**"));
-	}
-	if !symbol.known_by.is_empty() {
-		let known: Vec<String> = symbol
+	let slot = trace
+		.slots
+		.iter()
+		.find(|slot| slot.constant.name.eq_ignore_ascii_case(&token.text))?;
+	let mut out = format!(
+		"```verifpal\n{}\n```\n\nAssigned: `{}`\n\nCreated by **{}**",
+		slot.constant.name,
+		slot.initial_value,
+		trace.principal_name(slot.creator)
+	);
+	if !slot.known_by.is_empty() {
+		let known: Vec<String> = slot
 			.known_by
 			.iter()
-			.map(|(recipient, sender)| format!("{recipient} (from {sender})"))
+			.map(|&(recipient, sender)| {
+				format!(
+					"{} (from {})",
+					trace.principal_name(recipient),
+					trace.principal_name(sender)
+				)
+			})
 			.collect();
 		out.push_str(&format!("\n\nKnown by: {}", known.join(", ")));
 	}
-	if !symbol.phases.is_empty() {
-		let phases: Vec<String> = symbol.phases.iter().map(|p| p.to_string()).collect();
+	if !slot.phases.is_empty() {
+		let phases: Vec<String> = slot.phases.iter().map(|p| p.to_string()).collect();
 		out.push_str(&format!("\n\nPhases: {}", phases.join(", ")));
 	}
 	Some(out)
 }
 
-pub(crate) fn definition(doc: &Document, position: Position, uri: &Uri) -> Option<Location> {
-	let token = token_at(doc, position)?;
-	if !matches!(
-		token.kind,
-		TokenKind::ConstantName | TokenKind::PrincipalName
-	) {
-		return None;
-	}
-	let span = doc.tokens.declaration_of(token)?;
-	Some(Location {
-		uri: uri.clone(),
+fn location(doc: &Document, span: Span) -> Location {
+	Location {
+		uri: doc.uri.clone(),
 		range: doc.line.range(span),
-	})
+	}
 }
 
-pub(crate) fn references(doc: &Document, position: Position, uri: &Uri) -> Vec<Location> {
-	let Some(token) = token_at(doc, position) else {
+pub(crate) fn definition(doc: &Document, position: Position) -> Option<Location> {
+	let span = doc.tokens.declaration_of(symbol_at(doc, position)?)?;
+	Some(location(doc, span))
+}
+
+pub(crate) fn references(doc: &Document, position: Position) -> Vec<Location> {
+	let Some(token) = symbol_at(doc, position) else {
 		return Vec::new();
 	};
-	if !matches!(
-		token.kind,
-		TokenKind::ConstantName | TokenKind::PrincipalName
-	) {
-		return Vec::new();
-	}
 	doc.tokens
 		.references(token)
 		.into_iter()
-		.map(|span| Location {
-			uri: uri.clone(),
-			range: doc.line.range(span),
-		})
+		.map(|span| location(doc, span))
 		.collect()
 }
 
 pub(crate) fn highlights(doc: &Document, position: Position) -> Vec<DocumentHighlight> {
-	let Some(token) = token_at(doc, position) else {
+	let Some(token) = symbol_at(doc, position) else {
 		return Vec::new();
 	};
-	if !matches!(
-		token.kind,
-		TokenKind::ConstantName | TokenKind::PrincipalName
-	) {
-		return Vec::new();
-	}
 	let declaration = doc.tokens.declaration_of(token);
 	doc.tokens
 		.references(token)
@@ -299,11 +295,18 @@ pub(crate) fn highlights(doc: &Document, position: Position) -> Vec<DocumentHigh
 		.collect()
 }
 
+fn renameable_at(doc: &Document, position: Position) -> Option<&Token> {
+	symbol_at(doc, position).filter(|token| {
+		doc.model.is_some() && !(token.kind == TokenKind::ConstantName && is_nil(&token.text))
+	})
+}
+
+pub(crate) fn prepare_rename(doc: &Document, position: Position) -> Option<Range> {
+	renameable_at(doc, position).map(|token| doc.line.range(token.span))
+}
+
 pub(crate) fn rename(doc: &Document, position: Position, new_name: &str) -> Option<Vec<TextEdit>> {
-	let token = token_at(doc, position)?;
-	if doc.model.is_err() || !renameable(token) || !valid_rename(doc, token, new_name) {
-		return None;
-	}
+	let token = renameable_at(doc, position).filter(|token| valid_rename(doc, token, new_name))?;
 	Some(
 		doc.tokens
 			.references(token)
@@ -314,13 +317,6 @@ pub(crate) fn rename(doc: &Document, position: Position, new_name: &str) -> Opti
 			})
 			.collect(),
 	)
-}
-
-fn renameable(token: &Token) -> bool {
-	matches!(
-		token.kind,
-		TokenKind::ConstantName | TokenKind::PrincipalName
-	) && !(token.kind == TokenKind::ConstantName && token.text.eq_ignore_ascii_case("nil"))
 }
 
 fn valid_rename(doc: &Document, token: &Token, new_name: &str) -> bool {
@@ -334,14 +330,14 @@ fn valid_rename(doc: &Document, token: &Token, new_name: &str) -> bool {
 	match token.kind {
 		TokenKind::ConstantName => {
 			if new_name == "_"
-				|| new_name.eq_ignore_ascii_case("nil")
+				|| is_nil(new_name)
 				|| crate::parser::check_reserved(new_name).is_err()
 			{
 				return false;
 			}
 		}
 		TokenKind::PrincipalName => {
-			if crate::parser::reserved_for_principal(&new_name.to_ascii_lowercase()) {
+			if crate::parser::is_reserved_word(&new_name.to_ascii_lowercase()) {
 				return false;
 			}
 		}
@@ -357,7 +353,7 @@ fn valid_rename(doc: &Document, token: &Token, new_name: &str) -> bool {
 #[cfg_attr(not(feature = "lsp"), allow(dead_code))]
 pub(crate) fn folding_ranges(doc: &Document) -> Vec<FoldingRange> {
 	let mut ranges = Vec::new();
-	if let Ok(model) = &doc.model {
+	if let Some(model) = &doc.model {
 		for block in &model.blocks {
 			if let Block::Principal(p) = block {
 				push_fold(&mut ranges, doc, p.span, None);
@@ -376,7 +372,7 @@ pub(crate) fn folding_ranges(doc: &Document) -> Vec<FoldingRange> {
 		if token.kind == TokenKind::Keyword
 			&& (token.text.eq_ignore_ascii_case("queries")
 				|| token.text.eq_ignore_ascii_case("scenarios"))
-			&& let Some(close) = block_close(&doc.text, token.span.end)
+			&& let Some(close) = block_close(doc.text(), token.span.end)
 		{
 			push_fold(&mut ranges, doc, Span::new(token.span.start, close), None);
 		}
@@ -422,10 +418,10 @@ fn push_fold(
 	span: Span,
 	kind: Option<FoldingRangeKind>,
 ) {
-	let text = &doc.text[span.start.min(doc.text.len())..span.end.min(doc.text.len())];
-	let trimmed = span.start + text.trim_end().len();
+	let text = doc.text();
+	let folded = &text[span.start.min(text.len())..span.end.min(text.len())];
 	let start = doc.line.position(span.start);
-	let end = doc.line.position(trimmed);
+	let end = doc.line.position(span.start + folded.trim_end().len());
 	if end.line <= start.line {
 		return;
 	}
@@ -438,7 +434,7 @@ fn push_fold(
 }
 
 pub(crate) fn document_symbols(doc: &Document) -> Vec<DocumentSymbol> {
-	let Ok(model) = &doc.model else {
+	let Some(model) = &doc.model else {
 		return Vec::new();
 	};
 	let mut symbols = Vec::new();
@@ -500,8 +496,7 @@ pub(crate) fn document_symbols(doc: &Document) -> Vec<DocumentSymbol> {
 			)
 		})
 		.collect();
-	if let Some(first) = model.queries.first() {
-		let last = model.queries.last().unwrap_or(first);
+	if let (Some(first), Some(last)) = (model.queries.first(), model.queries.last()) {
 		symbols.push(symbol(
 			"queries".to_string(),
 			String::new(),
@@ -551,16 +546,15 @@ fn item(label: &str, kind: CompletionItemKind, entry: Option<&docs::Entry>) -> C
 		label: label.to_string(),
 		kind: Some(kind),
 		detail: entry.map(|e| e.eg.to_string()),
-		documentation: entry.map(|e| markdown(e.help.to_string())),
+		documentation: entry.map(|e| documentation(e.help.to_string())),
 		..Default::default()
 	}
 }
 
 pub(crate) fn completions(doc: &Document, position: Position) -> Vec<CompletionItem> {
-	let offset = doc.line.offset(position);
-	let before = &doc.text[..offset.min(doc.text.len())];
+	let before = text_before(doc, position);
 
-	if in_capability_brackets(doc, offset) {
+	if in_capability_brackets(before) {
 		return docs::CAPABILITIES
 			.iter()
 			.filter(|e| e.name != "from")
@@ -568,29 +562,15 @@ pub(crate) fn completions(doc: &Document, position: Position) -> Vec<CompletionI
 			.collect();
 	}
 
-	let trimmed = before.trim_end_matches(|c: char| c.is_alphanumeric() || c == '_');
-	let head = trimmed.trim_end();
-	let after_knows = head
-		.len()
-		.checked_sub("knows".len())
-		.filter(|&at| head.is_char_boundary(at))
-		.is_some_and(|at| {
-			head[at..].eq_ignore_ascii_case("knows")
-				&& head[..at]
-					.chars()
-					.next_back()
-					.is_none_or(|c| !c.is_alphanumeric() && c != '_')
-		});
-	if after_knows {
+	let head = before.trim_end_matches(is_word_char).trim_end();
+	if trailing_word(head).eq_ignore_ascii_case("knows") {
 		return ["public", "private"]
 			.iter()
 			.map(|q| item(q, CompletionItemKind::KEYWORD, docs::keyword(q)))
 			.collect();
 	}
 
-	if in_queries_block(doc, offset) {
-		// Once the line names its query kind, what follows are the constants
-		// the query is about and, for `authentication?`, the principals.
+	if in_queries_block(doc, before.len()) {
 		let line = &before[before.rfind('\n').map_or(0, |i| i + 1)..];
 		if line.contains('?') || line.trim_start().starts_with("precondition") {
 			return names(doc, true);
@@ -635,21 +615,14 @@ fn names(doc: &Document, principals: bool) -> Vec<CompletionItem> {
 	out
 }
 
-fn in_capability_brackets(doc: &Document, offset: usize) -> bool {
-	let before = &doc.text[..offset.min(doc.text.len())];
+fn in_capability_brackets(before: &str) -> bool {
 	let Some(open) = before.rfind('[') else {
 		return false;
 	};
 	if before[open..].contains(']') || before[open..].contains('\n') {
 		return false;
 	}
-	let head = before[..open].trim_end();
-	let name: String = head
-		.chars()
-		.rev()
-		.take_while(|c| c.is_alphanumeric() || *c == '_')
-		.collect();
-	let name: String = name.chars().rev().collect();
+	let name = trailing_word(before[..open].trim_end());
 	!name.is_empty() && crate::primitive::primitive_get_enum(&name.to_uppercase()).is_ok()
 }
 
@@ -662,12 +635,9 @@ fn in_queries_block(doc: &Document, offset: usize) -> bool {
 }
 
 pub(crate) fn signature_help(doc: &Document, position: Position) -> Option<SignatureHelp> {
-	let offset = doc.line.offset(position);
-	let before = &doc.text[..offset.min(doc.text.len())];
-	let (name, active) = enclosing_call(before)?;
-	let entry = docs::primitive(&name)?;
-	let id = crate::primitive::primitive_get_enum(&name.to_uppercase()).ok()?;
-	let def = crate::primitive::primitive_def(id).ok()?;
+	let (name, active) = enclosing_call(text_before(doc, position))?;
+	let entry = docs::primitive(name)?;
+	let (_, def) = primitive(name)?;
 	let args = def.arg_names();
 	let widest = *def.arity().last()? as usize;
 	let shown: Vec<String> = (0..widest)
@@ -681,7 +651,7 @@ pub(crate) fn signature_help(doc: &Document, position: Position) -> Option<Signa
 	Some(SignatureHelp {
 		signatures: vec![SignatureInformation {
 			label,
-			documentation: Some(markdown(entry.help.to_string())),
+			documentation: Some(documentation(entry.help.to_string())),
 			parameters: Some(
 				shown
 					.iter()
@@ -698,7 +668,7 @@ pub(crate) fn signature_help(doc: &Document, position: Position) -> Option<Signa
 	})
 }
 
-fn enclosing_call(before: &str) -> Option<(String, usize)> {
+fn enclosing_call(before: &str) -> Option<(&str, usize)> {
 	let bytes = before.as_bytes();
 	let mut depth = 0i32;
 	let mut commas = 0usize;
@@ -720,20 +690,17 @@ fn enclosing_call(before: &str) -> Option<(String, usize)> {
 	None
 }
 
-fn callee(head: &str) -> Option<String> {
+fn callee(head: &str) -> Option<&str> {
 	let mut head = head.trim_end();
 	if let Some(inner) = head.strip_suffix(']') {
 		head = inner[..inner.rfind('[')?].trim_end();
 	}
-	let name: String = head
-		.chars()
-		.rev()
-		.take_while(|c| c.is_alphanumeric() || *c == '_')
-		.collect();
-	(!name.is_empty()).then(|| name.chars().rev().collect())
+	let name = trailing_word(head);
+	(!name.is_empty()).then_some(name)
 }
 
 pub(crate) fn inlay_hints(doc: &Document, range: Range) -> Vec<InlayHint> {
+	let text = doc.text();
 	let from = doc.line.offset(range.start);
 	let to = doc.line.offset(range.end);
 	let mut hints = Vec::new();
@@ -744,27 +711,15 @@ pub(crate) fn inlay_hints(doc: &Document, range: Range) -> Vec<InlayHint> {
 		{
 			continue;
 		}
-		let Ok(id) = crate::primitive::primitive_get_enum(&token.text.to_uppercase()) else {
+		let Some((_, def)) = primitive(&token.text) else {
 			continue;
 		};
-		let Ok(def) = crate::primitive::primitive_def(id) else {
-			continue;
-		};
-		for (i, at) in argument_offsets(&doc.text, token.span.end)
-			.into_iter()
-			.enumerate()
+		for (name, at) in def
+			.arg_names()
+			.iter()
+			.zip(argument_offsets(text, token.span.end))
 		{
-			let Some(name) = def.arg_names().get(i) else {
-				break;
-			};
-			if is_placeholder_name(name) {
-				continue;
-			}
-			let written: String = doc.text[at..]
-				.chars()
-				.take_while(|c| c.is_alphanumeric() || *c == '_')
-				.collect();
-			if written.eq_ignore_ascii_case(name) {
+			if is_placeholder_name(name) || leading_word(&text[at..]).eq_ignore_ascii_case(name) {
 				continue;
 			}
 			hints.push(InlayHint {
@@ -832,16 +787,10 @@ fn argument_offsets(text: &str, after_name: usize) -> Vec<usize> {
 	starts
 }
 
-pub(crate) fn prepare_rename(doc: &Document, position: Position) -> Option<Range> {
-	let token = token_at(doc, position)?;
-	(doc.model.is_ok() && renameable(token)).then(|| doc.line.range(token.span))
-}
-
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::lsp::state::Documents;
-	use lsp_types::PositionEncodingKind;
+	use lsp_types::{PositionEncodingKind, Uri};
 	use std::str::FromStr;
 
 	const SRC: &str = "attacker[passive]\n\
@@ -857,31 +806,24 @@ queries[\n\
 \tconfidentiality? lg_a\n\
 ]\n";
 
-	fn doc() -> Documents {
-		let mut docs = Documents::new(PositionEncodingKind::UTF8);
-		docs.open(
-			"file:///l.vp".to_string(),
-			"l.vp".to_string(),
-			1,
-			SRC.to_string(),
-		);
-		docs
+	fn open(name: &str, text: &str) -> Document {
+		let uri = Uri::from_str(&format!("file:///{name}")).expect("a uri");
+		Document::new(uri, 1, text.to_string(), &PositionEncodingKind::UTF8)
+	}
+
+	fn doc() -> Document {
+		open("l.vp", SRC)
 	}
 
 	fn at(needle: &str) -> Position {
-		let docs = doc();
-		let d = docs.get("file:///l.vp").expect("open");
-		d.line.position(SRC.find(needle).expect("in the source"))
-	}
-
-	fn uri() -> Uri {
-		Uri::from_str("file:///l.vp").expect("a uri")
+		doc()
+			.line
+			.position(SRC.find(needle).expect("in the source"))
 	}
 
 	#[test]
 	fn hovering_a_primitive_shows_its_signature_and_arity() {
-		let docs = doc();
-		let d = docs.get("file:///l.vp").expect("open");
+		let d = &doc();
 		let h = hover(d, at("PUBKEY")).expect("a hover");
 		let lsp_types::HoverContents::Markup(m) = h.contents else {
 			panic!("expected markup");
@@ -893,20 +835,33 @@ queries[\n\
 
 	#[test]
 	fn hovering_a_constant_shows_what_the_trace_records() {
-		let docs = doc();
-		let d = docs.get("file:///l.vp").expect("open");
+		let d = &doc();
 		let h = hover(d, at("lg_ga = PUBKEY")).expect("a hover");
 		let lsp_types::HoverContents::Markup(m) = h.contents else {
 			panic!("expected markup");
 		};
-		assert!(m.value.contains("PUBKEY(lg_a)"), "{}", m.value);
-		assert!(m.value.contains("Alice"), "{}", m.value);
+		assert!(
+			m.value.starts_with(
+				"```verifpal\nlg_ga\n```\n\nAssigned: `PUBKEY(lg_a)`\n\nCreated by **Alice**"
+			),
+			"{}",
+			m.value
+		);
+		assert!(
+			m.value.contains("Known by: Bob (from Alice)"),
+			"{}",
+			m.value
+		);
+		let h = hover(d, at("lg_ga)")).expect("a hover on a use");
+		let lsp_types::HoverContents::Markup(used) = h.contents else {
+			panic!("expected markup");
+		};
+		assert_eq!(used.value, m.value, "a use resolves to the slot it names");
 	}
 
 	#[test]
 	fn hovering_a_query_kind_shows_what_it_checks() {
-		let docs = doc();
-		let d = docs.get("file:///l.vp").expect("open");
+		let d = &doc();
 		let h = hover(d, at("confidentiality?")).expect("a hover");
 		let lsp_types::HoverContents::Markup(m) = h.contents else {
 			panic!("expected markup");
@@ -917,11 +872,10 @@ queries[\n\
 
 	#[test]
 	fn definition_jumps_to_the_assignment() {
-		let docs = doc();
-		let d = docs.get("file:///l.vp").expect("open");
-		let loc = definition(d, at("HASH(lg_ga)"), &uri());
+		let d = &doc();
+		let loc = definition(d, at("HASH(lg_ga)"));
 		assert!(loc.is_none(), "HASH is a primitive, not a constant");
-		let loc = definition(d, at("lg_ga)"), &uri()).expect("a definition");
+		let loc = definition(d, at("lg_ga)")).expect("a definition");
 		let want = d
 			.line
 			.position(SRC.find("lg_ga = PUBKEY").expect("in the source"));
@@ -930,24 +884,21 @@ queries[\n\
 
 	#[test]
 	fn principal_definition_jumps_past_an_earlier_reference_to_its_block() {
-		let docs = doc();
-		let d = docs.get("file:///l.vp").expect("open");
-		let loc = definition(d, at("Bob: lg_ga"), &uri()).expect("a definition");
+		let d = &doc();
+		let loc = definition(d, at("Bob: lg_ga")).expect("a definition");
 		let want = d.line.position(SRC.find("Bob[\n").expect("in the source"));
 		assert_eq!(loc.range.start, want);
 	}
 
 	#[test]
 	fn references_finds_all_three_occurrences() {
-		let docs = doc();
-		let d = docs.get("file:///l.vp").expect("open");
-		assert_eq!(references(d, at("lg_ga = PUBKEY"), &uri()).len(), 3);
+		let d = &doc();
+		assert_eq!(references(d, at("lg_ga = PUBKEY")).len(), 3);
 	}
 
 	#[test]
 	fn the_declaration_highlights_as_a_write() {
-		let docs = doc();
-		let d = docs.get("file:///l.vp").expect("open");
+		let d = &doc();
 		let hs = highlights(d, at("lg_ga = PUBKEY"));
 		assert_eq!(hs.len(), 3);
 		assert_eq!(hs[0].kind, Some(DocumentHighlightKind::WRITE));
@@ -956,8 +907,7 @@ queries[\n\
 
 	#[test]
 	fn rename_rewrites_every_occurrence() {
-		let docs = doc();
-		let d = docs.get("file:///l.vp").expect("open");
+		let d = &doc();
 		let edits = rename(d, at("lg_ga = PUBKEY"), "renamed").expect("edits");
 		assert_eq!(edits.len(), 3);
 		assert!(edits.iter().all(|e| e.new_text == "renamed"));
@@ -965,16 +915,14 @@ queries[\n\
 
 	#[test]
 	fn rename_refuses_a_primitive() {
-		let docs = doc();
-		let d = docs.get("file:///l.vp").expect("open");
+		let d = &doc();
 		assert!(rename(d, at("PUBKEY"), "nope").is_none());
 		assert!(prepare_rename(d, at("PUBKEY")).is_none());
 	}
 
 	#[test]
 	fn rename_refuses_names_that_would_break_or_merge_the_model() {
-		let docs = doc();
-		let d = docs.get("file:///l.vp").expect("open");
+		let d = &doc();
 		let constant = at("lg_ga = PUBKEY");
 		for name in [
 			"",
@@ -1020,14 +968,7 @@ queries[\n\
 	#[test]
 	fn rename_refuses_a_document_that_does_not_parse() {
 		let source = SRC.replace("_ = HASH(lg_ga)", "_ = HASH(lg_ga) +");
-		let mut docs = Documents::new(PositionEncodingKind::UTF8);
-		docs.open(
-			"file:///broken.vp".to_string(),
-			"broken.vp".to_string(),
-			1,
-			source.clone(),
-		);
-		let d = docs.get("file:///broken.vp").expect("open");
+		let d = &open("broken.vp", &source);
 		let at = d
 			.line
 			.position(source.find("lg_a\n").expect("in the source"));
@@ -1038,14 +979,7 @@ queries[\n\
 	#[test]
 	fn a_principal_and_constant_with_the_same_spelling_are_distinct_symbols() {
 		let source = "attacker[passive]\nprincipal Alice[\n\tknows private alice\n]\nAlice -> Bob: alice\nprincipal Bob[\n\t_ = HASH(alice)\n]\nqueries[\n\tconfidentiality? alice\n]\n";
-		let mut docs = Documents::new(PositionEncodingKind::UTF8);
-		docs.open(
-			"file:///overlap.vp".to_string(),
-			"overlap.vp".to_string(),
-			1,
-			source.to_string(),
-		);
-		let d = docs.get("file:///overlap.vp").expect("open");
+		let d = &open("overlap.vp", source);
 		let principal_at = d
 			.line
 			.position(source.find("Alice").expect("principal is present"));
@@ -1055,21 +989,14 @@ queries[\n\
 		let constant_edits = rename(d, constant_at, "value").expect("constant edits");
 		assert_eq!(principal_edits.len(), 2);
 		assert_eq!(constant_edits.len(), 4);
-		let location = definition(d, constant_at, &uri()).expect("constant definition");
+		let location = definition(d, constant_at).expect("constant definition");
 		assert_eq!(location.range.start, d.line.position(constant_offset));
 	}
 
 	#[test]
 	fn the_builtin_nil_value_cannot_be_renamed() {
 		let source = "attacker[passive]\nprincipal Alice[\n\t_ = HASH(nil)\n]\nqueries[\n\tconfidentiality? nil\n]\n";
-		let mut docs = Documents::new(PositionEncodingKind::UTF8);
-		docs.open(
-			"file:///nil.vp".to_string(),
-			"nil.vp".to_string(),
-			1,
-			source.to_string(),
-		);
-		let d = docs.get("file:///nil.vp").expect("open");
+		let d = &open("nil.vp", source);
 		let position = d.line.position(source.find("nil").expect("nil is present"));
 		assert!(prepare_rename(d, position).is_none());
 		assert!(rename(d, position, "replacement").is_none());
@@ -1077,8 +1004,7 @@ queries[\n\
 
 	#[test]
 	fn folding_covers_each_principal_block() {
-		let docs = doc();
-		let d = docs.get("file:///l.vp").expect("open");
+		let d = &doc();
 		let folds = folding_ranges(d);
 		assert!(folds.len() >= 2, "{folds:?}");
 		assert!(
@@ -1089,8 +1015,7 @@ queries[\n\
 
 	#[test]
 	fn document_symbols_nest_expressions_under_principals() {
-		let docs = doc();
-		let d = docs.get("file:///l.vp").expect("open");
+		let d = &doc();
 		let symbols = document_symbols(d);
 		let alice = symbols.iter().find(|s| s.name == "Alice").expect("Alice");
 		assert_eq!(alice.kind, SymbolKind::NAMESPACE);
@@ -1100,8 +1025,7 @@ queries[\n\
 
 	#[test]
 	fn completion_offers_query_kinds_inside_the_queries_block() {
-		let docs = doc();
-		let d = docs.get("file:///l.vp").expect("open");
+		let d = &doc();
 		let items = completions(d, at("confidentiality? lg_a"));
 		assert!(items.iter().any(|i| i.label == "equivalence"), "{items:?}");
 		assert!(!items.iter().any(|i| i.label == "PUBKEY"), "{items:?}");
@@ -1109,8 +1033,7 @@ queries[\n\
 
 	#[test]
 	fn completion_offers_constants_and_principals_after_a_query_kind() {
-		let docs = doc();
-		let d = docs.get("file:///l.vp").expect("open");
+		let d = &doc();
 		let items = completions(d, at("lg_a\n]"));
 		let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
 		assert!(labels.contains(&"lg_a"), "{labels:?}");
@@ -1121,15 +1044,8 @@ queries[\n\
 
 	#[test]
 	fn completion_offers_qualifiers_after_knows_in_any_case() {
-		let mut docs = Documents::new(PositionEncodingKind::UTF8);
 		let src = "attacker[passive]\nprincipal Alice[\n\tKNOWS ";
-		docs.open(
-			"file:///ku.vp".to_string(),
-			"ku.vp".to_string(),
-			1,
-			src.to_string(),
-		);
-		let d = docs.get("file:///ku.vp").expect("open");
+		let d = &open("ku.vp", src);
 		let labels: Vec<String> = completions(d, d.line.position(src.len()))
 			.into_iter()
 			.map(|i| i.label)
@@ -1140,14 +1056,7 @@ queries[\n\
 	#[test]
 	fn nil_is_documented_as_a_keyword_and_offered_once() {
 		let source = "attacker[passive]\nprincipal Alice[\n\tknows private nl_k\n\t_ = AEAD_ENC(nl_k, nl_k, nl_k, nil)\n]\nqueries[\n\tconfidentiality? nl_k\n]\n";
-		let mut docs = Documents::new(PositionEncodingKind::UTF8);
-		docs.open(
-			"file:///nl.vp".to_string(),
-			"nl.vp".to_string(),
-			1,
-			source.to_string(),
-		);
-		let d = docs.get("file:///nl.vp").expect("open");
+		let d = &open("nl.vp", source);
 		let h = hover(d, d.line.position(source.find("nil)").expect("nil"))).expect("a hover");
 		let lsp_types::HoverContents::Markup(m) = h.contents else {
 			panic!("expected markup");
@@ -1163,22 +1072,13 @@ queries[\n\
 	#[test]
 	fn hovering_a_precondition_explains_the_option_and_names_its_principals() {
 		let source = "attacker[passive]\nprincipal Alice[\n\tknows private pr_m\n\tpr_h = HASH(pr_m)\n]\nAlice -> Bob: pr_h\nprincipal Bob[\n\t_ = HASH(pr_h)\n]\nqueries[\n\tconfidentiality? pr_m[\n\t\tprecondition[Alice -> Bob: pr_h]\n\t]\n]\n";
-		let mut docs = Documents::new(PositionEncodingKind::UTF8);
-		docs.open(
-			"file:///pr.vp".to_string(),
-			"pr.vp".to_string(),
-			1,
-			source.to_string(),
-		);
-		let d = docs.get("file:///pr.vp").expect("open");
+		let d = &open("pr.vp", source);
 		let option = source.find("precondition[").expect("the option");
 		let h = hover(d, d.line.position(option)).expect("a hover");
 		let lsp_types::HoverContents::Markup(m) = h.contents else {
 			panic!("expected markup");
 		};
 		assert!(m.value.contains("attached to any query"), "{}", m.value);
-		// The principals inside the option are references like any other, so
-		// a rename reaches them.
 		let bob = source[option..].find("Bob").expect("the recipient") + option;
 		let edits = rename(d, d.line.position(bob), "Carol").expect("edits");
 		assert_eq!(edits.len(), 3, "{edits:?}");
@@ -1187,14 +1087,7 @@ queries[\n\
 	#[test]
 	fn hovering_phase_inside_a_capability_bracket_explains_the_onset() {
 		let source = "attacker[passive]\nprincipal Alice[\n\tknows private cp_a\n\tcp_ga = PUBKEY[weak from phase 1](cp_a)\n]\nqueries[\n\tconfidentiality? cp_a\n]\n";
-		let mut docs = Documents::new(PositionEncodingKind::UTF8);
-		docs.open(
-			"file:///cp.vp".to_string(),
-			"cp.vp".to_string(),
-			1,
-			source.to_string(),
-		);
-		let d = docs.get("file:///cp.vp").expect("open");
+		let d = &open("cp.vp", source);
 		let at = d.line.position(source.find("phase 1").expect("the onset"));
 		let h = hover(d, at).expect("a hover");
 		let lsp_types::HoverContents::Markup(m) = h.contents else {
@@ -1206,15 +1099,8 @@ queries[\n\
 
 	#[test]
 	fn signature_help_looks_past_a_capability_bracket_and_a_line_break() {
-		let mut docs = Documents::new(PositionEncodingKind::UTF8);
 		let src = "attacker[passive]\nprincipal Alice[\n\tknows private sb_k\n\tsb_e = AEAD_ENC[forgeable from phase 1](sb_k,\n\t\t";
-		docs.open(
-			"file:///sb.vp".to_string(),
-			"sb.vp".to_string(),
-			1,
-			src.to_string(),
-		);
-		let d = docs.get("file:///sb.vp").expect("open");
+		let d = &open("sb.vp", src);
 		let help = signature_help(d, d.line.position(src.len())).expect("help");
 		assert_eq!(
 			help.signatures[0].label,
@@ -1226,14 +1112,7 @@ queries[\n\
 	#[test]
 	fn folding_covers_scenarios_and_stops_at_the_closing_bracket() {
 		let src = "attacker[active]\nprincipal Alice[\n\tknows public fs_gpeer\n\tknows private fs_a\n\tfs_e = ENC(fs_gpeer, fs_a)\n]\nscenarios[\n\tAlice[fs_gpeer = fs_gb]\n]\nqueries[\n\tconfidentiality? fs_a // see [1]\n]\n// tail\n";
-		let mut docs = Documents::new(PositionEncodingKind::UTF8);
-		docs.open(
-			"file:///fs.vp".to_string(),
-			"fs.vp".to_string(),
-			1,
-			src.to_string(),
-		);
-		let d = docs.get("file:///fs.vp").expect("open");
+		let d = &open("fs.vp", src);
 		let folds = folding_ranges(d);
 		assert!(
 			folds.iter().any(|f| f.start_line == 6 && f.end_line == 8),
@@ -1248,14 +1127,7 @@ queries[\n\
 	#[test]
 	fn a_block_comment_spanning_lines_gets_a_token_per_line() {
 		let src = "attacker[passive]\n/* one\n   two */\nprincipal Alice[\n\tknows private bc_a\n]\nqueries[\n\tconfidentiality? bc_a\n]\n";
-		let mut docs = Documents::new(PositionEncodingKind::UTF8);
-		docs.open(
-			"file:///bc.vp".to_string(),
-			"bc.vp".to_string(),
-			1,
-			src.to_string(),
-		);
-		let d = docs.get("file:///bc.vp").expect("open");
+		let d = &open("bc.vp", src);
 		let comment = TOKEN_TYPES
 			.iter()
 			.position(|t| *t == "comment")
@@ -1268,29 +1140,15 @@ queries[\n\
 	#[test]
 	fn inlay_hints_skip_placeholder_argument_names() {
 		let src = "attacker[passive]\nprincipal Alice[\n\tknows private ih_a\n\t_ = HASH(ih_a, ih_a)\n]\nqueries[\n\tconfidentiality? ih_a\n]\n";
-		let mut docs = Documents::new(PositionEncodingKind::UTF8);
-		docs.open(
-			"file:///ih.vp".to_string(),
-			"ih.vp".to_string(),
-			1,
-			src.to_string(),
-		);
-		let d = docs.get("file:///ih.vp").expect("open");
+		let d = &open("ih.vp", src);
 		let whole = Range::new(Position::new(0, 0), d.line.end());
 		assert!(inlay_hints(d, whole).is_empty());
 	}
 
 	#[test]
 	fn completion_offers_qualifiers_after_knows() {
-		let mut docs = Documents::new(PositionEncodingKind::UTF8);
 		let src = "attacker[passive]\nprincipal Alice[\n\tknows ";
-		docs.open(
-			"file:///k.vp".to_string(),
-			"k.vp".to_string(),
-			1,
-			src.to_string(),
-		);
-		let d = docs.get("file:///k.vp").expect("open");
+		let d = &open("k.vp", src);
 		let items = completions(d, d.line.position(src.len()));
 		let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
 		assert_eq!(labels, vec!["public", "private"]);
@@ -1298,15 +1156,8 @@ queries[\n\
 
 	#[test]
 	fn completion_offers_capabilities_inside_primitive_brackets() {
-		let mut docs = Documents::new(PositionEncodingKind::UTF8);
 		let src = "attacker[passive]\nprincipal Alice[\n\tknows private c_m\n\tc_h = HASH[";
-		docs.open(
-			"file:///c.vp".to_string(),
-			"c.vp".to_string(),
-			1,
-			src.to_string(),
-		);
-		let d = docs.get("file:///c.vp").expect("open");
+		let d = &open("c.vp", src);
 		let items = completions(d, d.line.position(src.len()));
 		let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
 		assert_eq!(labels, vec!["weak", "forgeable", "malleable"]);
@@ -1314,16 +1165,9 @@ queries[\n\
 
 	#[test]
 	fn signature_help_names_the_active_argument() {
-		let mut docs = Documents::new(PositionEncodingKind::UTF8);
 		let src =
 			"attacker[passive]\nprincipal Alice[\n\tknows private s_k\n\ts_e = AEAD_ENC(s_k, ";
-		docs.open(
-			"file:///s.vp".to_string(),
-			"s.vp".to_string(),
-			1,
-			src.to_string(),
-		);
-		let d = docs.get("file:///s.vp").expect("open");
+		let d = &open("s.vp", src);
 		let help = signature_help(d, d.line.position(src.len())).expect("help");
 		assert_eq!(
 			help.signatures[0].label,
@@ -1334,8 +1178,7 @@ queries[\n\
 
 	#[test]
 	fn semantic_tokens_are_five_tuples_in_source_order() {
-		let docs = doc();
-		let d = docs.get("file:///l.vp").expect("open");
+		let d = &doc();
 		let data = semantic_tokens(d);
 		assert!(!data.is_empty());
 		assert_eq!(data.len() % 5, 0);
@@ -1346,8 +1189,7 @@ queries[\n\
 
 	#[test]
 	fn a_primitive_is_tagged_as_a_default_library_function() {
-		let docs = doc();
-		let d = docs.get("file:///l.vp").expect("open");
+		let d = &doc();
 		let data = semantic_tokens(d);
 		let function = TOKEN_TYPES
 			.iter()
@@ -1361,8 +1203,7 @@ queries[\n\
 
 	#[test]
 	fn inlay_hints_name_primitive_arguments() {
-		let docs = doc();
-		let d = docs.get("file:///l.vp").expect("open");
+		let d = &doc();
 		let whole = Range::new(Position::new(0, 0), d.line.end());
 		let hints = inlay_hints(d, whole);
 		assert!(

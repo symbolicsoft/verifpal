@@ -50,6 +50,11 @@ impl Ctx {
 		self
 	}
 
+	pub(crate) fn one_of(self, keys: &[&'static str], chosen: &str) -> Ctx {
+		keys.iter()
+			.fold(self, |ctx, &key| ctx.flag(key, key == chosen))
+	}
+
 	fn get(&self, key: &str) -> Option<&Val> {
 		self.fields.iter().find(|(k, _)| *k == key).map(|(_, v)| v)
 	}
@@ -119,7 +124,7 @@ impl Template {
 	}
 }
 
-fn strip_header(raw: &'static str) -> &'static str {
+pub(crate) fn strip_header(raw: &'static str) -> &'static str {
 	let trimmed = raw.trim_start();
 	if let Some(after) = trimmed.strip_prefix("<!--") {
 		return after
@@ -458,6 +463,12 @@ mod tests {
 	fn an_empty_list_renders_nothing_and_its_inverse_renders_instead() {
 		let tpl = Template::parse("t", "{{#rows}}x{{/rows}}{{^rows}}none{{/rows}}", &HTML);
 		assert_eq!(render(&tpl, &Ctx::new().list("rows", vec![])), "none");
+	}
+
+	#[test]
+	fn one_of_raises_exactly_the_chosen_flag() {
+		let tpl = Template::parse("t", "{{#a}}A{{/a}}{{#b}}B{{/b}}{{#c}}C{{/c}}", &HTML);
+		assert_eq!(render(&tpl, &Ctx::new().one_of(&["a", "b", "c"], "b")), "B");
 	}
 
 	#[test]

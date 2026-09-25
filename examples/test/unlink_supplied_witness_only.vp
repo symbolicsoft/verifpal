@@ -1,0 +1,36 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: u0 at one session and at two.
+//
+// The attacker replaces x at Bob with Alice's y, so a = HASH(y, c1) and
+// b = HASH(y, c2) share y, but y is the value the attacker put there and
+// shows nothing about s. The attacker-supplied check once looked for the
+// install only in the view of the run answering the query, where Bob's x
+// resolves to Alice's honest copy, and reported a link via ENC(s, m2).
+// unlink_supplied_witness_masks.vp is the counterweight.
+attacker[active]
+
+principal Alice[
+	knows private s
+	generates m1, m2
+	x = ENC(s, m1)
+	y = ENC(s, m2)
+]
+
+Alice -> Bob: x, y
+
+principal Bob[
+	knows public c1, c2
+	a = HASH(x, c1)
+	b = HASH(y, c2)
+]
+
+Bob -> Dave: a, b
+
+principal Dave[
+	_ = HASH(a, b)
+]
+
+queries[
+	unlinkability? a, b
+]

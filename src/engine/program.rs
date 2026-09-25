@@ -33,12 +33,20 @@ pub(crate) struct Run {
 	pub(crate) step_of_slot: IdMap<usize, usize>,
 }
 
+impl Run {
+	fn push(&mut self, event: Event, phase: i32, gives: impl IntoIterator<Item = usize>) {
+		for slot in gives {
+			self.step_of_slot.entry(slot).or_insert(self.steps.len());
+		}
+		self.steps.push(Step { event, phase });
+	}
+}
+
 #[derive(Clone, Debug)]
 pub(crate) struct Program {
 	pub(crate) runs: Vec<Run>,
-	pub(crate) run_of: IdMap<PrincipalId, usize>,
+	run_of: IdMap<PrincipalId, usize>,
 	pub(crate) deliveries: Vec<Delivery>,
-	pub(crate) max_phase: i32,
 }
 
 impl Program {
@@ -65,18 +73,15 @@ impl Program {
 						continue;
 					};
 					for expr in &p.expressions {
-						let event = match expr.kind {
-							Declaration::Knows | Declaration::Generates => Event::Hold,
-							Declaration::Assignment => Event::Assign,
-							Declaration::Leaks => Event::Leak,
-						};
-						for c in &expr.constants {
-							if let Some(slot) = km.index_of(c) {
-								runs[run].steps.push(Step {
-									event: event(slot),
-									phase,
-								});
-							}
+						for slot in expr.constants.iter().filter_map(|c| km.index_of(c)) {
+							let (event, gives) = match expr.kind {
+								Declaration::Knows | Declaration::Generates => {
+									(Event::Hold(slot), Some(slot))
+								}
+								Declaration::Assignment => (Event::Assign(slot), Some(slot)),
+								Declaration::Leaks => (Event::Leak(slot), None),
+							};
+							runs[run].push(event, phase, gives);
 						}
 					}
 				}
@@ -86,24 +91,22 @@ impl Program {
 					else {
 						continue;
 					};
-					let slots = msg
+					let slots: Vec<(usize, bool)> = msg
 						.constants
 						.iter()
 						.filter_map(|c| km.index_of(c).map(|slot| (slot, c.guard)))
 						.collect();
 					let d = deliveries.len();
+					runs[sender].push(Event::Send(d), phase, None);
+					runs[recipient].push(
+						Event::Recv(d),
+						phase,
+						slots.iter().map(|&(slot, _)| slot),
+					);
 					deliveries.push(Delivery {
 						sender,
 						recipient,
 						slots,
-					});
-					runs[sender].steps.push(Step {
-						event: Event::Send(d),
-						phase,
-					});
-					runs[recipient].steps.push(Step {
-						event: Event::Recv(d),
-						phase,
 					});
 				}
 				Block::Phase(ph) => {
@@ -111,26 +114,10 @@ impl Program {
 				}
 			}
 		}
-		for run in &mut runs {
-			for (i, step) in run.steps.iter().enumerate() {
-				match step.event {
-					Event::Hold(slot) | Event::Assign(slot) => {
-						run.step_of_slot.entry(slot).or_insert(i);
-					}
-					Event::Recv(d) => {
-						for &(slot, _) in &deliveries[d].slots {
-							run.step_of_slot.entry(slot).or_insert(i);
-						}
-					}
-					_ => {}
-				}
-			}
-		}
 		Program {
 			runs,
 			run_of,
 			deliveries,
-			max_phase: km.max_phase,
 		}
 	}
 

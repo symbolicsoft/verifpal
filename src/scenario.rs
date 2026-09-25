@@ -1,43 +1,37 @@
 /* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
  * SPDX-License-Identifier: GPL-3.0-only */
 
-use std::collections::HashMap;
+use std::borrow::Cow;
+use std::cmp::Reverse;
 use std::sync::Arc;
 
 use crate::sanity::MAX_PRINCIPALS;
+use crate::sessions::{ModelCopy, map_constants};
 use crate::types::*;
 use crate::util::{base_name, did_you_mean, quoted_list};
-use crate::value::{MAX_COPIES, copy_value_id};
+use crate::value::MAX_COPIES;
+use crate::verify::Expansion;
 
-pub(crate) struct ScenarioExpansion {
-	pub(crate) model: Model,
-	pub(crate) honest: IdMap<PrincipalId, i32>,
-	pub(crate) summaries: Vec<ScenarioSummary>,
-	pub(crate) query_variants: Vec<Vec<Query>>,
-	pub(crate) interchangeable: Vec<(PrincipalId, PrincipalId)>,
-	pub(crate) actors: Vec<(PrincipalId, PrincipalId)>,
-	pub(crate) bound: Vec<ValueId>,
-}
-
-pub(crate) fn expand_scenarios(m: &Model, sessions: u8) -> VResult<ScenarioExpansion> {
+pub(crate) fn expand_scenarios(m: &Model, sessions: u8) -> VResult<Expansion> {
 	let count = m.scenarios.len();
 	if count == 0 {
-		return Ok(ScenarioExpansion {
+		return Ok(Expansion {
 			model: m.clone(),
-			honest: IdMap::default(),
-			summaries: Vec::new(),
-			query_variants: Vec::new(),
-			interchangeable: Vec::new(),
-			actors: Vec::new(),
-			bound: Vec::new(),
+			corrupt_from: None,
+			scenarios: Vec::new(),
+			variants: Vec::new(),
+			siblings: IdMap::default(),
+			interchangeable: IdMap::default(),
+			actors: IdMap::default(),
+			bound: IdSet::default(),
 		});
 	}
 	sanity_scenarios(m)?;
-	let copies = count as u32 * sessions as u32;
-	if copies > MAX_COPIES + 1 {
+	let analyzed = count as u32 * sessions as u32;
+	if analyzed > MAX_COPIES + 1 {
 		return Err(VerifpalError::sanity(
 			format!(
-				"{count} scenarios at {sessions} sessions would analyze {copies} copies \
+				"{count} scenarios at {sessions} sessions would analyze {analyzed} copies \
 				 of every principal, which exceeds the {} the id space holds",
 				MAX_COPIES + 1
 			)
@@ -62,89 +56,73 @@ pub(crate) fn expand_scenarios(m: &Model, sessions: u8) -> VResult<ScenarioExpan
 		));
 	}
 
+	let corruption = Corruption::of(m);
+	let mut scenarios: Vec<(&Scenario, i32)> = m
+		.scenarios
+		.iter()
+		.map(|s| (s, corruption.corrupt_from(s)))
+		.collect();
+	scenarios.sort_by_key(|&(_, corrupt_from)| Reverse(corrupt_from));
 	let freshen = m.freshened_constants();
-	let compromised = compromised_constants(m);
-	let keyed = key_material_constants(m);
-	let mentions = assignment_mentions(m);
-	let declared = honest_first(&m.scenarios, &compromised, &mentions, &keyed);
-	let m = &Model {
-		scenarios: declared,
-		..m.clone()
-	};
-	let pids = clone_principal_ids(&principals, count, m.highest_referenced_principal())?;
+	let copies: Vec<ModelCopy> = std::iter::once(ModelCopy::original(&freshen))
+		.chain(ModelCopy::numbered(
+			m,
+			&freshen,
+			(1..count).map(|k| (format!("@{}", k + 1), k as u32 * sessions as u32)),
+			"scenario",
+		)?)
+		.collect();
 
 	let mut blocks: Vec<Block> = Vec::with_capacity(m.blocks.len() * count);
 	for block in &m.blocks {
 		match block {
 			Block::Principal(p) => {
-				for k in 0..count {
-					blocks.push(Block::Principal(clone_principal(
-						p, k, sessions, &freshen, &pids, m,
-					)));
-				}
+				blocks.extend(copies.iter().zip(&scenarios).map(|(copy, (scenario, _))| {
+					Block::Principal(copy.principal(&bound(p, scenario)))
+				}));
 			}
 			Block::Message(msg) => {
-				for k in 0..count {
-					blocks.push(Block::Message(clone_message(
-						msg, k, sessions, &freshen, &pids,
-					)));
-				}
+				blocks.extend(copies.iter().map(|copy| Block::Message(copy.message(msg))));
 			}
-			Block::Phase(p) => blocks.push(Block::Phase(p.clone())),
+			Block::Phase(_) => blocks.push(block.clone()),
 		}
 	}
 
-	let mut honest: IdMap<PrincipalId, i32> = IdMap::default();
-	for k in 0..count {
-		let corrupt_from = scenario_corrupt_from(&m.scenarios[k], &compromised, &mentions, &keyed);
-		if corrupt_from <= 0 {
-			continue;
-		}
-		for (id, _) in &principals {
-			honest.insert(mapped_principal(*id, k, &pids), corrupt_from);
+	let mut corrupt_from: IdMap<PrincipalId, i32> = IdMap::default();
+	for (copy, &(_, from)) in copies.iter().zip(&scenarios) {
+		if from > 0 {
+			for &(id, _) in &principals {
+				corrupt_from.insert(copy.principal_id(id), from);
+			}
 		}
 	}
 
-	let any_honest = honest_first_corrupt_from(m, &compromised, &mentions, &keyed) > 0;
-	let mut query_variants: Vec<Vec<Query>> = Vec::with_capacity(m.queries.len());
-	for query in &m.queries {
-		let mut variants = Vec::new();
-		for k in 1..count {
-			if any_honest
-				&& scenario_corrupt_from(&m.scenarios[k], &compromised, &mentions, &keyed) <= 0
-			{
-				continue;
-			}
-			let variant = clone_query(query, k, sessions, &freshen, &pids);
-			if !query.same_shape(&variant) {
-				variants.push(variant);
-			}
-		}
-		query_variants.push(variants);
-	}
-
-	let model = Model {
-		blocks,
-		scenarios: Vec::new(),
-		scenarios_leading_comments: Vec::new(),
-		scenarios_header_trailing: None,
-		scenarios_tail_comments: Vec::new(),
-		scenarios_closing_trailing: None,
-		..m.clone()
-	};
-
-	let summaries: Vec<ScenarioSummary> = m
-		.scenarios
+	let any_honest = scenarios[0].1 > 0;
+	let query_variants: Vec<Vec<Query>> = m
+		.queries
 		.iter()
-		.map(|s| ScenarioSummary {
+		.map(|query| {
+			copies
+				.iter()
+				.zip(&scenarios)
+				.skip(1)
+				.filter(|&(_, &(_, corrupt_from))| !any_honest || corrupt_from > 0)
+				.map(|(copy, _)| copy.query(query))
+				.filter(|variant| !query.same_shape(variant))
+				.collect()
+		})
+		.collect();
+
+	let summaries: Vec<ScenarioSummary> = scenarios
+		.iter()
+		.map(|&(s, corrupt_from)| ScenarioSummary {
 			principal: Arc::clone(&s.principal_name),
 			bindings: s
 				.bindings
 				.iter()
 				.map(|(t, v)| (Arc::clone(&t.name), Arc::clone(&v.name)))
 				.collect(),
-			corrupt_from: Some(scenario_corrupt_from(s, &compromised, &mentions, &keyed))
-				.filter(|&phase| phase != i32::MAX),
+			corrupt_from: Some(corrupt_from).filter(|&phase| phase != i32::MAX),
 		})
 		.collect();
 
@@ -158,39 +136,79 @@ pub(crate) fn expand_scenarios(m: &Model, sessions: u8) -> VResult<ScenarioExpan
 			 corrupt peer; per-scenario values and principals are suffixed @2 onward.",
 		),
 		InfoLevel::Info,
-		false,
 	);
 
-	Ok(ScenarioExpansion {
-		model,
-		honest,
-		summaries,
-		query_variants,
-		interchangeable: interchangeable_clones(m, &principals, count, &pids),
+	Ok(Expansion {
+		model: Model {
+			blocks,
+			scenarios: Vec::new(),
+			..m.clone()
+		},
+		corrupt_from: Some(corrupt_from),
+		scenarios: summaries,
+		variants: query_variants,
+		siblings: IdMap::default(),
+		interchangeable: interchangeable_clones(&principals, &scenarios, &copies),
 		actors: principals
 			.iter()
-			.flat_map(|&(id, _)| (0..count).map(move |k| (id, k)))
-			.map(|(id, k)| (mapped_principal(id, k, &pids), id))
+			.flat_map(|&(id, _)| copies.iter().map(move |copy| (copy.principal_id(id), id)))
 			.collect(),
-		bound: m
-			.scenarios
+		bound: scenarios
 			.iter()
-			.flat_map(|s| s.bindings.iter())
-			.filter(|(target, value)| target.id != value.id)
+			.flat_map(|(s, _)| rebindings(s))
 			.map(|(_, value)| value.id)
 			.collect(),
 	})
 }
 
-fn peer_binding_key(m: &Model, k: usize, principal: PrincipalId) -> Vec<(ValueId, ValueId)> {
-	let scenario = &m.scenarios[k];
-	if scenario.principal != principal {
-		return Vec::new();
-	}
-	let mut out: Vec<(ValueId, ValueId)> = scenario
+fn rebindings(scenario: &Scenario) -> impl Iterator<Item = &(Constant, Constant)> {
+	scenario
 		.bindings
 		.iter()
 		.filter(|(target, value)| target.id != value.id)
+}
+
+fn bound<'p>(p: &'p Principal, scenario: &Scenario) -> Cow<'p, Principal> {
+	if scenario.principal != p.id {
+		return Cow::Borrowed(p);
+	}
+	let bind = |c: &Constant| match scenario
+		.bindings
+		.iter()
+		.find(|(target, _)| target.id == c.id)
+	{
+		Some((_, value)) => Constant {
+			guard: c.guard,
+			..value.clone()
+		},
+		None => c.clone(),
+	};
+	let mut out = p.clone();
+	out.expressions.retain_mut(|expr| {
+		let declared = !expr.constants.is_empty();
+		if expr.kind == Declaration::Knows {
+			expr.constants
+				.retain(|c| !rebindings(scenario).any(|(target, _)| target.id == c.id));
+		}
+		if declared && expr.constants.is_empty() {
+			return false;
+		}
+		for c in &mut expr.constants {
+			*c = bind(c);
+		}
+		if let Some(value) = &mut expr.assigned {
+			*value = map_constants(value, &bind);
+		}
+		true
+	});
+	Cow::Owned(out)
+}
+
+fn peer_binding_key(scenario: &Scenario, principal: PrincipalId) -> Vec<(ValueId, ValueId)> {
+	if scenario.principal != principal {
+		return Vec::new();
+	}
+	let mut out: Vec<(ValueId, ValueId)> = rebindings(scenario)
 		.map(|(target, value)| (target.id, value.id))
 		.collect();
 	out.sort_unstable();
@@ -198,21 +216,22 @@ fn peer_binding_key(m: &Model, k: usize, principal: PrincipalId) -> Vec<(ValueId
 }
 
 fn interchangeable_clones(
-	m: &Model,
 	principals: &[(PrincipalId, String)],
-	count: usize,
-	pids: &HashMap<(PrincipalId, usize), (PrincipalId, String)>,
-) -> Vec<(PrincipalId, PrincipalId)> {
-	let mut out = Vec::new();
+	scenarios: &[(&Scenario, i32)],
+	copies: &[ModelCopy],
+) -> IdMap<PrincipalId, PrincipalId> {
+	let mut out = IdMap::default();
 	for &(id, _) in principals {
-		let keys: Vec<Vec<(ValueId, ValueId)>> =
-			(0..count).map(|k| peer_binding_key(m, k, id)).collect();
-		for k in 0..count {
-			let canonical = keys.iter().position(|key| *key == keys[k]).unwrap_or(k);
-			out.push((
-				mapped_principal(id, k, pids),
-				mapped_principal(id, canonical, pids),
-			));
+		let keys: Vec<Vec<(ValueId, ValueId)>> = scenarios
+			.iter()
+			.map(|(s, _)| peer_binding_key(s, id))
+			.collect();
+		for (k, key) in keys.iter().enumerate() {
+			let canonical = keys.iter().position(|other| other == key).unwrap_or(k);
+			out.insert(
+				copies[k].principal_id(id),
+				copies[canonical].principal_id(id),
+			);
 		}
 	}
 	out
@@ -220,9 +239,7 @@ fn interchangeable_clones(
 
 #[cfg(test)]
 pub(crate) fn honesty_profile(m: &Model) -> std::collections::BTreeMap<String, i32> {
-	let compromised = compromised_constants(m);
-	let keyed = key_material_constants(m);
-	let mentions = assignment_mentions(m);
+	let corruption = Corruption::of(m);
 	m.scenarios
 		.iter()
 		.map(|s| {
@@ -233,85 +250,80 @@ pub(crate) fn honesty_profile(m: &Model) -> std::collections::BTreeMap<String, i
 				.collect();
 			(
 				format!("{}[{}]", s.principal_name, bindings.join(", ")),
-				scenario_corrupt_from(s, &compromised, &mentions, &keyed),
+				corruption.corrupt_from(s),
 			)
 		})
 		.collect()
 }
 
-fn honest_first_corrupt_from(
-	m: &Model,
-	compromised: &IdMap<ValueId, i32>,
-	mentions: &IdMap<ValueId, Vec<ValueId>>,
-	keyed: &IdSet<ValueId>,
-) -> i32 {
-	m.scenarios
-		.first()
-		.map(|s| scenario_corrupt_from(s, compromised, mentions, keyed))
-		.unwrap_or(i32::MAX)
+struct Corruption {
+	compromised: IdMap<ValueId, i32>,
+	mentions: IdMap<ValueId, Vec<ValueId>>,
+	keyed: IdSet<ValueId>,
 }
 
-fn honest_first(
-	scenarios: &[Scenario],
-	compromised: &IdMap<ValueId, i32>,
-	mentions: &IdMap<ValueId, Vec<ValueId>>,
-	keyed: &IdSet<ValueId>,
-) -> Vec<Scenario> {
-	let mut out: Vec<Scenario> = scenarios.to_vec();
-	out.sort_by_key(|s| std::cmp::Reverse(scenario_corrupt_from(s, compromised, mentions, keyed)));
-	out
+impl Corruption {
+	fn of(m: &Model) -> Corruption {
+		Corruption {
+			compromised: compromised_constants(m),
+			mentions: assignment_mentions(m),
+			keyed: key_material_constants(m),
+		}
+	}
+
+	fn corrupt_from(&self, scenario: &Scenario) -> i32 {
+		rebindings(scenario)
+			.flat_map(|(target, value)| {
+				let keyed = |id: &ValueId| self.keyed.contains(id);
+				let value_keyed = keyed(&target.id) || keyed(&value.id);
+				value_keyed.then_some(value.id).into_iter().chain(
+					self.mentions
+						.get(&value.id)
+						.into_iter()
+						.flatten()
+						.copied()
+						.filter(keyed),
+				)
+			})
+			.filter_map(|id| self.compromised.get(&id).copied())
+			.min()
+			.unwrap_or(i32::MAX)
+	}
+}
+
+fn expressions(m: &Model) -> impl Iterator<Item = &Expression> {
+	m.blocks
+		.iter()
+		.filter_map(|block| match block {
+			Block::Principal(p) => Some(&p.expressions),
+			_ => None,
+		})
+		.flatten()
+}
+
+fn declared_ids(expr: &Expression) -> impl Iterator<Item = ValueId> + '_ {
+	expr.constants.iter().map(|c| c.id)
 }
 
 fn assignment_mentions(m: &Model) -> IdMap<ValueId, Vec<ValueId>> {
 	let mut out: IdMap<ValueId, Vec<ValueId>> = IdMap::default();
-	for block in &m.blocks {
-		let Block::Principal(p) = block else {
+	for expression in expressions(m) {
+		let Some(value) = &expression.assigned else {
 			continue;
 		};
-		for expression in &p.expressions {
-			let Some(value) = &expression.assigned else {
-				continue;
-			};
-			let ids: Vec<ValueId> = value.constant_leaves().map(|c| c.id).collect();
-			for c in &expression.constants {
-				out.entry(c.id).or_insert_with(|| ids.clone());
-			}
+		let ids: Vec<ValueId> = value.constant_leaves().map(|c| c.id).collect();
+		for id in declared_ids(expression) {
+			out.entry(id).or_insert_with(|| ids.clone());
 		}
 	}
 	out
 }
 
-fn scenario_corrupt_from(
-	scenario: &Scenario,
-	compromised: &IdMap<ValueId, i32>,
-	mentions: &IdMap<ValueId, Vec<ValueId>>,
-	keyed: &IdSet<ValueId>,
-) -> i32 {
-	scenario
-		.bindings
-		.iter()
-		.filter(|(target, value)| target.id != value.id)
-		.filter_map(|(target, value)| {
-			std::iter::once(value.id)
-				.filter(|_| keyed.contains(&target.id))
-				.chain(
-					std::iter::once(value.id)
-						.chain(mentions.get(&value.id).into_iter().flatten().copied())
-						.filter(|id| keyed.contains(id)),
-				)
-				.filter_map(|id| compromised.get(&id).copied())
-				.min()
-		})
-		.min()
-		.unwrap_or(i32::MAX)
-}
-
 fn sanity_scenarios(m: &Model) -> VResult<()> {
 	let principals = m.declared_principals();
-	let known = known_constants(m);
 	let declared = declared_constants(m);
 	for scenario in &m.scenarios {
-		let Some((id, _)) = principals
+		let Some(&(id, _)) = principals
 			.iter()
 			.find(|(_, name)| name.as_str() == &*scenario.principal_name)
 		else {
@@ -334,19 +346,15 @@ fn sanity_scenarios(m: &Model) -> VResult<()> {
 			}
 			return Err(e.or_span(scenario.span));
 		};
+		let known = known_constants(m, id);
 		let mut bound: Vec<ValueId> = Vec::new();
 		for (target, value) in &scenario.bindings {
-			if !known.get(id).is_some_and(|set| set.contains(&target.id)) {
-				let names: Vec<String> = known
-					.get(id)
-					.map(|set| {
-						declared
-							.iter()
-							.filter(|(cid, _)| set.contains(cid))
-							.map(|(_, name)| name.clone())
-							.collect()
-					})
-					.unwrap_or_default();
+			if !known.contains(&target.id) {
+				let names: Vec<String> = declared
+					.iter()
+					.filter(|(cid, _)| known.contains(cid))
+					.map(|(_, name)| name.clone())
+					.collect();
 				let mut e = VerifpalError::sanity(
 					format!(
 						"scenario binds `{}`, which {} does not declare with `knows`",
@@ -439,42 +447,31 @@ fn message_carrying(m: &Model, target: ValueId) -> Option<String> {
 	})
 }
 
-fn known_constants(m: &Model) -> IdMap<PrincipalId, IdSet<ValueId>> {
-	let mut out: IdMap<PrincipalId, IdSet<ValueId>> = IdMap::default();
-	for block in &m.blocks {
-		let Block::Principal(p) = block else {
-			continue;
-		};
-		let entry = out.entry(p.id).or_default();
-		for expr in &p.expressions {
-			if expr.kind != Declaration::Knows {
-				continue;
-			}
-			for c in &expr.constants {
-				entry.insert(c.id);
-			}
-		}
-	}
-	out
+fn known_constants(m: &Model, principal: PrincipalId) -> IdSet<ValueId> {
+	m.blocks
+		.iter()
+		.filter_map(|block| match block {
+			Block::Principal(p) if p.id == principal => Some(&p.expressions),
+			_ => None,
+		})
+		.flatten()
+		.filter(|expr| expr.kind == Declaration::Knows)
+		.flat_map(declared_ids)
+		.collect()
 }
 
 fn declared_constants(m: &Model) -> Vec<(ValueId, String)> {
 	let mut out: Vec<(ValueId, String)> = Vec::new();
-	for block in &m.blocks {
-		let Block::Principal(p) = block else {
+	for expr in expressions(m) {
+		if !matches!(
+			expr.kind,
+			Declaration::Knows | Declaration::Generates | Declaration::Assignment
+		) {
 			continue;
-		};
-		for expr in &p.expressions {
-			if !matches!(
-				expr.kind,
-				Declaration::Knows | Declaration::Generates | Declaration::Assignment
-			) {
-				continue;
-			}
-			for c in &expr.constants {
-				if !out.iter().any(|(id, _)| *id == c.id) {
-					out.push((c.id, c.name.to_string()));
-				}
+		}
+		for c in &expr.constants {
+			if !out.iter().any(|(id, _)| *id == c.id) {
+				out.push((c.id, c.name.to_string()));
 			}
 		}
 	}
@@ -483,28 +480,16 @@ fn declared_constants(m: &Model) -> Vec<(ValueId, String)> {
 
 fn secret_declarations(m: &Model) -> IdSet<ValueId> {
 	let mut out: IdSet<ValueId> = IdSet::default();
-	for block in &m.blocks {
-		let Block::Principal(p) = block else {
-			continue;
-		};
-		for expr in &p.expressions {
-			let secret = match expr.kind {
-				Declaration::Generates => true,
-				Declaration::Knows => matches!(expr.qualifier, Some(Qualifier::Private)),
-				_ => false,
-			};
-			if secret {
-				for c in &expr.constants {
-					out.insert(c.id);
-				}
-			}
-			for term in expr.assigned.iter().flat_map(crate::value::subterms) {
-				if let Value::Primitive(inner) = term
-					&& crate::primitive::primitive_is_key_derivation(inner.id)
-					&& let Some(Value::Constant(c)) = inner.arguments.first()
-				{
-					out.insert(c.id);
-				}
+	for expr in expressions(m) {
+		if expr.declares_secret() {
+			out.extend(declared_ids(expr));
+		}
+		for term in expr.assigned.iter().flat_map(crate::value::subterms) {
+			if let Value::Primitive(inner) = term
+				&& crate::primitive::primitive_is_key_derivation(inner.id)
+				&& let Some(Value::Constant(c)) = inner.arguments.first()
+			{
+				out.insert(c.id);
 			}
 		}
 	}
@@ -513,87 +498,45 @@ fn secret_declarations(m: &Model) -> IdSet<ValueId> {
 
 fn key_material_constants(m: &Model) -> IdSet<ValueId> {
 	let mut out: IdSet<ValueId> = IdSet::default();
-	for block in &m.blocks {
-		let Block::Principal(p) = block else {
-			continue;
-		};
-		for expr in &p.expressions {
-			if expr.kind == Declaration::Knows && expr.qualifier == Some(Qualifier::Private) {
-				out.extend(expr.constants.iter().map(|c| c.id));
-			}
-			for term in expr.assigned.iter().flat_map(crate::value::subterms) {
-				let Value::Primitive(inner) = term else {
-					continue;
-				};
-				for at in crate::primitive::secret_positions(inner.id) {
-					match inner.arguments.get(at) {
-						Some(Value::Constant(c)) => {
-							out.insert(c.id);
-						}
-						Some(Value::Primitive(_)) => {
-							out.extend(expr.constants.iter().map(|c| c.id));
-						}
-						None => {}
+	for expr in expressions(m) {
+		if expr.kind == Declaration::Knows && expr.qualifier == Some(Qualifier::Private) {
+			out.extend(declared_ids(expr));
+		}
+		for term in expr.assigned.iter().flat_map(crate::value::subterms) {
+			let Value::Primitive(inner) = term else {
+				continue;
+			};
+			for at in crate::primitive::secret_positions(inner.id) {
+				match inner.arguments.get(at) {
+					Some(Value::Constant(c)) => {
+						out.insert(c.id);
 					}
+					Some(Value::Primitive(_)) => out.extend(declared_ids(expr)),
+					None => {}
 				}
 			}
 		}
 	}
 	loop {
 		let before = out.len();
-		for block in &m.blocks {
-			let Block::Principal(p) = block else {
-				continue;
-			};
-			for expr in &p.expressions {
-				if let Some(Value::Primitive(inner)) = &expr.assigned
-					&& crate::primitive::primitive_is_key_derivation(inner.id)
-					&& let Some(Value::Constant(c)) = inner.arguments.first()
-					&& out.contains(&c.id)
-				{
-					out.extend(expr.constants.iter().map(|c| c.id));
-				}
+		for expr in expressions(m) {
+			if let Some(Value::Primitive(inner)) = &expr.assigned
+				&& crate::primitive::primitive_is_key_derivation(inner.id)
+				&& let Some(Value::Constant(c)) = inner.arguments.first()
+				&& out.contains(&c.id)
+			{
+				out.extend(declared_ids(expr));
 			}
 		}
 		if out.len() == before {
-			break;
+			return out;
 		}
 	}
-	out
-}
-
-fn public_declarations(m: &Model) -> IdSet<ValueId> {
-	let mut out: IdSet<ValueId> = IdSet::default();
-	for block in &m.blocks {
-		let Block::Principal(p) = block else {
-			continue;
-		};
-		for expr in &p.expressions {
-			if expr.kind == Declaration::Knows && expr.qualifier == Some(Qualifier::Public) {
-				for c in &expr.constants {
-					out.insert(c.id);
-				}
-			}
-		}
-	}
-	out
 }
 
 fn compromised_constants(m: &Model) -> IdMap<ValueId, i32> {
 	let secret = secret_declarations(m);
-	let public = public_declarations(m);
-	let assignments: IdMap<ValueId, &Value> = m
-		.blocks
-		.iter()
-		.filter_map(|block| match block {
-			Block::Principal(p) => Some(&p.expressions),
-			_ => None,
-		})
-		.flatten()
-		.filter_map(|expression| expression.assigned.as_ref().map(|v| (expression, v)))
-		.flat_map(|(expression, value)| expression.constants.iter().map(move |c| (c.id, value)))
-		.collect();
-	let mut disclosures: Vec<(&Constant, i32)> = Vec::new();
+	let mut disclosures: Vec<(ValueId, i32)> = Vec::new();
 	let mut phase = 0i32;
 	for block in &m.blocks {
 		match block {
@@ -601,356 +544,145 @@ fn compromised_constants(m: &Model) -> IdMap<ValueId, i32> {
 			Block::Principal(p) => {
 				for expression in &p.expressions {
 					if expression.kind == Declaration::Leaks {
-						disclosures.extend(expression.constants.iter().map(|c| (c, phase)));
+						disclosures.extend(declared_ids(expression).map(|id| (id, phase)));
 					}
 				}
 			}
 			Block::Message(message) => {
-				disclosures.extend(message.constants.iter().map(|c| (c, phase)));
+				disclosures.extend(message.constants.iter().map(|c| (c.id, phase)));
 			}
 		}
 	}
-	let mut out: IdMap<ValueId, i32> = IdMap::default();
+	let mut attacker = Disclosure {
+		assignments: expressions(m)
+			.filter_map(|expression| expression.assigned.as_ref().map(|v| (expression, v)))
+			.flat_map(|(expression, value)| declared_ids(expression).map(move |id| (id, value)))
+			.collect(),
+		public: expressions(m)
+			.filter(|expr| {
+				expr.kind == Declaration::Knows && expr.qualifier == Some(Qualifier::Public)
+			})
+			.flat_map(declared_ids)
+			.collect(),
+		compromised: IdMap::default(),
+	};
 	loop {
 		let mut changed = false;
-		for &(c, phase) in &disclosures {
-			for (id, at) in exposed_constants(c, phase, &assignments, &out, &public) {
-				if secret.contains(&id) && out.get(&id).is_none_or(|&known| at < known) {
-					out.insert(id, at);
+		for &(id, phase) in &disclosures {
+			for (exposed, at) in attacker.exposed(id, phase) {
+				if secret.contains(&exposed)
+					&& attacker
+						.compromised
+						.get(&exposed)
+						.is_none_or(|&known| at < known)
+				{
+					attacker.compromised.insert(exposed, at);
 					changed = true;
 				}
 			}
 		}
-		for block in &m.blocks {
-			let Block::Principal(p) = block else {
+		for expression in expressions(m) {
+			let Some(value) = &expression.assigned else {
 				continue;
 			};
-			for expression in &p.expressions {
-				let Some(value) = &expression.assigned else {
-					continue;
-				};
-				let Some(from) = computable_from(value, &out, &public) else {
-					continue;
-				};
-				for c in &expression.constants {
-					match out.get(&c.id) {
-						Some(&at) if at <= from => {}
-						_ => {
-							out.insert(c.id, from);
-							changed = true;
-						}
-					}
+			let Some(from) = attacker.computable(value) else {
+				continue;
+			};
+			for id in declared_ids(expression) {
+				if attacker.compromised.get(&id).is_none_or(|&at| at > from) {
+					attacker.compromised.insert(id, from);
+					changed = true;
 				}
 			}
 		}
 		if !changed {
-			break;
+			return attacker.compromised;
 		}
 	}
-	out
 }
 
-fn exposed_constants(
-	c: &Constant,
-	phase: i32,
-	assignments: &IdMap<ValueId, &Value>,
-	compromised: &IdMap<ValueId, i32>,
-	public: &IdSet<ValueId>,
-) -> IdMap<ValueId, i32> {
-	let mut seen: IdMap<ValueId, i32> = IdMap::from_iter([(c.id, phase)]);
-	let mut primitives = IdSet::default();
-	let mut pending: Vec<(&Value, i32)> = assignments
-		.get(&c.id)
-		.map(|v| (*v, phase))
-		.into_iter()
-		.collect();
-	while let Some((value, at)) = pending.pop() {
-		match value {
-			Value::Constant(c) => {
-				if seen.get(&c.id).is_none_or(|&known| at < known) {
-					seen.insert(c.id, at);
-					pending.extend(assignments.get(&c.id).map(|v| (*v, at)));
-				}
-			}
-			Value::Primitive(p) if primitives.insert(Arc::as_ptr(p) as usize) => {
-				if crate::primitive::primitive_core_reveals_args(p.id) {
-					pending.extend(p.arguments.iter().map(|a| (a, at)));
-				} else if let Some((opened, reveals)) =
-					opened_from(p, assignments, compromised, public)
-				{
-					pending.extend(reveals.into_iter().map(|a| (a, at.max(opened))));
-				}
-			}
-			_ => {}
-		}
-	}
-	seen
+struct Disclosure<'m> {
+	assignments: IdMap<ValueId, &'m Value>,
+	public: IdSet<ValueId>,
+	compromised: IdMap<ValueId, i32>,
 }
 
-fn opened_from<'a>(
-	p: &'a Primitive,
-	assignments: &IdMap<ValueId, &Value>,
-	compromised: &IdMap<ValueId, i32>,
-	public: &IdSet<ValueId>,
-) -> Option<(i32, Vec<&'a Value>)> {
-	let rule = crate::primitive::primitive_get(p.id)
-		.ok()?
-		.decompose
-		.as_ref()?;
-	if rule.output.is_some_and(|output| output != p.output) {
-		return None;
-	}
-	let mut at = 0;
-	for &idx in &rule.given {
-		let mut argument = p.arguments.get(idx)?;
-		let mut hops = 0;
-		while let Value::Constant(c) = argument
-			&& let Some(assigned) = assignments.get(&c.id)
-			&& hops < assignments.len()
-		{
-			argument = assigned;
-			hops += 1;
+impl<'m> Disclosure<'m> {
+	fn exposed(&self, id: ValueId, phase: i32) -> IdMap<ValueId, i32> {
+		let mut seen: IdMap<ValueId, i32> = IdMap::from_iter([(id, phase)]);
+		let mut primitives = IdSet::default();
+		let mut pending: Vec<(&'m Value, i32)> = self
+			.assignments
+			.get(&id)
+			.map(|v| (*v, phase))
+			.into_iter()
+			.collect();
+		while let Some((value, at)) = pending.pop() {
+			match value {
+				Value::Constant(c) => {
+					if seen.get(&c.id).is_none_or(|&known| at < known) {
+						seen.insert(c.id, at);
+						pending.extend(self.assignments.get(&c.id).map(|v| (*v, at)));
+					}
+				}
+				Value::Primitive(p) if primitives.insert(Arc::as_ptr(p) as usize) => {
+					if crate::primitive::primitive_core_reveals_args(p.id) {
+						pending.extend(p.arguments.iter().map(|a| (a, at)));
+					} else if let Some((opened, reveals)) = self.opened(p) {
+						pending.extend(reveals.into_iter().map(|a| (a, at.max(opened))));
+					}
+				}
+				_ => {}
+			}
 		}
-		let (key, valid) = (rule.filter)(p, argument, idx);
-		if !valid {
+		seen
+	}
+
+	fn opened<'a>(&self, p: &'a Primitive) -> Option<(i32, Vec<&'a Value>)> {
+		let rule = crate::primitive::primitive_get(p.id)
+			.ok()?
+			.decompose
+			.as_ref()?;
+		if rule.output.is_some_and(|output| output != p.output) {
 			return None;
 		}
-		at = at.max(computable_from(&key, compromised, public)?);
-	}
-	let reveals = rule
-		.reveals
-		.iter()
-		.filter_map(|reveal| match *reveal {
-			crate::primitive::Reveal::Argument(i) => p.arguments.get(i),
-			crate::primitive::Reveal::Output(_) => None,
-		})
-		.collect();
-	Some((at, reveals))
-}
-
-fn computable_from(
-	v: &Value,
-	compromised: &IdMap<ValueId, i32>,
-	public: &IdSet<ValueId>,
-) -> Option<i32> {
-	let mut at = 0;
-	for c in v.constant_leaves() {
-		if c.is_nil() || public.contains(&c.id) {
-			continue;
+		let mut at = 0;
+		for &idx in &rule.given {
+			let mut argument = p.arguments.get(idx)?;
+			let mut hops = 0;
+			while let Value::Constant(c) = argument
+				&& let Some(assigned) = self.assignments.get(&c.id)
+				&& hops < self.assignments.len()
+			{
+				argument = assigned;
+				hops += 1;
+			}
+			let (key, valid) = (rule.filter)(p, argument, idx);
+			if !valid {
+				return None;
+			}
+			at = at.max(self.computable(&key)?);
 		}
-		at = at.max(compromised.get(&c.id).copied()?);
-	}
-	Some(at)
-}
-
-fn clone_principal_ids(
-	principals: &[(PrincipalId, String)],
-	count: usize,
-	highest: PrincipalId,
-) -> VResult<HashMap<(PrincipalId, usize), (PrincipalId, String)>> {
-	let mut next = principals
-		.iter()
-		.map(|&(id, _)| id)
-		.max()
-		.unwrap_or(0)
-		.max(highest);
-	let mut out = HashMap::new();
-	for k in 1..count {
-		for (id, name) in principals {
-			next = next.checked_add(1).ok_or_else(|| {
-				VerifpalError::internal("scenario expansion exhausted principal ids".into())
-			})?;
-			out.insert((*id, k), (next, format!("{name}@{}", k + 1)));
-		}
-	}
-	Ok(out)
-}
-
-fn mapped_principal(
-	id: PrincipalId,
-	k: usize,
-	pids: &HashMap<(PrincipalId, usize), (PrincipalId, String)>,
-) -> PrincipalId {
-	pids.get(&(id, k)).map(|&(id, _)| id).unwrap_or(id)
-}
-
-fn scenario_value_id(base: ValueId, k: usize, sessions: u8) -> ValueId {
-	copy_value_id(base, k as u32 * sessions as u32)
-}
-
-fn map_constant(c: &Constant, k: usize, sessions: u8, freshen: &IdSet<ValueId>) -> Constant {
-	if k == 0 || !freshen.contains(&c.id) {
-		return c.clone();
-	}
-	Constant {
-		name: Arc::from(format!("{}@{}", c.name, k + 1)),
-		id: scenario_value_id(c.id, k, sessions),
-		..c.clone()
-	}
-}
-
-fn map_value(v: &Value, k: usize, sessions: u8, freshen: &IdSet<ValueId>) -> Value {
-	match v {
-		Value::Constant(c) => Value::Constant(map_constant(c, k, sessions, freshen)),
-		Value::Primitive(p) => {
-			let arguments = p
-				.arguments
-				.iter()
-				.map(|a| map_value(a, k, sessions, freshen))
-				.collect();
-			Value::Primitive(Arc::new(p.with_arguments(arguments)))
-		}
-	}
-}
-
-fn bind(c: &Constant, scenario: &Scenario, principal: PrincipalId) -> Constant {
-	if scenario.principal != principal {
-		return c.clone();
-	}
-	for (target, value) in &scenario.bindings {
-		if target.id == c.id {
-			return Constant {
-				guard: c.guard,
-				..value.clone()
-			};
-		}
-	}
-	c.clone()
-}
-
-fn bind_value(v: &Value, scenario: &Scenario, principal: PrincipalId) -> Value {
-	match v {
-		Value::Constant(c) => Value::Constant(bind(c, scenario, principal)),
-		Value::Primitive(p) => {
-			let arguments = p
-				.arguments
-				.iter()
-				.map(|a| bind_value(a, scenario, principal))
-				.collect();
-			Value::Primitive(Arc::new(p.with_arguments(arguments)))
-		}
-	}
-}
-
-fn clone_principal(
-	p: &Principal,
-	k: usize,
-	sessions: u8,
-	freshen: &IdSet<ValueId>,
-	pids: &HashMap<(PrincipalId, usize), (PrincipalId, String)>,
-	m: &Model,
-) -> Principal {
-	let (id, name) = pids
-		.get(&(p.id, k))
-		.cloned()
-		.unwrap_or((p.id, p.name.clone()));
-	let scenario = &m.scenarios[k];
-	Principal {
-		name,
-		id,
-		span: p.span,
-		expressions: p
-			.expressions
+		let reveals = rule
+			.reveals
 			.iter()
-			.filter_map(|expr| {
-				let constants: Vec<Constant> = expr
-					.constants
-					.iter()
-					.filter(|c| !rebinds(expr, scenario, p.id, c))
-					.map(|c| map_constant(&bind(c, scenario, p.id), k, sessions, freshen))
-					.collect();
-				if constants.is_empty() && !expr.constants.is_empty() {
-					return None;
-				}
-				Some(Expression {
-					span: expr.span,
-					kind: expr.kind,
-					qualifier: expr.qualifier,
-					constants,
-					assigned: expr
-						.assigned
-						.as_ref()
-						.map(|v| map_value(&bind_value(v, scenario, p.id), k, sessions, freshen)),
-					leading_comments: Vec::new(),
-					trailing_comment: None,
-				})
+			.filter_map(|reveal| match *reveal {
+				crate::primitive::Reveal::Argument(i) => p.arguments.get(i),
+				crate::primitive::Reveal::Output(_) => None,
 			})
-			.collect(),
-		leading_comments: Vec::new(),
-		header_trailing: None,
-		tail_comments: Vec::new(),
-		closing_trailing: None,
+			.collect();
+		Some((at, reveals))
 	}
-}
 
-fn rebinds(expr: &Expression, scenario: &Scenario, principal: PrincipalId, c: &Constant) -> bool {
-	scenario.principal == principal
-		&& expr.kind == Declaration::Knows
-		&& scenario
-			.bindings
-			.iter()
-			.any(|(t, v)| t.id == c.id && v.id != c.id)
-}
-
-fn clone_query(
-	q: &Query,
-	k: usize,
-	sessions: u8,
-	freshen: &IdSet<ValueId>,
-	pids: &HashMap<(PrincipalId, usize), (PrincipalId, String)>,
-) -> Query {
-	Query {
-		span: q.span,
-		kind: q.kind,
-		constants: q
-			.constants
-			.iter()
-			.map(|c| map_constant(c, k, sessions, freshen))
-			.collect(),
-		message: clone_message(&q.message, k, sessions, freshen, pids),
-		options: q
-			.options
-			.iter()
-			.map(|o| QueryOption {
-				kind: o.kind,
-				message: clone_message(&o.message, k, sessions, freshen, pids),
-				leading_comments: Vec::new(),
-				trailing_comment: None,
-			})
-			.collect(),
-		leading_comments: Vec::new(),
-		trailing_comment: None,
-	}
-}
-
-fn clone_message(
-	msg: &Message,
-	k: usize,
-	sessions: u8,
-	freshen: &IdSet<ValueId>,
-	pids: &HashMap<(PrincipalId, usize), (PrincipalId, String)>,
-) -> Message {
-	let (sender, sender_name) = pids
-		.get(&(msg.sender, k))
-		.map(|(id, name)| (*id, Arc::<str>::from(name.as_str())))
-		.unwrap_or((msg.sender, Arc::clone(&msg.sender_name)));
-	let (recipient, recipient_name) = pids
-		.get(&(msg.recipient, k))
-		.map(|(id, name)| (*id, Arc::<str>::from(name.as_str())))
-		.unwrap_or((msg.recipient, Arc::clone(&msg.recipient_name)));
-	Message {
-		span: msg.span,
-		sender,
-		sender_name,
-		recipient,
-		recipient_name,
-		constants: msg
-			.constants
-			.iter()
-			.map(|c| map_constant(c, k, sessions, freshen))
-			.collect(),
-		leading_comments: Vec::new(),
-		trailing_comment: None,
+	fn computable(&self, v: &Value) -> Option<i32> {
+		let mut at = 0;
+		for c in v.constant_leaves() {
+			if c.is_nil() || self.public.contains(&c.id) {
+				continue;
+			}
+			at = at.max(self.compromised.get(&c.id).copied()?);
+		}
+		Some(at)
 	}
 }
 
@@ -958,6 +690,10 @@ fn clone_message(
 mod tests {
 	use super::*;
 	use crate::parser::parse_string;
+
+	fn starts_honest(s: &ScenarioSummary) -> bool {
+		s.corrupt_from.is_none_or(|phase| phase > 0)
+	}
 
 	const SRC: &str = "attacker[active]\n\
 		principal Alice[\n\
@@ -1001,7 +737,7 @@ mod tests {
 	fn a_scenario_bound_to_a_leaked_peer_is_not_honest() {
 		let m = parse_string("scx.vp", SRC).expect("parses");
 		let e = expand_scenarios(&m, 1).expect("expands");
-		assert_eq!(e.honest.len(), 3);
+		assert_eq!(e.corrupt_from.map(|c| c.len()), Some(3));
 	}
 
 	#[test]
@@ -1039,9 +775,9 @@ mod tests {
 		let src = SRC.replace("Alice[scx_gpeer = scx_gb]\n", "");
 		let m = parse_string("scx.vp", &src).expect("parses");
 		let e = expand_scenarios(&m, 1).expect("expands");
-		assert!(e.honest.is_empty());
-		assert_eq!(e.summaries.len(), 1);
-		assert!(!e.summaries[0].honest());
+		assert!(e.corrupt_from.as_ref().is_some_and(|c| c.is_empty()));
+		assert_eq!(e.scenarios.len(), 1);
+		assert!(!starts_honest(&e.scenarios[0]));
 	}
 
 	#[test]
@@ -1109,9 +845,9 @@ mod tests {
 		let m = parse_string("scx.vp", &src).expect("parses");
 		let e = expand_scenarios(&m, 1).expect("expands");
 		assert!(
-			e.summaries.iter().all(|s| s.honest()),
+			e.scenarios.iter().all(starts_honest),
 			"only a leaked secret marks a peer corrupt: {:?}",
-			e.summaries
+			e.scenarios
 		);
 	}
 
@@ -1121,17 +857,17 @@ mod tests {
 		let m = parse_string("scx.vp", &inline).expect("parses");
 		let e = expand_scenarios(&m, 1).expect("expands");
 		assert!(
-			!e.summaries[1].honest(),
+			!starts_honest(&e.scenarios[1]),
 			"HASH(scx_mk) is Mallory's private key and scx_mk leaks: {:?}",
-			e.summaries
+			e.scenarios
 		);
 		let kept = inline.replace("leaks scx_mk", "leaks scx_gm");
 		let m = parse_string("scx.vp", &kept).expect("parses");
 		let e = expand_scenarios(&m, 1).expect("expands");
 		assert!(
-			e.summaries.iter().all(|s| s.honest()),
+			e.scenarios.iter().all(starts_honest),
 			"leaking the public key computes nothing: {:?}",
-			e.summaries
+			e.scenarios
 		);
 	}
 
@@ -1161,10 +897,10 @@ mod tests {
 			let m = parse_string("scx.vp", &src).expect("parses");
 			let e = expand_scenarios(&m, 1).expect("expands");
 			assert_eq!(
-				e.summaries[1].honest(),
+				starts_honest(&e.scenarios[1]),
 				honest,
 				"{wrap} with {extra:?}: {:?}",
-				e.summaries
+				e.scenarios
 			);
 		}
 	}
@@ -1192,20 +928,20 @@ mod tests {
 			]\n";
 		let m = parse_string("sbk.vp", src).expect("parses");
 		let e = expand_scenarios(&m, 1).expect("expands");
-		assert!(e.summaries[0].honest());
+		assert!(starts_honest(&e.scenarios[0]));
 		assert!(
-			!e.summaries[1].honest(),
+			!starts_honest(&e.scenarios[1]),
 			"sbk_km becomes Alice's key once bound there, and its only ingredient \
 			 goes out in the clear: {:?}",
-			e.summaries
+			e.scenarios
 		);
 		let m =
 			parse_string("sbk.vp", &src.replace("Mallory -> Alice: sbk_sm\n", "")).expect("parses");
 		let e = expand_scenarios(&m, 1).expect("expands");
 		assert!(
-			e.summaries.iter().all(|s| s.honest()),
+			e.scenarios.iter().all(starts_honest),
 			"an ingredient never disclosed leaves the bound key secret: {:?}",
-			e.summaries
+			e.scenarios
 		);
 	}
 
@@ -1219,11 +955,11 @@ mod tests {
 			.replace("leaks scx_mk", "leaks scx_mk2");
 		let m = parse_string("scx.vp", &src).expect("parses");
 		let e = expand_scenarios(&m, 1).expect("expands");
-		assert!(e.summaries[0].honest());
+		assert!(starts_honest(&e.scenarios[0]));
 		assert!(
-			!e.summaries[1].honest(),
+			!starts_honest(&e.scenarios[1]),
 			"a leaked assignment standing as a private key marks its peer corrupt: {:?}",
-			e.summaries
+			e.scenarios
 		);
 	}
 
@@ -1274,8 +1010,8 @@ mod tests {
 	fn a_leaked_private_key_still_makes_its_scenario_corrupt() {
 		let m = parse_string("scx.vp", SRC).expect("parses");
 		let e = expand_scenarios(&m, 1).expect("expands");
-		assert!(e.summaries[0].honest());
-		assert!(!e.summaries[1].honest());
+		assert!(starts_honest(&e.scenarios[0]));
+		assert!(!starts_honest(&e.scenarios[1]));
 	}
 
 	#[test]
@@ -1312,11 +1048,8 @@ mod tests {
 			confidentiality? pcl_m\n\
 			]\n";
 		let m = parse_string("pcl.vp", src).expect("parses");
-		let compromised = compromised_constants(&m);
-		let keyed = key_material_constants(&m);
-		let mentions = assignment_mentions(&m);
-		let corrupt_from =
-			|i: usize| scenario_corrupt_from(&m.scenarios[i], &compromised, &mentions, &keyed);
+		let corruption = Corruption::of(&m);
+		let corrupt_from = |i: usize| corruption.corrupt_from(&m.scenarios[i]);
 
 		assert_eq!(
 			corrupt_from(1),
@@ -1335,16 +1068,18 @@ mod tests {
 
 		let e = expand_scenarios(&m, 1).expect("expands");
 		assert!(
-			e.honest.values().any(|&at| at == 1),
+			e.corrupt_from
+				.as_ref()
+				.is_some_and(|c| c.values().any(|&at| at == 1)),
 			"the honest set records when a run stops being honest, not just whether"
 		);
 		assert!(
-			e.summaries[0].honest() && !e.summaries[1].honest(),
+			starts_honest(&e.scenarios[0]) && !starts_honest(&e.scenarios[1]),
 			"the block is normalised honest-first, so the run the written query names \
 			 is one that is honest at phase 0 whenever the model declares any"
 		);
 		assert!(
-			e.query_variants[0].is_empty(),
+			e.variants[0].is_empty(),
 			"the only other scenario is corrupt from phase 0, so it gets no instance \
 			 of the query: its claims are not the protocol's to keep"
 		);
@@ -1353,15 +1088,8 @@ mod tests {
 	#[test]
 	fn every_session_clone_of_an_honest_scenario_stays_honest() {
 		let m = parse_string("scx.vp", SRC).expect("parses");
-		let e = expand_scenarios(&m, 2).expect("expands");
-		let expanded =
-			crate::sessions::expand_sessions(&e.model, 2, &e.query_variants).expect("expands");
-		let mut honest = e.honest.clone();
-		for &(original, clone) in &expanded.principal_clones {
-			if let Some(&corrupt_from) = honest.get(&original) {
-				honest.insert(clone, corrupt_from);
-			}
-		}
+		let expanded = crate::verify::expand(&m, 2).expect("expands");
+		let honest = expanded.corrupt_from.expect("scenarios mark honesty");
 		assert_eq!(honest.len(), 6);
 		let corrupt = expanded
 			.model
@@ -1381,9 +1109,7 @@ mod tests {
 	#[test]
 	fn scenario_and_session_copies_never_share_an_id() {
 		let m = parse_string("scx.vp", SRC).expect("parses");
-		let e = expand_scenarios(&m, 2).expect("expands");
-		let expanded =
-			crate::sessions::expand_sessions(&e.model, 2, &e.query_variants).expect("expands");
+		let expanded = crate::verify::expand(&m, 2).expect("expands");
 		let mut seen: IdSet<ValueId> = IdSet::default();
 		for block in &expanded.model.blocks {
 			let Block::Principal(p) = block else {

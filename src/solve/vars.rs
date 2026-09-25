@@ -10,7 +10,7 @@ pub(crate) const ATTACKER_VAR_BASE: ValueId = 0x8000_0000;
 
 pub(crate) const FREE_VAR_BASE: ValueId = 0xC000_0000;
 
-pub(crate) const FREE_LANE_STRIDE: u32 = 1 << 16;
+const FREE_LANE_STRIDE: u32 = 1 << 16;
 
 pub(crate) const FREE_LANES: u32 = 1 << 13;
 
@@ -308,17 +308,8 @@ pub(crate) fn canonical_slots(s: &Substitution) -> Substitution {
 }
 
 pub(crate) fn dedupe_slots(mut candidates: Vec<Substitution>) -> Vec<Substitution> {
-	let mut seen = SeenSubstitutions::default();
-	let mut keys = Vec::new();
-	candidates.retain(|s| {
-		let key = canonical_slots(s);
-		if seen.contains(&keys, &key) {
-			return false;
-		}
-		keys.push(key);
-		seen.absorb(&keys);
-		true
-	});
+	let mut seen = Distinct::default();
+	candidates.retain(|s| seen.insert(canonical_slots(s), ()));
 	candidates
 }
 
@@ -337,51 +328,45 @@ pub(crate) fn substitution_hash(s: &Substitution) -> u64 {
 	acc
 }
 
-#[derive(Default)]
-pub(crate) struct SeenSubstitutions {
-	index: IdMap<u64, Vec<usize>>,
-	absorbed: usize,
+pub(crate) struct Distinct<T> {
+	items: Vec<(Substitution, T)>,
+	index: IdMap<(u64, T), Vec<usize>>,
 }
 
-impl SeenSubstitutions {
-	pub(crate) fn absorb(&mut self, items: &[Substitution]) {
-		for (i, candidate) in items.iter().enumerate().skip(self.absorbed) {
-			self.index
-				.entry(substitution_hash(candidate))
-				.or_default()
-				.push(i);
+impl<T> Default for Distinct<T> {
+	fn default() -> Self {
+		Distinct {
+			items: Vec::new(),
+			index: IdMap::default(),
 		}
-		self.absorbed = items.len();
+	}
+}
+
+impl<T: Copy + Eq + std::hash::Hash> Distinct<T> {
+	pub(crate) fn insert(&mut self, s: Substitution, tag: T) -> bool {
+		let bucket = self.index.entry((substitution_hash(&s), tag)).or_default();
+		if bucket
+			.iter()
+			.any(|&at| same_substitution(&self.items[at].0, &s))
+		{
+			return false;
+		}
+		bucket.push(self.items.len());
+		self.items.push((s, tag));
+		true
 	}
 
-	pub(crate) fn contains(&self, items: &[Substitution], candidate: &Substitution) -> bool {
-		self.index
-			.get(&substitution_hash(candidate))
-			.is_some_and(|bucket| {
-				bucket
-					.iter()
-					.any(|&i| same_substitution(&items[i], candidate))
-			})
+	pub(crate) fn into_items(self) -> Vec<(Substitution, T)> {
+		self.items
 	}
 }
 
 pub(crate) fn dedupe(candidates: Vec<Substitution>) -> Vec<Substitution> {
-	let mut out: Vec<Substitution> = Vec::with_capacity(candidates.len());
-	let mut seen: IdMap<u64, Vec<usize>> = IdMap::default();
+	let mut distinct = Distinct::default();
 	for candidate in candidates {
-		let hash = substitution_hash(&candidate);
-		let duplicate = seen.get(&hash).is_some_and(|bucket| {
-			bucket
-				.iter()
-				.any(|&i| same_substitution(&out[i], &candidate))
-		});
-		if duplicate {
-			continue;
-		}
-		seen.entry(hash).or_default().push(out.len());
-		out.push(candidate);
+		distinct.insert(candidate, ());
 	}
-	out
+	distinct.items.into_iter().map(|(s, ())| s).collect()
 }
 
 #[cfg(test)]

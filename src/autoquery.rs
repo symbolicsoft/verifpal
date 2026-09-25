@@ -3,38 +3,47 @@
 
 use crate::types::*;
 
-pub(crate) fn auto_queries(m: &Model, km: &ProtocolTrace, states: &[PrincipalState]) -> Vec<Query> {
-	let mut out = Vec::new();
-	for c in secret_constants(m) {
-		if km.index_of(&c).is_none() || c.is_nil() {
-			continue;
-		}
-		out.push(single_constant_query(QueryKind::Confidentiality, c));
-	}
+pub(crate) fn auto_queries(m: &Model, km: &ProtocolTrace) -> Vec<Query> {
+	let mut out: Vec<Query> = secret_constants(m)
+		.into_iter()
+		.filter(|c| km.index_of(c).is_some() && !c.is_nil())
+		.map(|c| generated(QueryKind::Confidentiality, vec![c], Message::default()))
+		.collect();
 	for slot in &km.slots {
 		for &(recipient, sender) in &slot.known_by {
-			if sender == recipient || slot.constant.is_nil() {
+			if sender == recipient
+				|| slot.constant.is_nil()
+				|| !slot.known_by_principal(sender)
+				|| !slot.known_by_principal(recipient)
+				|| !crate::resolution::principal_uses_constant(km, recipient, &slot.constant)
+			{
 				continue;
 			}
-			if !slot.known_by_principal(sender) || !slot.known_by_principal(recipient) {
-				continue;
-			}
-			if !crate::resolution::principal_uses_constant(km, states, recipient, &slot.constant) {
-				continue;
-			}
-			out.push(authentication_query(km, sender, recipient, &slot.constant));
+			out.push(generated(
+				QueryKind::Authentication,
+				Vec::new(),
+				Message {
+					sender,
+					sender_name: km.principal_name(sender).into(),
+					recipient,
+					recipient_name: km.principal_name(recipient).into(),
+					constants: vec![slot.constant.clone()],
+					..Message::default()
+				},
+			));
 		}
 	}
 	for slot in &km.slots {
-		if slot.sent_by.is_empty() || slot.constant.is_nil() {
+		if slot.sent_by.is_empty()
+			|| slot.constant.is_nil()
+			|| !crate::resolution::constant_used_by_any_principal(km, &slot.constant)
+		{
 			continue;
 		}
-		if !crate::resolution::constant_used_by_any_principal(km, states, &slot.constant) {
-			continue;
-		}
-		out.push(single_constant_query(
+		out.push(generated(
 			QueryKind::Freshness,
-			slot.constant.clone(),
+			vec![slot.constant.clone()],
+			Message::default(),
 		));
 	}
 	out
@@ -51,15 +60,7 @@ fn secret_constants(m: &Model) -> Vec<Constant> {
 		let Block::Principal(p) = block else {
 			continue;
 		};
-		for expression in &p.expressions {
-			let secret = match expression.kind {
-				Declaration::Generates => true,
-				Declaration::Knows => matches!(expression.qualifier, Some(Qualifier::Private)),
-				_ => false,
-			};
-			if !secret {
-				continue;
-			}
+		for expression in p.expressions.iter().filter(|e| e.declares_secret()) {
 			for c in &expression.constants {
 				if !rebound.contains(&c.id) && !out.iter().any(|prior| prior.id == c.id) {
 					out.push(c.clone());
@@ -70,41 +71,14 @@ fn secret_constants(m: &Model) -> Vec<Constant> {
 	out
 }
 
-fn single_constant_query(kind: QueryKind, c: Constant) -> Query {
+fn generated(kind: QueryKind, constants: Vec<Constant>, message: Message) -> Query {
 	Query {
 		span: Span::default(),
 		kind,
-		constants: vec![c],
-		message: Message::default(),
+		constants,
+		message,
 		options: Vec::new(),
-		leading_comments: Vec::new(),
-		trailing_comment: None,
-	}
-}
-
-fn authentication_query(
-	km: &ProtocolTrace,
-	sender: PrincipalId,
-	recipient: PrincipalId,
-	c: &Constant,
-) -> Query {
-	Query {
-		span: Span::default(),
-		kind: QueryKind::Authentication,
-		constants: Vec::new(),
-		message: Message {
-			span: Span::default(),
-			sender,
-			sender_name: km.principal_name(sender).into(),
-			recipient,
-			recipient_name: km.principal_name(recipient).into(),
-			constants: vec![c.clone()],
-			leading_comments: Vec::new(),
-			trailing_comment: None,
-		},
-		options: Vec::new(),
-		leading_comments: Vec::new(),
-		trailing_comment: None,
+		comments: LineComments::default(),
 	}
 }
 
@@ -112,16 +86,16 @@ fn authentication_query(
 mod tests {
 	use super::*;
 
-	fn model_and_trace(path: &str) -> (Model, ProtocolTrace, Vec<PrincipalState>) {
+	fn model_and_trace(path: &str) -> (Model, ProtocolTrace) {
 		let m = crate::parser::parse_file(path).expect("parses");
-		let (km, ps) = crate::sanity::sanity(&m).expect("sane");
-		(m, km, ps)
+		let km = crate::sanity::sanity(&m).expect("sane");
+		(m, km)
 	}
 
 	#[test]
 	fn every_secret_constant_gets_a_confidentiality_query() {
-		let (m, km, ps) = model_and_trace("examples/test/hmac_ok.vp");
-		let queries = auto_queries(&m, &km, &ps);
+		let (m, km) = model_and_trace("examples/test/hmac_ok.vp");
+		let queries = auto_queries(&m, &km);
 		assert!(
 			queries.iter().any(|q| q.kind == QueryKind::Confidentiality),
 			"expected at least one confidentiality query"
@@ -140,10 +114,10 @@ mod tests {
 			let Ok(mut m) = crate::parser::parse_file(&display) else {
 				continue;
 			};
-			let Ok((km, ps)) = crate::sanity::sanity(&m) else {
+			let Ok(km) = crate::sanity::sanity(&m) else {
 				continue;
 			};
-			m.queries = auto_queries(&m, &km, &ps);
+			m.queries = auto_queries(&m, &km);
 			crate::sanity::sanity(&m).unwrap_or_else(|e| {
 				panic!("generated queries must pass sanity for {display}: {e}")
 			});
@@ -154,9 +128,9 @@ mod tests {
 
 	#[test]
 	fn an_auto_query_set_asks_more_than_the_model_wrote() {
-		let (m, km, ps) = model_and_trace("examples/test/hmac_ok.vp");
+		let (m, km) = model_and_trace("examples/test/hmac_ok.vp");
 		let written = m.queries.len();
-		let generated = auto_queries(&m, &km, &ps).len();
+		let generated = auto_queries(&m, &km).len();
 		assert!(
 			generated > written,
 			"auto queries ({generated}) should exceed the {written} written by hand"

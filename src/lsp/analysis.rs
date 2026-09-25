@@ -5,9 +5,11 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use lsp_server::{Message, Notification};
-use lsp_types::PositionEncodingKind;
+use lsp_server::Message;
+use lsp_types::Uri;
 
+use crate::lsp::line::LineIndex;
+use crate::lsp::proto::{AnalysisReport, notify};
 use crate::report::Analysis;
 use crate::types::VResult;
 
@@ -18,28 +20,12 @@ enum LiveState {
 	Finished,
 }
 
-pub(crate) fn analyze(
-	name: &str,
-	text: &str,
-	sessions: u8,
-	cancel: &Arc<AtomicBool>,
-) -> VResult<Analysis> {
+fn analyze(name: &str, text: &str, sessions: u8, cancel: &Arc<AtomicBool>) -> VResult<Analysis> {
 	let model = crate::parser::parse_string(name, text)?;
 	let started = std::time::Instant::now();
 	let ctx = crate::verify::analyze_sessions_cancellable(&model, sessions, Arc::clone(cancel))
 		.map_err(|e| e.located(&model.file_name, &model.source))?;
-	let results = ctx.results_get();
-	let report = crate::verify::VerifyReport {
-		file_name: name.to_string(),
-		sessions,
-		attacker: model.attacker,
-		code: crate::types::VerifyResult::results_code(&results),
-		results,
-		elapsed: Some(started.elapsed()),
-		assumptions: ctx.assumptions().to_vec(),
-		scenarios: ctx.scenarios().to_vec(),
-		provenance: crate::verify::Provenance::default(),
-	};
+	let report = crate::verify::VerifyReport::of(&model, &ctx, sessions, Some(started.elapsed()));
 	Ok(Analysis::of(&report, text))
 }
 
@@ -89,15 +75,31 @@ impl Live {
 type Verdicts = Arc<Mutex<HashMap<String, (i32, Vec<lsp_types::Diagnostic>)>>>;
 
 pub(crate) struct Job {
-	pub uri: String,
-	pub name: String,
-	pub text: String,
+	pub uri: Uri,
 	pub version: i32,
+	pub line: LineIndex,
 	pub sessions: u8,
 	pub token: String,
-	pub encoding: PositionEncodingKind,
 	pub progress: bool,
 	pub passing: bool,
+}
+
+impl Job {
+	fn report(&self, outcome: Result<Analysis, Option<String>>) -> AnalysisReport {
+		let (analysis, error) = match outcome {
+			Ok(analysis) => (Some(analysis), None),
+			Err(error) => (None, error),
+		};
+		AnalysisReport {
+			uri: self.uri.clone(),
+			version: self.version,
+			token: self.token.clone(),
+			ok: analysis.is_some(),
+			cancelled: analysis.is_none() && error.is_none(),
+			error,
+			analysis,
+		}
+	}
 }
 
 pub(crate) struct Runner {
@@ -132,7 +134,8 @@ impl Runner {
 			.map(|(_, d)| d.clone())
 	}
 
-	pub(crate) fn forget(&mut self, uri: &str) {
+	pub(crate) fn discard(&mut self, uri: &str) {
+		self.cancel(uri);
 		self.verdicts
 			.lock()
 			.unwrap_or_else(|e| e.into_inner())
@@ -153,7 +156,8 @@ impl Runner {
 	}
 
 	pub(crate) fn start(&mut self, job: Job) {
-		self.cancel(&job.uri);
+		let key = job.uri.as_str().to_string();
+		self.cancel(&key);
 		self.running.retain(|_, live| live.is_running());
 		let cancel = Arc::new(AtomicBool::new(false));
 		let live = Arc::new(Live {
@@ -161,67 +165,53 @@ impl Runner {
 			state: Mutex::new(LiveState::Running),
 			token: job.token.clone(),
 		});
-		self.running.insert(job.uri.clone(), Arc::clone(&live));
+		self.running.insert(key.clone(), Arc::clone(&live));
 		let sender = self.sender.clone();
 		let verdicts = Arc::clone(&self.verdicts);
 		let worker = std::thread::Builder::new().stack_size(ANALYSIS_STACK);
 		let spawned = worker.spawn(move || {
 			let _done = Finished(Arc::clone(&live));
 			crate::info::set_verbosity(crate::info::Verbosity::Silent);
+			let name = crate::lsp::state::file_name(&job.uri);
 			if job.progress {
 				progress(
 					&sender,
 					&job.token,
 					serde_json::json!({
 						"kind": "begin",
-						"title": format!("Analyzing {}", job.name),
+						"title": format!("Analyzing {name}"),
 						"cancellable": true,
 					}),
 				);
 			}
-			let outcome = analyze(&job.name, &job.text, job.sessions, &cancel);
-			let report = analysis_report(job.uri.clone(), job.version, job.token.clone(), outcome);
+			let outcome = analyze(&name, job.line.text(), job.sessions, &cancel)
+				.map_err(|e| (e.kind != crate::types::ErrorKind::Cancelled).then(|| e.to_string()));
+			let report = job.report(outcome);
 			if job.progress {
 				progress(&sender, &job.token, serde_json::json!({"kind": "end"}));
 			}
 			let completed = live.complete(|| {
-				if let Some(analysis) = &report.analysis
-					&& let Ok(parsed) = <lsp_types::Uri as std::str::FromStr>::from_str(&job.uri)
-				{
-					let line = crate::lsp::line::LineIndex::new(&job.text, &job.encoding);
-					let all = crate::lsp::diagnostics::of_verdicts(analysis, &line);
+				if let Some(analysis) = &report.analysis {
+					let all = crate::lsp::diagnostics::of_verdicts(analysis, &job.line);
 					let shown = crate::lsp::diagnostics::shown(&all, job.passing);
 					verdicts
 						.lock()
 						.unwrap_or_else(|e| e.into_inner())
-						.insert(job.uri.clone(), (job.version, all));
-					let _ = sender.send(Message::Notification(Notification::new(
-						"textDocument/publishDiagnostics".to_string(),
+						.insert(key, (job.version, all));
+					notify(
+						&sender,
+						"textDocument/publishDiagnostics",
 						lsp_types::PublishDiagnosticsParams {
-							uri: parsed,
+							uri: job.uri.clone(),
 							diagnostics: shown,
 							version: Some(job.version),
 						},
-					)));
+					);
 				}
-				let _ = sender.send(Message::Notification(Notification::new(
-					"verifpal/analysisReport".to_string(),
-					report,
-				)));
+				notify(&sender, "verifpal/analysisReport", report);
 			});
 			if !completed {
-				let _ = sender.send(Message::Notification(Notification::new(
-					"verifpal/analysisReport".to_string(),
-					crate::lsp::proto::AnalysisReport {
-						uri: job.uri,
-						version: job.version,
-						token: job.token,
-						ok: false,
-						cancelled: true,
-						error: None,
-						analysis: None,
-					},
-				)));
+				notify(&sender, "verifpal/analysisReport", job.report(Err(None)));
 			}
 		});
 		spawned.expect("spawn the analysis worker");
@@ -229,37 +219,6 @@ impl Runner {
 }
 
 const ANALYSIS_STACK: usize = 256 << 20;
-
-fn analysis_report(
-	uri: String,
-	version: i32,
-	token: String,
-	outcome: VResult<Analysis>,
-) -> crate::lsp::proto::AnalysisReport {
-	match outcome {
-		Ok(analysis) => crate::lsp::proto::AnalysisReport {
-			uri,
-			version,
-			token,
-			ok: true,
-			cancelled: false,
-			error: None,
-			analysis: Some(analysis),
-		},
-		Err(e) => {
-			let cancelled = e.kind == crate::types::ErrorKind::Cancelled;
-			crate::lsp::proto::AnalysisReport {
-				uri,
-				version,
-				token,
-				ok: false,
-				cancelled,
-				error: (!cancelled).then(|| e.to_string()),
-				analysis: None,
-			}
-		}
-	}
-}
 
 struct Finished(Arc<Live>);
 
@@ -270,10 +229,11 @@ impl Drop for Finished {
 }
 
 fn progress(sender: &crossbeam_channel::Sender<Message>, token: &str, value: serde_json::Value) {
-	let _ = sender.send(Message::Notification(Notification::new(
-		"$/progress".to_string(),
+	notify(
+		sender,
+		"$/progress",
 		serde_json::json!({"token": token, "value": value}),
-	)));
+	);
 }
 
 #[cfg(test)]
@@ -300,13 +260,11 @@ mod tests {
 
 	fn job(uri: &str, token: &str) -> Job {
 		Job {
-			uri: uri.to_string(),
-			name: "an.vp".to_string(),
-			text: ATTACKED.to_string(),
+			uri: <Uri as std::str::FromStr>::from_str(uri).expect("a uri"),
 			version: 1,
+			line: LineIndex::new(ATTACKED, &lsp_types::PositionEncodingKind::UTF8),
 			sessions: 1,
 			token: token.to_string(),
-			encoding: PositionEncodingKind::UTF8,
 			progress: false,
 			passing: true,
 		}
@@ -331,7 +289,6 @@ mod tests {
 	fn a_run_is_cancellable_by_its_token_exactly_once() {
 		let (sender, _receiver) = crossbeam_channel::unbounded();
 		let mut runner = Runner::new(sender);
-		// Registered by hand, so the run cannot finish before it is cancelled.
 		runner.running.insert(
 			"file:///ct.vp".to_string(),
 			Arc::new(Live {
@@ -361,7 +318,7 @@ mod tests {
 			runner.verdicts(uri, 2).is_none(),
 			"another version's text has no verdicts"
 		);
-		runner.forget(uri);
+		runner.discard(uri);
 		assert!(runner.verdicts(uri, 1).is_none());
 	}
 

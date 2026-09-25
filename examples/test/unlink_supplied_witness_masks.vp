@@ -1,0 +1,57 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: u1 at one session and at two.
+//
+// Counterweight to unlink_supplied_witness_only.vp: t1 and t2 are linked
+// through Bob's key k, which the attacker computes from the certified key it
+// controls (Alice's a_sk leaks), even though an attacker-supplied witness is
+// also available. A rejected witness must not hide a valid one; the check
+// once stopped at the first witness it found.
+attacker[active]
+
+principal Alice[
+	knows private a_sk
+	ga = PUBKEY(a_sk)
+	leaks a_sk
+]
+
+principal Carol[
+	generates c
+	gc = PUBKEY(c)
+]
+
+Alice -> Ca: [ga]
+Carol -> Ca: [gc]
+
+principal Ca[
+	knows private ca
+	gca = PUBKEY(ca)
+	certa = SIGN(ca, ga)
+	certc = SIGN(ca, gc)
+]
+
+Ca -> Alice: [gca], certa
+Ca -> Carol: [certc]
+Ca -> Bob: [gca]
+
+Carol -> Bob: gc, certc
+
+principal Bob[
+	knows public c1, c2
+	_ = SIGNVERIF(gca, gc, certc)?
+	generates b
+	gb = PUBKEY(b)
+	k = DH_KEX(gc, b)
+	t1 = HASH(gc, k, c1)
+	t2 = HASH(gc, k, c2)
+]
+
+Bob -> Dave: gb, t1, t2
+
+principal Dave[
+	_ = HASH(t1, t2)
+]
+
+queries[
+	unlinkability? t1, t2
+]

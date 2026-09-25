@@ -1,7 +1,7 @@
 /* SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
  * SPDX-License-Identifier: GPL-3.0-only */
 
-use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
+use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum};
 use clap_complete::Shell;
 use verifpal::{
 	ColorChoice, Run, Verbosity, VerifyReport, diagram, html_report, info_banner, pretty_print,
@@ -68,29 +68,196 @@ struct Cli {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
-enum ColorArg {
-	Auto,
-	Always,
-	Never,
-}
-
-impl From<ColorArg> for ColorChoice {
-	fn from(arg: ColorArg) -> Self {
-		match arg {
-			ColorArg::Auto => ColorChoice::Auto,
-			ColorArg::Always => ColorChoice::Always,
-			ColorArg::Never => ColorChoice::Never,
-		}
-	}
-}
-
-#[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
 enum FormatArg {
 	Text,
 	Json,
 	Html,
 	#[value(alias = "latex")]
 	Tex,
+}
+
+#[derive(Args)]
+struct VerifyArgs {
+	#[arg(
+		required = true,
+		num_args = 1..,
+		value_name = "MODELS",
+		help = "Paths of the .vp model files to analyze",
+		long_help = "One or more paths to Verifpal model files. A model file's name must end \
+		             in '.vp' and be at most 64 characters long.\n\n\
+		             Models are analyzed in the order given, each independently of the \
+		             others, with their text reports separated by a blank line. If one \
+		             cannot be read, parsed or validated, the error is printed and the \
+		             remaining models are analyzed anyway; the run then ends with exit \
+		             status 1. When more than one model is given, --result-code prefixes \
+		             each code with the path of the model it belongs to."
+	)]
+	models: Vec<String>,
+	#[arg(
+		long,
+		default_value_t = false,
+		help = "Print the compact one-letter-per-query result code",
+		long_help = "Print the verdicts as a compact result code, and suppress the banner.\n\n\
+		             The code has one letter and one digit per query, in the order the \
+		             queries appear in the model: 'c' for confidentiality, 'a' for \
+		             authentication, 'f' for freshness, 'u' for unlinkability and 'e' for \
+		             equivalence, each followed by '0' if the query holds or '1' if an \
+		             attack was found. 'c1a0' means the model's first query, a \
+		             confidentiality one, was broken, while its second, an authentication \
+		             one, held.\n\n\
+		             The rest of the analysis is still printed and the code is the last line \
+		             of output, so 'verifpal verify model.vp --result-code | tail -1' gets \
+		             the code by itself; adding --quiet silences everything else instead. \
+		             When more than one model is given, each line is prefixed with that \
+		             model's path.\n\n\
+		             Verifpal's own test suite uses this to pin the expected verdicts of a \
+		             model, and it is the easiest way to compare two runs."
+	)]
+	result_code: bool,
+	#[arg(
+		long,
+		default_value_t = 2,
+		value_parser = clap::value_parser!(u8).range(1..=16),
+		help = "Concurrent sessions to analyze per principal [1-16]",
+		long_help = "Analyze every principal as running this many concurrent sessions of the \
+		             protocol, rather than the default of two.\n\n\
+		             Verifpal does this by rewriting the model before analysis: each \
+		             principal and each message block is replicated the given number of \
+		             times, with generated and computed values freshened per session, while \
+		             values a principal knows stay shared between them. The expanded model \
+		             is one you could have written by hand, so nothing about the analysis \
+		             changes; the attacker can now carry values between concurrent runs.\n\n\
+		             That is what makes replay attacks reachable. Authentication queries in \
+		             Verifpal ask for injective agreement, so a message the attacker lifts \
+		             out of one session and delivers into another breaks the query even \
+		             though nothing was forged. At --sessions 1 there is no sibling run to \
+		             replay from, and no such attack can be reported.\n\n\
+		             Verdicts are relative to this count. Raising it \
+		             strengthens a query that still holds, and can only reveal more attacks, \
+		             never fewer, but it is expensive: cost grows steeply with the number of \
+		             replicated principals. Start at the default and raise it deliberately; \
+		             no finite count rules out an attack that needs more concurrent runs. \
+		             Accepted values run from 1 to 16."
+	)]
+	sessions: u8,
+	#[arg(
+		long,
+		default_value_t = false,
+		help = "Exit with status 2 if any query was broken",
+		long_help = "Exit with status 2 when an attack was found against any query in any of \
+		             the given models, instead of the usual status 0.\n\n\
+		             By default a discovered attack is a normal result rather than a \
+		             failure: for most models an attack is the answer the user was after, so \
+		             Verifpal reports it and exits successfully. This flag is for scripting \
+		             and continuous integration, where a model is expected to verify and a \
+		             newly appearing attack should fail the build.\n\n\
+		             Status 1 still means the run itself failed, on a file that could not be \
+		             read, parsed or validated, and it takes precedence over status 2."
+	)]
+	fail_on_attack: bool,
+	#[arg(
+		long,
+		default_value_t = false,
+		help = "Replace the model's queries with a generated set",
+		long_help = "Discard the model's own queries block and analyze a generated set of \
+		             queries in its place.\n\n\
+		             Verifpal derives a confidentiality query for every secret the protocol \
+		             uses, meaning everything a principal generates and everything it knows \
+		             privately; an authentication query for every sender \
+		             and recipient pair where the recipient both receives a value and goes \
+		             on to use it inside a primitive; and a freshness query for every value \
+		             that travels over the wire and is used. The model's own queries block \
+		             must still be present and valid, since the model is parsed and \
+		             validated before its queries are replaced.\n\n\
+		             Use this to find out what a model gives you, rather than to check what \
+		             you expected of it. It is a quick first look at an unfamiliar protocol, \
+		             and it makes two models comparable by asking the same questions of \
+		             both.\n\n\
+		             It does not replace a hand-written queries block, which is the only way \
+		             to state a property the generator does not cover: unlinkability, \
+		             equivalence, and any query carrying a precondition option."
+	)]
+	auto_queries: bool,
+	#[arg(
+		long,
+		value_enum,
+		default_value_t = FormatArg::Text,
+		help = "Report as text, JSON, a self-contained HTML page or a LaTeX document",
+		long_help = "Choose how the analysis is reported.\n\n\
+		             'text', the default, is the human-readable report printed as the \
+		             analysis proceeds: the banner, the progress of the search, and each \
+		             query's verdict followed by the trace of any attack against it.\n\n\
+		             'json' prints one machine-readable object describing the whole run to \
+		             stdout: every model with its source, every query with its verdict and \
+		             position in the file, and every attack trace as structured steps rather \
+		             than prose. This is what the editor integrations consume, and what to \
+		             parse if you are building something on top of Verifpal.\n\n\
+		             'html' prints a single self-contained page to stdout, with no external \
+		             scripts, styles or images, so redirecting it into a file gives a report \
+		             you can open or email as it is. The page has a sequence diagram of \
+		             the protocol, the model source syntax-highlighted, and a diagram of \
+		             each attack beside its trace.\n\n\
+		             'tex' prints one LaTeX document to stdout, ready to compile with \
+		             tectonic exactly as it stands. It carries a message-sequence chart of \
+		             the protocol, a table of every query and its verdict, a keyed diagram \
+		             and numbered trace for each attack, and the model source as an \
+		             appendix listing. Terms are typeset as mathematics rather than as \
+		             tool output, and every figure is delimited by BEGIN/END comment \
+		             markers and built only from the \\vp macros defined in the one \
+		             preamble block, so a single figure can be lifted into a paper by \
+		             copying that block once. 'latex' is accepted as an alias.\n\n\
+		             All three structured formats suppress the ordinary progress output and \
+		             disable color, neither of which belongs in the middle of a document. A \
+		             model that fails is reported inside the document rather than on stderr, \
+		             so nothing is lost by redirecting stdout alone."
+	)]
+	format: FormatArg,
+	#[arg(
+		short,
+		long,
+		default_value_t = false,
+		conflicts_with = "verbose",
+		help = "Print query verdicts and warnings only",
+		long_help = "Print only what the analysis concluded: each query's verdict, each \
+		             attack trace, and any warning. The banner, the live progress indicator \
+		             and the running commentary about what is being analyzed are all \
+		             suppressed.\n\n\
+		             Together with --result-code this silences everything but the code \
+		             itself, which is what a script wants. Conflicts with --verbose."
+	)]
+	quiet: bool,
+	#[arg(
+		short,
+		long,
+		default_value_t = false,
+		help = "Print every deduction and analysis step",
+		long_help = "Print the individual steps the engine takes, which the normal report \
+		             leaves out: every value the attacker deduced along with the rule that \
+		             yielded it, and every principal and query being analyzed as it is \
+		             reached.\n\n\
+		             Use it when a verdict is surprising and you want to see the knowledge \
+		             the attacker accumulated on the way to it. Output grows with the size \
+		             of the model, and on a large one the deduction log is capped after a \
+		             thousand messages, with a line saying so; the analysis itself continues \
+		             in full. Conflicts with --quiet."
+	)]
+	verbose: bool,
+	#[arg(
+		long,
+		value_enum,
+		default_value_t = ColorChoice::Auto,
+		help = "When to color the output: auto, always or never",
+		long_help = "Control whether the report is printed with ANSI color and styling.\n\n\
+		             'auto', the default, colors the output when stdout is a terminal and \
+		             leaves it plain when it is redirected into a file or a pipe. It also \
+		             honors the surrounding environment: NO_COLOR or TERM=dumb turns color \
+		             off, and CLICOLOR_FORCE or FORCE_COLOR turns it on.\n\n\
+		             'always' colors the output whatever stdout is, which is useful when \
+		             piping into a pager that understands escape sequences. 'never' disables \
+		             color outright.\n\n\
+		             The JSON and HTML reports are never colored, whatever this is set to."
+	)]
+	color: ColorChoice,
 }
 
 #[derive(Subcommand)]
@@ -118,188 +285,7 @@ enum Commands {
 		                   the ones it rejected. Start there when an active-attacker verdict is \
 		                   surprising."
 	)]
-	Verify {
-		#[arg(
-			required = true,
-			num_args = 1..,
-			value_name = "MODELS",
-			help = "Paths of the .vp model files to analyze",
-			long_help = "One or more paths to Verifpal model files. A model file's name must end \
-			             in '.vp' and be at most 64 characters long.\n\n\
-			             Models are analyzed in the order given, each independently of the \
-			             others, with their text reports separated by a blank line. If one \
-			             cannot be read, parsed or validated, the error is printed and the \
-			             remaining models are analyzed anyway; the run then ends with exit \
-			             status 1. When more than one model is given, --result-code prefixes \
-			             each code with the path of the model it belongs to."
-		)]
-		models: Vec<String>,
-		#[arg(
-			long,
-			default_value_t = false,
-			help = "Print the compact one-letter-per-query result code",
-			long_help = "Print the verdicts as a compact result code, and suppress the banner.\n\n\
-			             The code has one letter and one digit per query, in the order the \
-			             queries appear in the model: 'c' for confidentiality, 'a' for \
-			             authentication, 'f' for freshness, 'u' for unlinkability and 'e' for \
-			             equivalence, each followed by '0' if the query holds or '1' if an \
-			             attack was found. 'c1a0' means the model's first query, a \
-			             confidentiality one, was broken, while its second, an authentication \
-			             one, held.\n\n\
-			             The rest of the analysis is still printed and the code is the last line \
-			             of output, so 'verifpal verify model.vp --result-code | tail -1' gets \
-			             the code by itself; adding --quiet silences everything else instead. \
-			             When more than one model is given, each line is prefixed with that \
-			             model's path.\n\n\
-			             Verifpal's own test suite uses this to pin the expected verdicts of a \
-			             model, and it is the easiest way to compare two runs."
-		)]
-		result_code: bool,
-		#[arg(
-			long,
-			default_value_t = 2,
-			value_parser = clap::value_parser!(u8).range(1..=16),
-			help = "Concurrent sessions to analyze per principal [1-16]",
-			long_help = "Analyze every principal as running this many concurrent sessions of the \
-			             protocol, rather than the default of two.\n\n\
-			             Verifpal does this by rewriting the model before analysis: each \
-			             principal and each message block is replicated the given number of \
-			             times, with generated and computed values freshened per session, while \
-			             values a principal knows stay shared between them. The expanded model \
-			             is one you could have written by hand, so nothing about the analysis \
-			             changes; the attacker can now carry values between concurrent runs.\n\n\
-			             That is what makes replay attacks reachable. Authentication queries in \
-			             Verifpal ask for injective agreement, so a message the attacker lifts \
-			             out of one session and delivers into another breaks the query even \
-			             though nothing was forged. At --sessions 1 there is no sibling run to \
-			             replay from, and no such attack can be reported.\n\n\
-			             Verdicts are relative to this count. Raising it \
-			             strengthens a query that still holds, and can only reveal more attacks, \
-			             never fewer, but it is expensive: cost grows steeply with the number of \
-			             replicated principals. Start at the default and raise it deliberately; \
-			             no finite count rules out an attack that needs more concurrent runs. \
-			             Accepted values run from 1 to 16."
-		)]
-		sessions: u8,
-		#[arg(
-			long,
-			default_value_t = false,
-			help = "Exit with status 2 if any query was broken",
-			long_help = "Exit with status 2 when an attack was found against any query in any of \
-			             the given models, instead of the usual status 0.\n\n\
-			             By default a discovered attack is a normal result rather than a \
-			             failure: for most models an attack is the answer the user was after, so \
-			             Verifpal reports it and exits successfully. This flag is for scripting \
-			             and continuous integration, where a model is expected to verify and a \
-			             newly appearing attack should fail the build.\n\n\
-			             Status 1 still means the run itself failed, on a file that could not be \
-			             read, parsed or validated, and it takes precedence over status 2."
-		)]
-		fail_on_attack: bool,
-		#[arg(
-			long,
-			default_value_t = false,
-			help = "Replace the model's queries with a generated set",
-			long_help = "Discard the model's own queries block and analyze a generated set of \
-			             queries in its place.\n\n\
-			             Verifpal derives a confidentiality query for every secret the protocol \
-			             uses, meaning everything a principal generates and everything it knows \
-			             privately; an authentication query for every sender \
-			             and recipient pair where the recipient both receives a value and goes \
-			             on to use it inside a primitive; and a freshness query for every value \
-			             that travels over the wire and is used. The model's own queries block \
-			             must still be present and valid, since the model is parsed and \
-			             validated before its queries are replaced.\n\n\
-			             Use this to find out what a model gives you, rather than to check what \
-			             you expected of it. It is a quick first look at an unfamiliar protocol, \
-			             and it makes two models comparable by asking the same questions of \
-			             both.\n\n\
-			             It does not replace a hand-written queries block, which is the only way \
-			             to state a property the generator does not cover: unlinkability, \
-			             equivalence, and any query carrying a precondition option."
-		)]
-		auto_queries: bool,
-		#[arg(
-			long,
-			value_enum,
-			default_value_t = FormatArg::Text,
-			help = "Report as text, JSON, a self-contained HTML page or a LaTeX document",
-			long_help = "Choose how the analysis is reported.\n\n\
-			             'text', the default, is the human-readable report printed as the \
-			             analysis proceeds: the banner, the progress of the search, and each \
-			             query's verdict followed by the trace of any attack against it.\n\n\
-			             'json' prints one machine-readable object describing the whole run to \
-			             stdout: every model with its source, every query with its verdict and \
-			             position in the file, and every attack trace as structured steps rather \
-			             than prose. This is what the editor integrations consume, and what to \
-			             parse if you are building something on top of Verifpal.\n\n\
-			             'html' prints a single self-contained page to stdout, with no external \
-			             scripts, styles or images, so redirecting it into a file gives a report \
-			             you can open or email as it is. The page has a sequence diagram of \
-			             the protocol, the model source syntax-highlighted, and a diagram of \
-			             each attack beside its trace.\n\n\
-			             'tex' prints one LaTeX document to stdout, ready to compile with \
-			             tectonic exactly as it stands. It carries a message-sequence chart of \
-			             the protocol, a table of every query and its verdict, a keyed diagram \
-			             and numbered trace for each attack, and the model source as an \
-			             appendix listing. Terms are typeset as mathematics rather than as \
-			             tool output, and every figure is delimited by BEGIN/END comment \
-			             markers and built only from the \\vp macros defined in the one \
-			             preamble block, so a single figure can be lifted into a paper by \
-			             copying that block once. 'latex' is accepted as an alias.\n\n\
-			             All three structured formats suppress the ordinary progress output and \
-			             disable color, neither of which belongs in the middle of a document. A \
-			             model that fails is reported inside the document rather than on stderr, \
-			             so nothing is lost by redirecting stdout alone."
-		)]
-		format: FormatArg,
-		#[arg(
-			short,
-			long,
-			default_value_t = false,
-			conflicts_with = "verbose",
-			help = "Print query verdicts and warnings only",
-			long_help = "Print only what the analysis concluded: each query's verdict, each \
-			             attack trace, and any warning. The banner, the live progress indicator \
-			             and the running commentary about what is being analyzed are all \
-			             suppressed.\n\n\
-			             Together with --result-code this silences everything but the code \
-			             itself, which is what a script wants. Conflicts with --verbose."
-		)]
-		quiet: bool,
-		#[arg(
-			short,
-			long,
-			default_value_t = false,
-			help = "Print every deduction and analysis step",
-			long_help = "Print the individual steps the engine takes, which the normal report \
-			             leaves out: every value the attacker deduced along with the rule that \
-			             yielded it, and every principal and query being analyzed as it is \
-			             reached.\n\n\
-			             Use it when a verdict is surprising and you want to see the knowledge \
-			             the attacker accumulated on the way to it. Output grows with the size \
-			             of the model, and on a large one the deduction log is capped after a \
-			             thousand messages, with a line saying so; the analysis itself continues \
-			             in full. Conflicts with --quiet."
-		)]
-		verbose: bool,
-		#[arg(
-			long,
-			value_enum,
-			default_value_t = ColorArg::Auto,
-			help = "When to color the output: auto, always or never",
-			long_help = "Control whether the report is printed with ANSI color and styling.\n\n\
-			             'auto', the default, colors the output when stdout is a terminal and \
-			             leaves it plain when it is redirected into a file or a pipe. It also \
-			             honors the surrounding environment: NO_COLOR or TERM=dumb turns color \
-			             off, and CLICOLOR_FORCE or FORCE_COLOR turns it on.\n\n\
-			             'always' colors the output whatever stdout is, which is useful when \
-			             piping into a pager that understands escape sequences. 'never' disables \
-			             color outright.\n\n\
-			             The JSON and HTML reports are never colored, whatever this is set to."
-		)]
-		color: ColorArg,
-	},
+	Verify(VerifyArgs),
 	#[command(
 		arg_required_else_help = true,
 		about = "Reformat models into the canonical Verifpal style",
@@ -388,7 +374,7 @@ enum Commands {
 		#[arg(
 			long,
 			value_enum,
-			default_value_t = ColorArg::Auto,
+			default_value_t = ColorChoice::Auto,
 			help = "When to color the output: auto, always or never",
 			long_help = "Control whether ANSI color and styling are used.\n\n\
 			             The Mermaid source itself is never colored. It is machine-readable \
@@ -399,7 +385,7 @@ enum Commands {
 			             TERM=dumb, CLICOLOR_FORCE and FORCE_COLOR as the verify command does. \
 			             'always' styles it regardless, and 'never' disables styling outright."
 		)]
-		color: ColorArg,
+		color: ColorChoice,
 	},
 	#[command(
 		about = "Print version, homepage and author",
@@ -487,28 +473,23 @@ enum Commands {
 	},
 }
 
-fn man_write(path: &std::path::Path, page: clap_mangen::Man) -> std::io::Result<()> {
-	let mut rendered = Vec::new();
-	page.render(&mut rendered)?;
-	std::fs::write(path, rendered)
+fn status<E: std::fmt::Display>(result: Result<(), E>) -> i32 {
+	match result {
+		Ok(()) => 0,
+		Err(e) => {
+			eprintln!("{}", e);
+			EXIT_ERROR
+		}
+	}
 }
 
-fn run_man(output: Option<String>) -> i32 {
+fn run_man(output: Option<String>) -> std::io::Result<()> {
 	let command = Cli::command();
 	let Some(output) = output else {
-		return match clap_mangen::Man::new(command).render(&mut std::io::stdout()) {
-			Ok(()) => 0,
-			Err(e) => {
-				eprintln!("{}", e);
-				EXIT_ERROR
-			}
-		};
+		return clap_mangen::Man::new(command).render(&mut std::io::stdout());
 	};
 	let directory = std::path::PathBuf::from(output);
-	if let Err(e) = std::fs::create_dir_all(&directory) {
-		eprintln!("{}", e);
-		return EXIT_ERROR;
-	}
+	std::fs::create_dir_all(&directory)?;
 	let mut pages = vec![(
 		directory.join("verifpal.1"),
 		clap_mangen::Man::new(command.clone()).manual(MAN_MANUAL),
@@ -527,12 +508,11 @@ fn run_man(output: Option<String>) -> i32 {
 		pages.push((path, page));
 	}
 	for (path, page) in pages {
-		if let Err(e) = man_write(&path, page) {
-			eprintln!("{}", e);
-			return EXIT_ERROR;
-		}
+		let mut rendered = Vec::new();
+		page.render(&mut rendered)?;
+		std::fs::write(path, rendered)?;
 	}
-	0
+	Ok(())
 }
 
 fn verify_verbosity(structured: bool, result_code: bool, quiet: bool, verbose: bool) -> Verbosity {
@@ -548,18 +528,18 @@ fn verify_verbosity(structured: bool, result_code: bool, quiet: bool, verbose: b
 	Verbosity::Normal
 }
 
-#[allow(clippy::too_many_arguments)]
-fn run_verify(
-	models: Vec<String>,
-	result_code: bool,
-	sessions: u8,
-	fail_on_attack: bool,
-	auto_queries: bool,
-	format: FormatArg,
-	quiet: bool,
-	verbose: bool,
-	color: ColorArg,
-) -> i32 {
+fn run_verify(args: VerifyArgs) -> i32 {
+	let VerifyArgs {
+		models,
+		result_code,
+		sessions,
+		fail_on_attack,
+		auto_queries,
+		format,
+		quiet,
+		verbose,
+		color,
+	} = args;
 	let structured = format != FormatArg::Text;
 	if structured && result_code {
 		eprintln!(
@@ -571,29 +551,26 @@ fn run_verify(
 	set_color_choice(if structured {
 		ColorChoice::Never
 	} else {
-		color.into()
+		color
 	});
 	set_verbosity(verify_verbosity(structured, result_code, quiet, verbose));
 
 	let update_check = update_check_start(VERSION);
-	if !result_code && !structured {
+	let chrome = !structured && !result_code;
+	if chrome {
 		info_banner(VERSION);
 	}
 
 	let single = models.len() == 1;
 	let mut outcomes: Vec<(String, Result<VerifyReport, String>)> = Vec::new();
 	let mut sources: Vec<String> = Vec::new();
-	let mut had_error = false;
-	let mut had_attack = false;
 
 	for (index, model) in models.iter().enumerate() {
-		if index > 0 && !structured && !result_code {
+		if index > 0 && chrome {
 			out!();
 		}
-		let analyzed = verify_report_with_source_opts(model, sessions, auto_queries);
-		match analyzed {
+		match verify_report_with_source_opts(model, sessions, auto_queries) {
 			Ok((report, source)) => {
-				had_attack |= report.results.iter().any(|r| r.resolved);
 				if result_code {
 					if single {
 						out!("{}", report.code);
@@ -605,7 +582,6 @@ fn run_verify(
 				sources.push(source);
 			}
 			Err(e) => {
-				had_error = true;
 				let text = e.to_string();
 				if !structured {
 					eprintln!("{}", text);
@@ -620,33 +596,30 @@ fn run_verify(
 		}
 	}
 
+	let run = || Run::of(VERSION, &outcomes, &sources);
 	match format {
 		FormatArg::Text => {}
-		FormatArg::Json => {
-			let run = Run::of(VERSION, &outcomes, &sources);
-			match serde_json::to_string(&run) {
-				Ok(text) => out!("{}", text),
-				Err(e) => {
-					eprintln!("could not serialize the report: {}", e);
-					return EXIT_ERROR;
-				}
+		FormatArg::Json => match serde_json::to_string(&run()) {
+			Ok(text) => out!("{}", text),
+			Err(e) => {
+				eprintln!("could not serialize the report: {}", e);
+				return EXIT_ERROR;
 			}
-		}
-		FormatArg::Html => {
-			let run = Run::of(VERSION, &outcomes, &sources);
-			outp!("{}", html_report(&run));
-		}
-		FormatArg::Tex => {
-			let run = Run::of(VERSION, &outcomes, &sources);
-			outp!("{}", tex_report(&run));
-		}
+		},
+		FormatArg::Html => outp!("{}", html_report(&run())),
+		FormatArg::Tex => outp!("{}", tex_report(&run())),
 	}
 	update_check_report(&update_check);
 
-	if had_error {
+	if outcomes.iter().any(|(_, outcome)| outcome.is_err()) {
 		return EXIT_ERROR;
 	}
-	if fail_on_attack && had_attack {
+	let attacked = outcomes.iter().any(|(_, outcome)| {
+		outcome
+			.as_ref()
+			.is_ok_and(|report| report.results.iter().any(|r| r.resolved))
+	});
+	if fail_on_attack && attacked {
 		return EXIT_ATTACK;
 	}
 	0
@@ -699,51 +672,16 @@ fn pretty_file_changed(model: &str, output: &str, write: bool) -> std::io::Resul
 fn main() {
 	let cli = Cli::parse();
 	let status = match cli.command {
-		Commands::Verify {
-			models,
-			result_code,
-			sessions,
-			fail_on_attack,
-			auto_queries,
-			format,
-			quiet,
-			verbose,
-			color,
-		} => run_verify(
-			models,
-			result_code,
-			sessions,
-			fail_on_attack,
-			auto_queries,
-			format,
-			quiet,
-			verbose,
-			color,
-		),
+		Commands::Verify(args) => run_verify(args),
 		Commands::Pretty {
 			models,
 			write,
 			check,
 		} => run_pretty(models, write, check),
-		Commands::Lsp { stdio: _ } => match verifpal::lsp_run() {
-			Ok(()) => 0,
-			Err(e) => {
-				eprintln!("{}", e);
-				EXIT_ERROR
-			}
-		},
+		Commands::Lsp { stdio: _ } => status(verifpal::lsp_run()),
 		Commands::Diagram { model, color } => {
-			set_color_choice(color.into());
-			match diagram(&model) {
-				Ok(output) => {
-					outp!("{}", output);
-					0
-				}
-				Err(e) => {
-					eprintln!("{}", e);
-					EXIT_ERROR
-				}
-			}
+			set_color_choice(color);
+			status(diagram(&model).map(|output| outp!("{}", output)))
 		}
 		Commands::About => {
 			let update_check = update_check_start(VERSION);
@@ -762,7 +700,7 @@ fn main() {
 			clap_complete::generate(shell, &mut command, "verifpal", &mut std::io::stdout());
 			0
 		}
-		Commands::Man { output } => run_man(output),
+		Commands::Man { output } => status(run_man(output)),
 	};
 	if status != 0 {
 		std::process::exit(status);

@@ -1,100 +1,64 @@
 /* SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
  * SPDX-License-Identifier: GPL-3.0-only */
 
-use std::collections::HashMap;
-
 use lsp_types::{PositionEncodingKind, Uri};
 
 use crate::lsp::line::LineIndex;
 use crate::tokens::TokenIndex;
-use crate::types::{Model, ProtocolTrace, VResult, VerifpalError};
+use crate::types::{Model, ProtocolTrace, VerifpalError};
 
 pub(crate) struct Document {
-	pub text: String,
+	pub uri: Uri,
 	#[cfg_attr(not(feature = "lsp"), allow(dead_code))]
 	pub version: i32,
-	#[cfg_attr(not(feature = "lsp"), allow(dead_code))]
-	pub name: String,
 	pub line: LineIndex,
-	pub model: VResult<Model>,
+	pub model: Option<Model>,
 	pub tokens: TokenIndex,
 	pub trace: Option<ProtocolTrace>,
-	pub sanity: Option<VerifpalError>,
+	pub error: Option<VerifpalError>,
 }
 
-pub(crate) struct Documents {
-	encoding: PositionEncodingKind,
-	open: HashMap<String, Document>,
-}
-
-impl Documents {
-	pub(crate) fn new(encoding: PositionEncodingKind) -> Documents {
-		Documents {
-			encoding,
-			open: HashMap::new(),
-		}
-	}
-
-	pub(crate) fn open(&mut self, uri: String, name: String, version: i32, text: String) {
-		let doc = self.build(name, version, text);
-		self.open.insert(uri, doc);
-	}
-
-	#[cfg_attr(not(feature = "lsp"), allow(dead_code))]
-	pub(crate) fn change(&mut self, uri: &str, version: i32, text: String) {
-		let Some(name) = self.open.get(uri).map(|d| d.name.clone()) else {
-			return;
-		};
-		let doc = self.build(name, version, text);
-		self.open.insert(uri.to_string(), doc);
-	}
-
-	#[cfg_attr(not(feature = "lsp"), allow(dead_code))]
-	pub(crate) fn close(&mut self, uri: &str) {
-		self.open.remove(uri);
-	}
-
-	pub(crate) fn get(&self, uri: &str) -> Option<&Document> {
-		self.open.get(uri)
-	}
-
-	#[cfg_attr(not(feature = "lsp"), allow(dead_code))]
-	pub(crate) fn uris(&self) -> Vec<String> {
-		self.open.keys().cloned().collect()
-	}
-
-	fn build(&self, name: String, version: i32, text: String) -> Document {
-		let line = LineIndex::new(&text, &self.encoding);
-		let (model, tokens) = crate::parser::parse_string_indexed(&name, &text);
-		let mut trace = None;
-		let mut sanity = None;
-		if let Ok(m) = &model {
-			match crate::sanity::sanity(m) {
-				Ok((t, _)) => {
-					trace = Some(t);
-					if let Err(e) = crate::verify::expand(m, crate::sessions::DEFAULT_SESSIONS)
-						.and_then(|e| crate::sanity::sanity(&e.model))
-					{
-						sanity = Some(e.located(&m.file_name, &m.source));
-					}
-				}
-				Err(e) => sanity = Some(e.located(&m.file_name, &m.source)),
+impl Document {
+	pub(crate) fn new(
+		uri: Uri,
+		version: i32,
+		text: String,
+		encoding: &PositionEncodingKind,
+	) -> Document {
+		let line = LineIndex::new(&text, encoding);
+		let (parsed, tokens) = crate::parser::parse_string_indexed(&file_name(&uri), &text);
+		let (model, trace, error) = match parsed {
+			Err(e) => (None, None, Some(e)),
+			Ok(m) => {
+				let (trace, error) = match crate::sanity::sanity(&m) {
+					Ok(t) => (
+						Some(t),
+						crate::verify::expand(&m, crate::sessions::DEFAULT_SESSIONS)
+							.and_then(|e| crate::sanity::sanity(&e.model))
+							.err(),
+					),
+					Err(e) => (None, Some(e)),
+				};
+				let error = error.map(|e| e.located(&m.file_name, &m.source));
+				(Some(m), trace, error)
 			}
-		}
+		};
 		Document {
-			text,
+			uri,
 			version,
-			name,
 			line,
 			model,
 			tokens,
 			trace,
-			sanity,
+			error,
 		}
+	}
+
+	pub(crate) fn text(&self) -> &str {
+		self.line.text()
 	}
 }
 
-#[cfg_attr(not(feature = "lsp"), allow(dead_code))]
 pub(crate) fn file_name(uri: &Uri) -> String {
 	let path = uri.path().as_str();
 	let last = path.rsplit('/').next().unwrap_or("");
@@ -148,6 +112,15 @@ mod tests {
 		Uri::from_str(s).expect("a uri")
 	}
 
+	fn document(name: &str, version: i32, text: &str) -> Document {
+		Document::new(
+			uri(&format!("file:///{name}")),
+			version,
+			text.to_string(),
+			&PositionEncodingKind::UTF8,
+		)
+	}
+
 	#[test]
 	fn a_file_name_comes_from_the_last_path_segment() {
 		assert_eq!(file_name(&uri("file:///home/nadim/simple.vp")), "simple.vp");
@@ -157,33 +130,21 @@ mod tests {
 
 	#[test]
 	fn an_opened_document_is_parsed_and_indexed() {
-		let mut docs = Documents::new(PositionEncodingKind::UTF8);
-		docs.open(
-			"file:///m.vp".to_string(),
-			"m.vp".to_string(),
-			1,
-			GOOD.to_string(),
-		);
-		let doc = docs.get("file:///m.vp").expect("the document is open");
+		let doc = document("m.vp", 1, GOOD);
 		assert_eq!(doc.version, 1);
-		assert!(doc.model.is_ok());
+		assert!(doc.model.is_some());
+		assert!(doc.error.is_none());
 		assert!(doc.trace.is_some(), "a valid model gets a trace");
 		assert!(!doc.tokens.tokens().is_empty());
+		assert_eq!(doc.model.expect("parsed").file_name, "m.vp");
 	}
 
 	#[test]
-	fn a_changed_document_is_reparsed_at_the_new_version() {
-		let mut docs = Documents::new(PositionEncodingKind::UTF8);
-		docs.open(
-			"file:///m.vp".to_string(),
-			"m.vp".to_string(),
-			1,
-			GOOD.to_string(),
-		);
-		docs.change("file:///m.vp", 2, "attacker[passive]\n".to_string());
-		let doc = docs.get("file:///m.vp").expect("still open");
+	fn a_document_that_does_not_parse_keeps_its_tokens() {
+		let doc = document("m.vp", 2, "attacker[passive]\n");
 		assert_eq!(doc.version, 2);
-		assert!(doc.model.is_err(), "a truncated model does not parse");
+		assert!(doc.model.is_none(), "a truncated model does not parse");
+		assert!(doc.error.is_some(), "and the parse error is kept");
 		assert!(doc.trace.is_none(), "no trace without a model");
 		assert!(
 			!doc.tokens.tokens().is_empty(),
@@ -200,17 +161,10 @@ mod tests {
 			queries[\n\
 			confidentiality? sf_nothing\n\
 			]\n";
-		let mut docs = Documents::new(PositionEncodingKind::UTF8);
-		docs.open(
-			"file:///b.vp".to_string(),
-			"b.vp".to_string(),
-			1,
-			broken.to_string(),
-		);
-		let doc = docs.get("file:///b.vp").expect("open");
-		assert!(doc.model.is_ok(), "it parses");
+		let doc = document("b.vp", 1, broken);
+		assert!(doc.model.is_some(), "it parses");
 		assert!(doc.trace.is_none(), "but it does not pass sanity");
-		assert!(doc.sanity.is_some(), "and the sanity error is kept");
+		assert!(doc.error.is_some(), "and the sanity error is kept");
 	}
 
 	#[test]
@@ -235,26 +189,18 @@ mod tests {
 			queries[\n\
 			confidentiality? sb_m\n\
 			]\n";
-		let mut docs = Documents::new(PositionEncodingKind::UTF8);
-		docs.open(
-			"file:///sb.vp".to_string(),
-			"sb.vp".to_string(),
-			1,
-			broken.to_string(),
-		);
-		let doc = docs.get("file:///sb.vp").expect("open");
-		assert!(doc.model.is_ok(), "it parses");
+		let doc = document("sb.vp", 1, broken);
+		assert!(doc.model.is_some(), "it parses");
 		assert!(
-			doc.sanity.is_some(),
+			doc.error.is_some(),
 			"the analysis would reject this binding, so the live check must too"
 		);
 		let fine = broken.replace(
 			"principal Alice[\n",
 			"Bob -> Alice: [sb_gb]\nprincipal Alice[\n",
 		);
-		docs.change("file:///sb.vp", 2, fine);
-		let doc = docs.get("file:///sb.vp").expect("open");
-		assert!(doc.sanity.is_none(), "{:?}", doc.sanity);
+		let doc = document("sb.vp", 2, &fine);
+		assert!(doc.error.is_none(), "{:?}", doc.error);
 	}
 
 	#[test]
@@ -267,34 +213,13 @@ mod tests {
 			src.push_str("queries[\n\tconfidentiality? pc_0\n]\n");
 			src
 		};
-		let mut docs = Documents::new(PositionEncodingKind::UTF8);
-		docs.open(
-			"file:///pc.vp".to_string(),
-			"pc.vp".to_string(),
-			1,
-			model(65),
-		);
-		let doc = docs.get("file:///pc.vp").expect("open");
+		let doc = document("pc.vp", 1, &model(65));
 		assert!(
-			doc.sanity.is_some(),
+			doc.error.is_some(),
 			"two sessions of 65 principals exceed the cap `verify` enforces, so the live \
 			 check must report it too"
 		);
-		docs.change("file:///pc.vp", 2, model(64));
-		let doc = docs.get("file:///pc.vp").expect("open");
-		assert!(doc.sanity.is_none(), "{:?}", doc.sanity);
-	}
-
-	#[test]
-	fn a_closed_document_is_forgotten() {
-		let mut docs = Documents::new(PositionEncodingKind::UTF8);
-		docs.open(
-			"file:///m.vp".to_string(),
-			"m.vp".to_string(),
-			1,
-			GOOD.to_string(),
-		);
-		docs.close("file:///m.vp");
-		assert!(docs.get("file:///m.vp").is_none());
+		let doc = document("pc.vp", 2, &model(64));
+		assert!(doc.error.is_none(), "{:?}", doc.error);
 	}
 }

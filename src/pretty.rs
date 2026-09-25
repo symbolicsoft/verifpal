@@ -4,7 +4,7 @@
 use std::fmt;
 
 use crate::parser::parse_file;
-use crate::primitive::primitive_name;
+use crate::primitive::{primitive_name, primitive_threshold};
 use crate::types::*;
 
 pub fn pretty_print(model_file: &str) -> VResult<String> {
@@ -22,25 +22,20 @@ impl fmt::Display for Constant {
 
 impl fmt::Display for Primitive {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		let name = primitive_name(self.id);
-		write!(f, "{}", name)?;
-		let threshold = crate::primitive::primitive_threshold(self.id).map(|_| self.threshold);
+		write!(f, "{}", primitive_name(self.id))?;
+		let threshold = primitive_threshold(self.id).map(|_| self.threshold);
 		if threshold.is_some() || !self.capabilities.is_empty() {
-			write!(f, "[")?;
-			let mut first = true;
+			let mut separator = "[";
 			if let Some(t) = threshold {
-				write!(f, "{}", t)?;
-				first = false;
+				write!(f, "{}{}", separator, t)?;
+				separator = ", ";
 			}
 			for (cap, onset) in self.capabilities.iter() {
-				if !first {
-					write!(f, ", ")?;
-				}
-				first = false;
-				write!(f, "{}", cap.name())?;
+				write!(f, "{}{}", separator, cap.name())?;
 				if onset > 0 {
 					write!(f, " from phase {}", onset)?;
 				}
+				separator = ", ";
 			}
 			write!(f, "]")?;
 		}
@@ -70,74 +65,35 @@ impl fmt::Display for Value {
 
 impl fmt::Display for Query {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		match self.kind {
-			QueryKind::Authentication => {
-				write!(
-					f,
-					"authentication? {} -> {}: {}",
-					self.message.sender_name,
-					self.message.recipient_name,
-					pretty_constants(&self.message.constants),
-				)?;
-			}
-			_ => {
-				write!(
-					f,
-					"{}? {}",
-					self.kind.name(),
-					pretty_constants(&self.constants)
-				)?;
-			}
+		write!(f, "{}", query_display(self))?;
+		if self.options.is_empty() {
+			return Ok(());
 		}
-		if !self.options.is_empty() {
-			write!(f, "[")?;
-			for option in &self.options {
-				for comment in &option.leading_comments {
-					write!(f, "\n\t\t{}", render_comment(comment, "\t\t"))?;
-				}
-				match option.kind {
-					QueryOptionKind::Precondition => {
-						write!(
-							f,
-							"\n\t\tprecondition[{} -> {}: {}]{}",
-							option.message.sender_name,
-							option.message.recipient_name,
-							pretty_constants(&option.message.constants),
-							render_trailing(option.trailing_comment.as_ref()),
-						)?;
-					}
-				}
-			}
-			write!(f, "\n\t]")?;
+		write!(f, "[")?;
+		for option in &self.options {
+			write!(
+				f,
+				"\n{}",
+				render_line(&option.comments, "\t\t", pretty_option(option))
+			)?;
 		}
-		Ok(())
+		write!(f, "\n\t]")
 	}
 }
 
 impl fmt::Display for Expression {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match self.kind {
-			Declaration::Knows => {
-				let qualifier = self.qualifier.unwrap_or(Qualifier::Private);
-				write!(
-					f,
-					"knows {} {}",
-					qualifier,
-					pretty_constants(&self.constants)
-				)
-			}
-			Declaration::Generates => {
-				write!(f, "generates {}", pretty_constants(&self.constants))
-			}
-			Declaration::Leaks => {
-				write!(f, "leaks {}", pretty_constants(&self.constants))
-			}
+			Declaration::Knows => write!(
+				f,
+				"knows {} {}",
+				self.qualifier.unwrap_or(Qualifier::Private),
+				pretty_constants(&self.constants)
+			),
+			Declaration::Generates => write!(f, "generates {}", pretty_constants(&self.constants)),
+			Declaration::Leaks => write!(f, "leaks {}", pretty_constants(&self.constants)),
 			Declaration::Assignment => {
-				let right = match &self.assigned {
-					Some(v) => v.to_string(),
-					None => String::new(),
-				};
-				let left: Vec<String> = self
+				let outputs: Vec<String> = self
 					.constants
 					.iter()
 					.map(|c| {
@@ -148,7 +104,11 @@ impl fmt::Display for Expression {
 						}
 					})
 					.collect();
-				write!(f, "{} = {}", left.join(", "), right)
+				write!(f, "{} = ", outputs.join(", "))?;
+				match &self.assigned {
+					Some(value) => write!(f, "{}", value),
+					None => Ok(()),
+				}
 			}
 		}
 	}
@@ -157,121 +117,107 @@ impl fmt::Display for Expression {
 fn render_comment(c: &Comment, indent: &str) -> String {
 	match c.style {
 		CommentStyle::Line => format!("//{}", c.text),
+		CommentStyle::Block if !c.text.contains('\n') => format!("/*{}*/", c.text),
 		CommentStyle::Block => {
-			if !c.text.contains('\n') {
-				format!("/*{}*/", c.text)
-			} else {
-				let cont_indent: String = format!("{}   ", indent);
-				let margin = c
-					.text
-					.split('\n')
-					.skip(1)
-					.filter(|line| !line.trim().is_empty())
-					.map(|line| line.len() - line.trim_start_matches([' ', '\t']).len())
-					.min()
-					.unwrap_or(0);
-				let mut out = String::from("/*");
-				for (i, line) in c.text.split('\n').enumerate() {
-					if i == 0 {
-						out.push_str(line);
-					} else {
-						out.push('\n');
-						out.push_str(&cont_indent);
-						if !line.trim().is_empty() {
-							out.push_str(&line[margin..]);
-						}
-					}
+			let mut lines = c.text.split('\n');
+			let mut out = format!("/*{}", lines.next().unwrap_or_default());
+			let rest: Vec<&str> = lines.collect();
+			let margin = rest
+				.iter()
+				.filter(|line| !line.trim().is_empty())
+				.map(|line| line.len() - line.trim_start_matches([' ', '\t']).len())
+				.min()
+				.unwrap_or(0);
+			for line in rest {
+				out.push('\n');
+				out.push_str(indent);
+				out.push_str("   ");
+				if !line.trim().is_empty() {
+					out.push_str(&line[margin..]);
 				}
-				out.push_str("*/");
-				out
 			}
+			out.push_str("*/");
+			out
 		}
 	}
 }
 
 fn render_leading(comments: &[Comment], indent: &str) -> String {
-	if comments.is_empty() {
-		return String::new();
-	}
-	let mut s = String::new();
-	for c in comments {
-		s.push_str(indent);
-		s.push_str(&render_comment(c, indent));
-		s.push('\n');
-	}
-	s
+	comments
+		.iter()
+		.map(|c| format!("{}{}\n", indent, render_comment(c, indent)))
+		.collect()
 }
 
 fn render_trailing(comment: Option<&Comment>) -> String {
-	match comment {
-		Some(c) => format!(" {}", render_comment(c, "")),
-		None => String::new(),
+	comment
+		.map(|c| format!(" {}", render_comment(c, "")))
+		.unwrap_or_default()
+}
+
+fn render_line(comments: &LineComments, indent: &str, line: impl fmt::Display) -> String {
+	format!(
+		"{}{indent}{line}{}",
+		render_leading(&comments.leading, indent),
+		render_trailing(comments.trailing.as_ref())
+	)
+}
+
+fn render_bracketed<'m>(
+	head: &str,
+	comments: &BracketComments,
+	items: impl Iterator<Item = (&'m LineComments, impl fmt::Display)>,
+) -> String {
+	let mut out = render_leading(&comments.leading, "");
+	out.push_str(&format!(
+		"{}[{}\n",
+		head,
+		render_trailing(comments.opening.as_ref())
+	));
+	for (item, line) in items {
+		out.push_str(&render_line(item, "\t", line));
+		out.push('\n');
 	}
+	out.push_str(&render_leading(&comments.tail, "\t"));
+	out.push(']');
+	out.push_str(&render_trailing(comments.closing.as_ref()));
+	out
 }
 
 pub(crate) fn query_display(q: &Query) -> String {
-	match q.kind {
-		QueryKind::Authentication => format!(
-			"authentication? {} -> {}: {}",
-			q.message.sender_name,
-			q.message.recipient_name,
-			pretty_constants(&q.message.constants),
-		),
-		_ => format!("{}? {}", q.kind.name(), pretty_constants(&q.constants)),
-	}
+	let subject = match q.kind {
+		QueryKind::Authentication => pretty_message(&q.message),
+		_ => pretty_constants(&q.constants),
+	};
+	format!("{}? {}", q.kind.name(), subject)
 }
 
 pub(crate) fn query_line(q: &Query) -> String {
-	let mut out = query_display(q);
+	let head = query_display(q);
 	if q.options.is_empty() {
-		return out;
+		return head;
 	}
-	out.push('[');
-	for (i, option) in q.options.iter().enumerate() {
-		if i > 0 {
-			out.push(' ');
-		}
-		match option.kind {
-			QueryOptionKind::Precondition => out.push_str(&format!(
-				"precondition[{} -> {}: {}]",
-				option.message.sender_name,
-				option.message.recipient_name,
-				pretty_constants(&option.message.constants),
-			)),
+	let options: Vec<String> = q.options.iter().map(pretty_option).collect();
+	format!("{}[{}]", head, options.join(" "))
+}
+
+fn pretty_option(option: &QueryOption) -> String {
+	match option.kind {
+		QueryOptionKind::Precondition => {
+			format!("precondition[{}]", pretty_message(&option.message))
 		}
 	}
-	out.push(']');
-	out
 }
 
 pub(crate) fn pretty_constants(constants: &[Constant]) -> String {
 	constants
 		.iter()
-		.map(|c| c.to_string())
+		.map(Constant::to_string)
 		.collect::<Vec<_>>()
 		.join(", ")
 }
 
-pub(crate) fn pretty_principal(principal: &Principal) -> String {
-	let mut output = format!("principal {}[", principal.name);
-	output.push_str(&render_trailing(principal.header_trailing.as_ref()));
-	output.push('\n');
-	for expression in &principal.expressions {
-		output.push_str(&render_leading(&expression.leading_comments, "\t"));
-		output.push_str(&format!(
-			"\t{}{}\n",
-			expression,
-			render_trailing(expression.trailing_comment.as_ref())
-		));
-	}
-	output.push_str(&render_leading(&principal.tail_comments, "\t"));
-	output.push(']');
-	output.push_str(&render_trailing(principal.closing_trailing.as_ref()));
-	output.push_str("\n\n");
-	output
-}
-
-pub(crate) fn pretty_message(message: &Message) -> String {
+fn pretty_message(message: &Message) -> String {
 	format!(
 		"{} -> {}: {}",
 		message.sender_name,
@@ -280,127 +226,82 @@ pub(crate) fn pretty_message(message: &Message) -> String {
 	)
 }
 
+fn pretty_scenario(scenario: &Scenario) -> String {
+	let bindings: Vec<String> = scenario
+		.bindings
+		.iter()
+		.map(|(target, value)| format!("{} = {}", target, value))
+		.collect();
+	format!("{}[{}]", scenario.principal_name, bindings.join(", "))
+}
+
 pub(crate) fn pretty_model(m: &Model) -> String {
 	let mut output = String::new();
-
-	if !m.pre_attacker_comments.is_empty() {
-		output.push_str(&render_leading(&m.pre_attacker_comments, ""));
+	if !m.attacker_comments.leading.is_empty() {
+		output.push_str(&render_leading(&m.attacker_comments.leading, ""));
 		output.push('\n');
 	}
-
 	output.push_str(&format!(
 		"attacker[{}]{}\n\n",
 		m.attacker,
-		render_trailing(m.attacker_trailing.as_ref())
+		render_trailing(m.attacker_comments.trailing.as_ref())
 	));
-
 	for block in &m.blocks {
-		match block {
-			Block::Principal(p) => {
-				output.push_str(&render_leading(&p.leading_comments, ""));
-				output.push_str(&pretty_principal(p));
-			}
-			Block::Message(msg) => {
-				output.push_str(&render_leading(&msg.leading_comments, ""));
-				output.push_str(&pretty_message(msg));
-				output.push_str(&render_trailing(msg.trailing_comment.as_ref()));
-				output.push_str("\n\n");
-			}
-			Block::Phase(ph) => {
-				output.push_str(&render_leading(&ph.leading_comments, ""));
-				output.push_str(&format!(
-					"phase[{}]{}\n\n",
-					ph.number,
-					render_trailing(ph.trailing_comment.as_ref())
-				));
-			}
-		}
-	}
-
-	if !m.scenarios.is_empty()
-		|| !m.scenarios_leading_comments.is_empty()
-		|| m.scenarios_header_trailing.is_some()
-		|| !m.scenarios_tail_comments.is_empty()
-		|| m.scenarios_closing_trailing.is_some()
-	{
-		output.push_str(&render_leading(&m.scenarios_leading_comments, ""));
-		output.push_str("scenarios[");
-		output.push_str(&render_trailing(m.scenarios_header_trailing.as_ref()));
-		output.push('\n');
-		for scenario in &m.scenarios {
-			output.push_str(&render_leading(&scenario.leading_comments, "\t"));
-			let bindings = scenario
-				.bindings
-				.iter()
-				.map(|(target, value)| format!("{} = {}", target, value))
-				.collect::<Vec<_>>()
-				.join(", ");
-			output.push_str(&format!(
-				"\t{}[{}]{}\n",
-				scenario.principal_name,
-				bindings,
-				render_trailing(scenario.trailing_comment.as_ref())
-			));
-		}
-		output.push_str(&render_leading(&m.scenarios_tail_comments, "\t"));
-		output.push(']');
-		output.push_str(&render_trailing(m.scenarios_closing_trailing.as_ref()));
+		output.push_str(&match block {
+			Block::Principal(p) => render_bracketed(
+				&format!("principal {}", p.name),
+				&p.comments,
+				p.expressions.iter().map(|e| (&e.comments, e)),
+			),
+			Block::Message(msg) => render_line(&msg.comments, "", pretty_message(msg)),
+			Block::Phase(ph) => render_line(&ph.comments, "", format!("phase[{}]", ph.number)),
+		});
 		output.push_str("\n\n");
 	}
-
-	output.push_str(&render_leading(&m.queries_leading_comments, ""));
-	output.push_str("queries[");
-	output.push_str(&render_trailing(m.queries_header_trailing.as_ref()));
-	output.push('\n');
-
-	for query in &m.queries {
-		output.push_str(&render_leading(&query.leading_comments, "\t"));
-		output.push_str(&format!(
-			"\t{}{}\n",
-			query,
-			render_trailing(query.trailing_comment.as_ref())
+	if !m.scenarios.is_empty() || !m.scenarios_comments.is_empty() {
+		output.push_str(&render_bracketed(
+			"scenarios",
+			&m.scenarios_comments,
+			m.scenarios
+				.iter()
+				.map(|s| (&s.comments, pretty_scenario(s))),
 		));
+		output.push_str("\n\n");
 	}
-
-	output.push_str(&render_leading(&m.queries_tail_comments, "\t"));
-	output.push(']');
-	output.push_str(&render_trailing(m.queries_closing_trailing.as_ref()));
+	output.push_str(&render_bracketed(
+		"queries",
+		&m.queries_comments,
+		m.queries.iter().map(|q| (&q.comments, q)),
+	));
 	output.push('\n');
-
 	if !m.tail_comments.is_empty() {
 		output.push('\n');
-		for c in &m.tail_comments {
-			output.push_str(&render_comment(c, ""));
-			output.push('\n');
-		}
+		output.push_str(&render_leading(&m.tail_comments, ""));
 	}
-
 	output
 }
 
 pub(crate) fn pretty_arity(spec_arity: &[i32]) -> String {
-	match spec_arity.len() {
-		0 => String::new(),
-		1 => spec_arity[0].to_string(),
-		_ => {
-			let (init, last) = spec_arity.split_at(spec_arity.len() - 1);
-			let init_str: Vec<String> = init.iter().map(|n| n.to_string()).collect();
-			format!("{}, or {}", init_str.join(", "), last[0])
+	match spec_arity {
+		[] => String::new(),
+		[only] => only.to_string(),
+		[init @ .., last] => {
+			let init: Vec<String> = init.iter().map(i32::to_string).collect();
+			format!("{}, or {}", init.join(", "), last)
 		}
 	}
 }
 
 pub fn diagram(model_file: &str) -> VResult<String> {
-	let m = parse_file(model_file)?;
-	mermaid_of(&m).map_err(|e| e.located(&m.file_name, &m.source))
+	Ok(mermaid_of(&parse_file(model_file)?))
 }
 
-pub(crate) fn mermaid_of(m: &Model) -> VResult<String> {
+pub(crate) fn mermaid_of(m: &Model) -> String {
 	let mut principals: Vec<&str> = Vec::new();
 	for block in &m.blocks {
-		let names: Vec<&str> = match block {
+		let names = match block {
 			Block::Principal(p) => vec![p.name.as_str()],
-			Block::Message(msg) => vec![&msg.sender_name, &msg.recipient_name],
+			Block::Message(msg) => vec![&*msg.sender_name, &*msg.recipient_name],
 			Block::Phase(_) => Vec::new(),
 		};
 		for name in names {
@@ -413,28 +314,27 @@ pub(crate) fn mermaid_of(m: &Model) -> VResult<String> {
 		let at = principals.iter().position(|n| *n == name).unwrap_or(0);
 		format!("p{at}")
 	};
-	let body = diagram_body(m, &id)?;
 	let mut out = String::from("sequenceDiagram\n");
 	for (at, name) in principals.iter().enumerate() {
 		out.push_str(&format!("    participant p{at} as {name}\n"));
 	}
-	for line in body.lines() {
+	for line in diagram_body(m, &id).lines() {
 		out.push_str("    ");
 		out.push_str(line);
 		out.push('\n');
 	}
-	Ok(out)
+	out
 }
 
 #[cfg_attr(not(feature = "lsp"), allow(dead_code))]
-pub(crate) fn pretty_diagram(m: &Model) -> VResult<String> {
+pub(crate) fn pretty_diagram(m: &Model) -> String {
 	diagram_body(m, &|name: &str| name.to_string())
 }
 
-fn diagram_body(m: &Model, id: &dyn Fn(&str) -> String) -> VResult<String> {
+fn diagram_body(m: &Model, id: &dyn Fn(&str) -> String) -> String {
 	let anchor = m.blocks.iter().find_map(|block| match block {
-		Block::Principal(p) => Some(p.name.clone()),
-		Block::Message(msg) => Some(msg.sender_name.to_string()),
+		Block::Principal(p) => Some(p.name.as_str()),
+		Block::Message(msg) => Some(&*msg.sender_name),
 		Block::Phase(_) => None,
 	});
 	let mut output = String::new();
@@ -454,7 +354,7 @@ fn diagram_body(m: &Model, id: &dyn Fn(&str) -> String) -> VResult<String> {
 				));
 			}
 			Block::Phase(phase) => {
-				if let Some(anchor) = &anchor {
+				if let Some(anchor) = anchor {
 					output.push_str(&format!(
 						"Note right of {}: phase[{}]\n",
 						id(anchor),
@@ -464,8 +364,9 @@ fn diagram_body(m: &Model, id: &dyn Fn(&str) -> String) -> VResult<String> {
 			}
 		}
 	}
-	Ok(output)
+	output
 }
+
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -488,6 +389,16 @@ mod tests {
 		}
 		let m2 = parse_string("pc.vp", &once).expect("reparse");
 		assert_eq!(pretty_model(&m2), once, "formatting is not stable");
+	}
+
+	#[test]
+	fn repeated_carriage_returns_end_no_comment() {
+		let src = "attacker[active] // a\r\r\n// b\r\r\nprincipal Alice[\n\tknows private rcr_a // c\r\r\n]\nqueries[\n\tconfidentiality? rcr_a\n]\n";
+		let once = pretty_model(&parse_string("rcr.vp", src).expect("parse"));
+		assert!(!once.contains('\r'), "{once:?}");
+		for text in ["// a", "// b", "// c"] {
+			assert!(once.contains(text), "{text} was dropped:\n{once}");
+		}
 	}
 
 	#[test]
@@ -718,8 +629,8 @@ mod tests {
 		let m2 = parse_string("t.vp", &out).expect("re-parse");
 		match &m2.blocks[0] {
 			Block::Principal(p) => {
-				assert_eq!(p.leading_comments.len(), 1);
-				assert!(matches!(p.leading_comments[0].style, CommentStyle::Block));
+				assert_eq!(p.comments.leading.len(), 1);
+				assert!(matches!(p.comments.leading[0].style, CommentStyle::Block));
 			}
 			_ => panic!(),
 		}
@@ -832,7 +743,7 @@ mod tests {
 			confidentiality? pd_x\n\
 			]\n";
 		let m = parse_string("pd.vp", src).expect("parse");
-		let out = pretty_diagram(&m).expect("diagram");
+		let out = pretty_diagram(&m);
 		assert!(out.contains("Note right of Alice: phase[1]"), "{out}");
 		assert!(!out.contains("of :"), "{out}");
 	}

@@ -112,7 +112,7 @@ pub(crate) fn supports(id: PrimitiveId, cap: Capability) -> bool {
 		return false;
 	};
 	match cap {
-		Capability::Weak => !spec.weak_reveals.is_empty() || spec.weak_reveals_output.is_some(),
+		Capability::Weak => !spec.weak_reveals.is_empty(),
 		Capability::Forgeable => spec.forgeable_secret.is_some(),
 		Capability::Malleable => !spec.malleable_vary.is_empty(),
 	}
@@ -354,8 +354,6 @@ impl CapabilityIndex {
 				out.push((name.to_string(), Reach::SameTerm(annotated.clone())));
 				return;
 			}
-			// The secret-keyed reach: this occurrence is not the annotated term,
-			// but a `forgeable` assumption on the same secret licenses forging it.
 			if index.forgeable_secret_position(p, i32::MAX).is_some()
 				&& let Some(secret) = forgeable_secret_of(p)
 			{

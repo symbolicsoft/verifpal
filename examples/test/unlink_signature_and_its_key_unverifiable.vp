@@ -1,0 +1,24 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: u0 at one session and at two.
+//
+// unlink_signature_and_its_key.vp with the signed message fresh and never
+// sent: the attacker cannot run SIGNVERIF, so nothing ties s1 to ga.
+attacker[passive]
+
+principal Alice[
+	generates m1
+	generates sk
+	ga = PUBKEY(sk)
+	s1 = SIGN(sk, m1)
+]
+
+Alice -> Bob: ga, s1
+
+principal Bob[
+	_ = HASH(ga, s1)
+]
+
+queries[
+	unlinkability? s1, ga
+]

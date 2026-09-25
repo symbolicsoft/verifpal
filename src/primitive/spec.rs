@@ -46,16 +46,16 @@ fn filter_identity(_p: &Primitive, x: &Value, _i: usize) -> (Value, bool) {
 	(x.clone(), true)
 }
 
+fn peel_key_derivation(x: &Value) -> (Value, bool) {
+	match super::key_derivation_inner(x) {
+		Some(inner) => (inner.clone(), true),
+		None => (x.clone(), false),
+	}
+}
+
 fn filter_extract_dh_exponent(_p: &Primitive, x: &Value, i: usize) -> (Value, bool) {
 	match i {
-		0 => match x {
-			Value::Primitive(p)
-				if super::primitive_is_key_derivation(p.id) && p.arguments.len() == 1 =>
-			{
-				(p.arguments[0].clone(), true)
-			}
-			Value::Constant(_) | Value::Primitive(_) => (x.clone(), false),
-		},
+		0 => peel_key_derivation(x),
 		1 => (x.clone(), true),
 		_ => (x.clone(), false),
 	}
@@ -87,14 +87,7 @@ fn filter_dec_rewrite(_p: &Primitive, x: &Value, i: usize) -> (Value, bool) {
 
 fn filter_ringsignverif_rewrite(_p: &Primitive, x: &Value, i: usize) -> (Value, bool) {
 	match i {
-		0 => match x {
-			Value::Primitive(p)
-				if super::primitive_is_key_derivation(p.id) && p.arguments.len() == 1 =>
-			{
-				(p.arguments[0].clone(), true)
-			}
-			Value::Constant(_) | Value::Primitive(_) => (x.clone(), false),
-		},
+		0 => peel_key_derivation(x),
 		1..=4 => (x.clone(), true),
 		_ => (x.clone(), false),
 	}
@@ -221,7 +214,7 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 			},
 			arity: vec![1, 2, 3, 4, 5],
 			output: vec![1],
-			weak_reveals: vec![0, 1, 2, 3, 4],
+			weak_reveals: (0..5).map(Reveal::Argument).collect(),
 			divergence_filler: true,
 			..PrimitiveSpec::default()
 		},
@@ -253,7 +246,7 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 				reveals: vec![Reveal::Argument(2)],
 				filter: filter_identity,
 			}),
-			weak_reveals: vec![2],
+			weak_reveals: vec![Reveal::Argument(2)],
 			forgeable_secret: Some(0),
 			reuse: Some(ReuseRule {
 				fixed: vec![0, 1],
@@ -303,7 +296,7 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 				reveals: vec![Reveal::Argument(1)],
 				filter: filter_identity,
 			}),
-			weak_reveals: vec![1],
+			weak_reveals: vec![Reveal::Argument(1)],
 			malleable_vary: vec![1],
 			..PrimitiveSpec::default()
 		},
@@ -362,7 +355,7 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 				banned: vec![PRIM_PUBKEY, PRIM_DH_KEX],
 				note: "`PUBKEY` derives a public value from a private one, so its argument cannot already be public",
 			}],
-			weak_reveals: vec![0],
+			weak_reveals: vec![Reveal::Argument(0)],
 			..PrimitiveSpec::default()
 		},
 		PrimitiveSpec {
@@ -449,7 +442,7 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 				reveals: vec![Reveal::Argument(1)],
 				filter: filter_extract_dh_exponent,
 			}),
-			weak_reveals: vec![1],
+			weak_reveals: vec![Reveal::Argument(1)],
 			..PrimitiveSpec::default()
 		},
 		PrimitiveSpec {
@@ -672,7 +665,7 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 					note: "",
 				},
 			],
-			weak_reveals_output: Some(0),
+			weak_reveals: vec![Reveal::Output(0)],
 			..PrimitiveSpec::default()
 		},
 		PrimitiveSpec {

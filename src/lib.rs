@@ -2,9 +2,6 @@
  * SPDX-License-Identifier: GPL-3.0-only */
 
 #![warn(unreachable_pub)]
-// The soundness argument of the paper is an argument about what the code can
-// reach, and `unsafe` would let any of it reach anything. There is none, and
-// this keeps it that way.
 #![forbid(unsafe_code)]
 
 pub(crate) mod autoquery;
@@ -31,7 +28,6 @@ pub(crate) mod principal;
 pub(crate) mod query;
 pub(crate) mod report;
 pub(crate) mod resolution;
-pub(crate) mod rewrite;
 pub(crate) mod sanity;
 pub(crate) mod scenario;
 pub(crate) mod sessions;

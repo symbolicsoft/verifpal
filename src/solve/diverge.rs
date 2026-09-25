@@ -13,30 +13,22 @@ pub(crate) fn solve_divergent(a: &Value, b: &Value, s: &Substitution) -> Vec<Sub
 	let mut b_vars = Vec::new();
 	collect_vars(a, &mut a_vars);
 	collect_vars(b, &mut b_vars);
-
 	if a_vars.is_empty() && b_vars.is_empty() {
 		return Vec::new();
 	}
-
-	let mut out = Vec::new();
-
-	for id in a_vars.iter().chain(b_vars.iter()) {
-		let in_a = a_vars.contains(id);
-		let in_b = b_vars.contains(id);
-		if in_a == in_b {
-			continue;
+	let nil_at = |ids: &[ValueId]| {
+		let mut out = s.clone();
+		for &id in ids {
+			out.entry(id).or_insert_with(value_nil);
 		}
-		let mut extended = s.clone();
-		extended.entry(*id).or_insert_with(value_nil);
-		out.push(extended);
-	}
-
-	let mut all = s.clone();
-	for id in a_vars.iter().chain(b_vars.iter()) {
-		all.entry(*id).or_insert_with(value_nil);
-	}
-	out.push(all);
-
+		out
+	};
+	let one_sided = a_vars
+		.iter()
+		.filter(|id| !b_vars.contains(id))
+		.chain(b_vars.iter().filter(|id| !a_vars.contains(id)));
+	let mut out: Vec<_> = one_sided.map(|&id| nil_at(&[id])).collect();
+	out.push(nil_at(&[a_vars.as_slice(), b_vars.as_slice()].concat()));
 	dedupe(out)
 }
 
@@ -61,7 +53,7 @@ pub(crate) fn distinguish(sym: &SymbolicState, proposal: &Substitution) -> Optio
 	Some(out)
 }
 
-pub(crate) fn fillers() -> Vec<Value> {
+fn fillers() -> Vec<Value> {
 	let Some(filler) = filler_primitive() else {
 		return vec![value_nil()];
 	};

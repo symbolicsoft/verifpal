@@ -1,0 +1,39 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: e1 at one session and at two.
+//
+// The attacker replaces u at Alice, so x = HASH(s, u) differs from Bob's
+// y = HASH(s, u), and Alice halts at her ASSERT before sending x. Every run
+// holds or borrows both computed values, but each would have received one of
+// them later, and that starvation once hid the difference at one session.
+attacker[active]
+
+principal Carol[
+	generates u
+	hu = HASH(u)
+]
+
+Carol -> Alice: u, [hu]
+Carol -> Bob: [u]
+
+principal Alice[
+	knows private s
+	x = HASH(s, u)
+]
+
+principal Bob[
+	knows private s
+	y = HASH(s, u)
+]
+
+principal Alice[
+	_ = ASSERT(HASH(u), hu)?
+]
+
+Alice -> Bob: [x]
+Bob -> Alice: [y]
+Alice -> Carol: [x]
+
+queries[
+	equivalence? x, y
+]

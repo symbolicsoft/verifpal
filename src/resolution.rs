@@ -136,39 +136,31 @@ fn resolve_trace_primitive(
 		.map(resolved_primitive)
 }
 
-pub(crate) fn state_mentions(
+pub(crate) fn mentions_across_principals(
 	value: &Value,
 	trace: &ProtocolTrace,
-	ps: &PrincipalState,
-	owner: PrincipalId,
+	principal: PrincipalId,
 	target: ValueId,
 ) -> bool {
-	let mut pending = vec![(value, owner)];
+	let mut pending = vec![(value, principal)];
 	let mut seen = IdSet::default();
 	while let Some((value, owner)) = pending.pop() {
 		match value {
 			Value::Constant(c) => {
 				if c.id == target {
-					if ps
-						.index_of(c)
-						.is_some_and(|idx| owner == ps.id || ps.mutation_reaches(idx, owner))
-					{
+					if trace.index_of(c).is_some_and(|idx| {
+						owner == principal || trace.slots[idx].mutation_reaches(owner)
+					}) {
 						return true;
 					}
 					continue;
 				}
-				let Some(idx) = trace.index_of(c) else {
+				let Some(slot) = trace.index_of(c).map(|idx| &trace.slots[idx]) else {
 					continue;
 				};
-				let inner = &trace.slots[idx].initial_value;
-				if !matches!(inner, Value::Primitive(_)) {
-					continue;
+				if matches!(slot.initial_value, Value::Primitive(_)) {
+					pending.push((&slot.initial_value, slot.creator));
 				}
-				let next = ps
-					.index_of(c)
-					.map(|i| ps.values[i].provenance.creator)
-					.unwrap_or(trace.slots[idx].creator);
-				pending.push((inner, next));
 			}
 			Value::Primitive(p) => {
 				if seen.insert((Arc::as_ptr(p) as usize, owner)) {
@@ -180,178 +172,23 @@ pub(crate) fn state_mentions(
 	false
 }
 
-fn compute_visibility(
-	slot_idx: usize,
-	root_index: usize,
-	root_value: &Value,
-	ps: &PrincipalState,
-	existing_use_original: bool,
-) -> bool {
-	if slot_idx == root_index {
-		if existing_use_original {
-			return true;
-		}
-		return ps.should_use_original(slot_idx);
-	}
-
-	let root_from_other = matches!(root_value, Value::Primitive(_))
-		&& ps.values[root_index].provenance.creator != ps.id;
-
-	let forced = existing_use_original || root_from_other;
-	if forced {
-		!ps.mutation_reaches(slot_idx, ps.values[root_index].provenance.creator)
-	} else {
-		ps.should_use_original(slot_idx)
-	}
-}
-
-pub(crate) struct ResolveMemo {
-	slots: Vec<[Option<Value>; 2]>,
-	terms: IdMap<TermKey, (Arc<Primitive>, Option<Value>)>,
-}
-
-type TermKey = (usize, usize, bool, bool);
-
-impl ResolveMemo {
-	pub(crate) fn new(slots: usize) -> ResolveMemo {
-		ResolveMemo {
-			slots: vec![[None, None]; slots],
-			terms: IdMap::default(),
-		}
-	}
-}
-
-pub(crate) fn resolve_ps_values(
-	value: &Value,
-	root_value: &Value,
-	root_index: usize,
-	ps: &PrincipalState,
-	use_original: bool,
-	memo: &mut ResolveMemo,
-) -> VResult<Option<Value>> {
-	let Value::Constant(c) = value else {
-		return resolve_ps_primitive(value, root_value, root_index, ps, use_original, memo);
-	};
-	let Some(start) = ps.index_of(c) else {
-		return Err(VerifpalError::resolution("invalid index".into()));
-	};
-	let mut slot_idx = start;
-	let mut use_orig = compute_visibility(slot_idx, root_index, root_value, ps, use_original);
-	let mut hops = 0usize;
-	loop {
-		let held = if use_orig {
-			ps.values[slot_idx].perceived()
-		} else {
-			&ps.values[slot_idx].value
-		};
-		let Value::Constant(alias) = held else {
-			break;
-		};
-		let Some(next) = ps.index_of(alias) else {
-			break;
-		};
-		if next == slot_idx || hops >= ps.values.len() {
-			break;
-		}
-		slot_idx = next;
-		use_orig = compute_visibility(slot_idx, root_index, root_value, ps, use_original);
-		hops += 1;
-	}
-	let rerooted = slot_idx != root_index;
-	if rerooted && let Some(hit) = &memo.slots[slot_idx][usize::from(use_orig)] {
-		return Ok(Some(hit.clone()));
-	}
-	let resolved = if use_orig {
-		ps.values[slot_idx].perceived()
-	} else {
-		&ps.values[slot_idx].value
-	};
-	match resolved {
-		Value::Constant(rc) => Ok((rc.id != c.id).then(|| resolved.clone())),
-		Value::Primitive(_) if !rerooted => {
-			let mapped =
-				resolve_ps_primitive(resolved, root_value, root_index, ps, use_orig, memo)?;
-			Ok(Some(mapped.unwrap_or_else(|| resolved.clone())))
-		}
-		Value::Primitive(_) => {
-			let mapped = resolve_ps_primitive(resolved, resolved, slot_idx, ps, use_orig, memo)?;
-			let out = mapped.unwrap_or_else(|| resolved.clone());
-			memo.slots[slot_idx][usize::from(use_orig)] = Some(out.clone());
-			Ok(Some(out))
-		}
-	}
-}
-
-fn resolve_ps_primitive(
-	value: &Value,
-	root_value: &Value,
-	root_index: usize,
-	ps: &PrincipalState,
-	use_original: bool,
-	memo: &mut ResolveMemo,
-) -> VResult<Option<Value>> {
-	let Value::Primitive(prim) = value else {
-		return Err(VerifpalError::resolution("expected a primitive".into()));
-	};
-	let key = (
-		Arc::as_ptr(prim) as usize,
-		root_index,
-		use_original,
-		matches!(root_value, Value::Primitive(_)),
-	);
-	if let Some((held, hit)) = memo.terms.get(&key)
-		&& Arc::ptr_eq(held, prim)
-	{
-		return Ok(hit.clone());
-	}
-	let use_orig = if ps.values[root_index].provenance.creator == ps.id {
-		false
-	} else {
-		use_original
-	};
-	let mapped = prim.try_map_arguments(|arg| {
-		resolve_ps_values(arg, root_value, root_index, ps, use_orig, memo)
-	})?;
-	let out = mapped.map(resolved_primitive);
-	memo.terms.insert(key, (Arc::clone(prim), out.clone()));
-	Ok(out)
-}
-
 pub(crate) fn principal_uses_constant(
 	trace: &ProtocolTrace,
-	states: &[PrincipalState],
-	principal_id: PrincipalId,
+	principal: PrincipalId,
 	c: &Constant,
 ) -> bool {
-	let Some(ps) = states.iter().find(|state| state.id == principal_id) else {
-		return false;
-	};
 	trace.slots.iter().any(|slot| {
-		slot.creator == principal_id
+		slot.creator == principal
 			&& matches!(&slot.initial_value, Value::Primitive(_))
-			&& state_mentions(&slot.initial_value, trace, ps, ps.id, c.id)
+			&& mentions_across_principals(&slot.initial_value, trace, principal, c.id)
 	})
 }
 
-pub(crate) fn constant_used_by_any_principal(
-	trace: &ProtocolTrace,
-	states: &[PrincipalState],
-	c: &Constant,
-) -> bool {
-	states
-		.iter()
-		.any(|ps| principal_uses_constant(trace, states, ps.id, c))
-}
-
-pub(crate) fn constant_used_by_principal(
-	trace: &ProtocolTrace,
-	principal_id: PrincipalId,
-	c: &Constant,
-) -> bool {
+pub(crate) fn constant_used_by_any_principal(trace: &ProtocolTrace, c: &Constant) -> bool {
 	trace
-		.used_by
-		.get(&c.id)
-		.is_some_and(|principals| principals.contains(&principal_id))
+		.principal_ids
+		.iter()
+		.any(|&principal| principal_uses_constant(trace, principal, c))
 }
 
 #[cfg(test)]
@@ -361,40 +198,21 @@ mod tests {
 
 	#[test]
 	fn repeated_resolution_shares_ground_terms_and_tracks_changed_inputs() {
-		let model = crate::parser::parse_string("resolved.vp", "attacker[active]\nprincipal Sender[generates a, b]\nSender -> Reader: a, b\nprincipal Reader[x = HASH(a)]\nqueries[confidentiality? x]\n").unwrap();
-		let (_, states) = crate::sanity::sanity(&model).unwrap();
-		let base = states.iter().find(|state| state.name == "Reader").unwrap();
-		let index = |name: &str| {
-			base.meta
-				.iter()
-				.position(|slot| slot.constant.name.as_ref() == name)
-				.unwrap()
-		};
-		let target = index("x");
-		let mut first = base.clone();
-		let mut second = base.clone();
-		first.resolve_all_values().unwrap();
-		second.resolve_all_values().unwrap();
-		assert!(
-			first.values[target]
-				.value
-				.same_term(&second.values[target].value)
+		let model = crate::parser::parse_string("resolved.vp", "attacker[active]\nprincipal Sender[generates a, b]\nSender -> Reader: a, b\nprincipal Reader[x = HASH(a)\ny = HASH(x)\nz = HASH(b)]\nqueries[confidentiality? y]\n").unwrap();
+		let trace = crate::sanity::sanity(&model).unwrap();
+		let y = trace_constant(&trace, "y");
+		let first = resolve_trace_term(&y, &trace);
+		let second = resolve_trace_term(&y, &trace);
+		assert!(first.same_term(&second));
+		let changed = resolve_trace_term(
+			&Value::primitive(
+				crate::primitive::PRIM_HASH,
+				vec![trace_constant(&trace, "z")],
+				0,
+			),
+			&trace,
 		);
-		let mut changed = base.clone();
-		let replacement = base.values[index("b")].value.clone();
-		let slot = &mut changed.values[index("a")];
-		slot.original = slot.value.clone();
-		slot.provenance.creator = crate::principal::ATTACKER_ID;
-		slot.provenance.sender = crate::principal::ATTACKER_ID;
-		slot.provenance.attacker_tainted = true;
-		slot.pre_rewrite = replacement.clone();
-		slot.value = replacement;
-		changed.resolve_all_values().unwrap();
-		assert!(
-			!first.values[target]
-				.value
-				.equivalent(&changed.values[target].value, true)
-		);
+		assert!(!first.equivalent(&changed, true));
 	}
 
 	#[test]
@@ -472,12 +290,7 @@ mod tests {
 	fn use_checks_visit_shared_terms_without_expanding_their_occurrences() {
 		let target = make_constant("mentions_dag_target");
 		let seed = make_constant("mentions_dag_seed");
-		let ps = make_principal_state(
-			"Reader",
-			1,
-			vec![make_slot_meta(target.as_constant().unwrap(), true)],
-			vec![make_slot_values(&target, 1)],
-		);
+		let trace = make_trace(vec![make_trace_slot(&target, &target, 1)]);
 		let mut term = seed;
 		for _ in 0..40 {
 			term = Value::primitive(
@@ -486,11 +299,10 @@ mod tests {
 				0,
 			);
 		}
-		let trace = make_trace();
 		let id = target.as_constant().unwrap().id;
-		assert!(!state_mentions(&term, &trace, &ps, ps.id, id));
+		assert!(!mentions_across_principals(&term, &trace, 1, id));
 		let used = Value::primitive(crate::primitive::PRIM_HASH, vec![term, target], 0);
-		assert!(state_mentions(&used, &trace, &ps, ps.id, id));
+		assert!(mentions_across_principals(&used, &trace, 1, id));
 	}
 
 	#[test]
@@ -504,174 +316,15 @@ mod tests {
 			queries[confidentiality? target]\n",
 		)
 		.unwrap();
-		let (trace, states) = crate::sanity::sanity(&model).unwrap();
-		let ps = states.iter().find(|state| state.name == "Bob").unwrap();
+		let trace = crate::sanity::sanity(&model).unwrap();
+		let bob = trace.principal_ids[trace.principals.iter().position(|p| p == "Bob").unwrap()];
 		let target = trace_constant(&trace, "target");
 		let sealed = trace_constant(&trace, "sealed");
 		let slot = trace.index_of(sealed.as_constant().unwrap()).unwrap();
 		let shared = trace.slots[slot].initial_value.clone();
 		let id = target.as_constant().unwrap().id;
-		assert!(!state_mentions(&sealed, &trace, ps, ps.id, id));
+		assert!(!mentions_across_principals(&sealed, &trace, bob, id));
 		let both = Value::primitive(crate::primitive::PRIM_HASH, vec![sealed, shared], 0);
-		assert!(state_mentions(&both, &trace, ps, ps.id, id));
-	}
-
-	fn two_slot_state(mutatable_to: Vec<PrincipalId>, root_creator: PrincipalId) -> PrincipalState {
-		let wire = make_constant("cv_wire");
-		let term_name = make_constant("cv_term");
-		let mutated = make_constant("cv_mutated");
-		let (wire_c, term_c) = (
-			wire.as_constant().expect("constant").clone(),
-			term_name.as_constant().expect("constant").clone(),
-		);
-
-		let mut wire_meta = make_slot_meta(&wire_c, false);
-		wire_meta.wire = vec![1];
-		wire_meta.known = true;
-		wire_meta.mutatable_to = mutatable_to;
-		let term_meta = make_slot_meta(&term_c, true);
-
-		let mut wire_values = make_slot_values(&mutated, 2);
-		wire_values.original = wire.clone();
-		wire_values.provenance.attacker_tainted = true;
-		let term_values = make_slot_values(
-			&make_primitive(crate::primitive::PRIM_HASH, vec![wire], 0),
-			root_creator,
-		);
-
-		make_principal_state(
-			"Bob",
-			1,
-			vec![wire_meta, term_meta],
-			vec![wire_values, term_values],
-		)
-	}
-
-	fn visibility(ps: &PrincipalState, slot: usize, root: usize, forced: bool) -> bool {
-		let root_value = ps.values[root].value.clone();
-		compute_visibility(slot, root, &root_value, ps, forced)
-	}
-
-	#[test]
-	fn the_root_slot_takes_the_visibility_it_was_asked_for() {
-		let ps = two_slot_state(vec![], 1);
-		assert!(visibility(&ps, 1, 1, true));
-		assert_eq!(visibility(&ps, 1, 1, false), ps.should_use_original(1));
-	}
-
-	#[test]
-	fn a_term_of_this_principals_own_sees_the_mutation_it_was_handed() {
-		let ps = two_slot_state(vec![2], 1);
-		assert!(
-			!visibility(&ps, 0, 1, false),
-			"Bob computed this term himself out of a wire value the attacker replaced, \
-			 so he computes with what he was handed"
-		);
-	}
-
-	#[test]
-	fn a_term_of_another_principals_keeps_its_own_value_unless_the_attacker_reached_it() {
-		let unreachable = two_slot_state(vec![], 2);
-		assert!(
-			visibility(&unreachable, 0, 1, false),
-			"the root belongs to another principal and no unguarded delivery carried \
-			 this value to it, so its resolution is the honest one"
-		);
-		let reachable = two_slot_state(vec![2], 2);
-		assert!(
-			!visibility(&reachable, 0, 1, false),
-			"the same value reached that principal unguarded, so the attacker's choice \
-			 does appear inside what it computed"
-		);
-	}
-
-	#[test]
-	fn an_inherited_original_view_still_asks_whether_the_attacker_reached_the_slot() {
-		let unreachable = two_slot_state(vec![], 1);
-		assert!(visibility(&unreachable, 0, 1, true));
-		let reachable = two_slot_state(vec![1], 1);
-		assert!(
-			!visibility(&reachable, 0, 1, true),
-			"an outer original view does not survive into a slot the attacker could \
-			 replace on its way to the term's creator"
-		);
-	}
-
-	#[test]
-	fn a_substituted_slot_resolves_through_the_name_it_was_given() {
-		let alias = make_constant("rc_alias");
-		let target = make_constant("rc_target");
-		let carrier = make_constant("rc_carrier");
-		let (alias_c, target_c, carrier_c) = (
-			alias.as_constant().expect("constant").clone(),
-			target.as_constant().expect("constant").clone(),
-			carrier.as_constant().expect("constant").clone(),
-		);
-		let inner = make_primitive(
-			crate::primitive::PRIM_HASH,
-			vec![make_constant("rc_seed")],
-			0,
-		);
-		let seed_c = make_constant("rc_seed");
-
-		let mut alias_meta = make_slot_meta(&alias_c, false);
-		alias_meta.wire = vec![1];
-		let mut target_meta = make_slot_meta(&target_c, false);
-		target_meta.wire = vec![1];
-		let carrier_meta = make_slot_meta(&carrier_c, true);
-		let seed_meta = make_slot_meta(seed_c.as_constant().expect("constant"), true);
-
-		let mut alias_values = make_slot_values(&target, 2);
-		alias_values.provenance.attacker_tainted = true;
-		let mut target_values = make_slot_values(&inner, 2);
-		target_values.provenance.attacker_tainted = true;
-		let carrier_values = make_slot_values(
-			&make_primitive(crate::primitive::PRIM_HASH, vec![alias.clone()], 0),
-			1,
-		);
-		let seed_values = make_slot_values(&seed_c, 1);
-
-		let mut ps = make_principal_state(
-			"Bob",
-			1,
-			vec![alias_meta, target_meta, carrier_meta, seed_meta],
-			vec![alias_values, target_values, carrier_values, seed_values],
-		);
-		ps.resolve_all_values().expect("resolves");
-
-		let (resolved, _) = ps.resolve_constant(&alias_c, false);
-		assert!(
-			resolved.equivalent(&inner, true),
-			"a slot the attacker filled with another slot's name must resolve to what that \
-			 name holds. Stopping at the name leaves the recipient's own check comparing a \
-			 label while the term handed to it carries a value, and two different values \
-			 then compare equal, which is a contradiction nothing executes. Got {resolved}"
-		);
-	}
-
-	#[test]
-	fn a_slot_that_names_itself_terminates_the_walk() {
-		let received = make_constant("rc_self");
-		let received_c = received.as_constant().expect("constant").clone();
-		let mut meta = make_slot_meta(&received_c, false);
-		meta.wire = vec![1];
-		let ps = make_principal_state("Bob", 1, vec![meta], vec![make_slot_values(&received, 2)]);
-		let (resolved, _) = ps.resolve_constant(&received_c, false);
-		assert!(
-			resolved.equivalent(&received, true),
-			"a received constant's slot holds the constant itself, so the walk has to stop \
-			 there rather than chase its own name forever"
-		);
-	}
-
-	#[test]
-	fn a_constant_rooted_term_is_never_forced_by_its_root() {
-		let mut ps = two_slot_state(vec![2], 2);
-		ps.values[1] = make_slot_values(&make_constant("cv_plain"), 2);
-		assert_eq!(
-			visibility(&ps, 0, 1, false),
-			ps.should_use_original(0),
-			"only a primitive root can impose another principal's view"
-		);
+		assert!(mentions_across_principals(&both, &trace, bob, id));
 	}
 }

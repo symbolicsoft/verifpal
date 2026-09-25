@@ -79,20 +79,14 @@ fn update_alert(newer: &str, current: &str) {
 }
 
 fn update_newer_version(body: &str, current: &str) -> Option<String> {
-	let current_components = update_parse_version(current)?;
+	let current = update_parse_version(current)?;
 	let mut newest: Option<(Vec<u64>, String)> = None;
 	for name in update_tag_names(body) {
 		let Some(components) = update_parse_version(&name) else {
 			continue;
 		};
-		if !update_version_is_newer(&components, &current_components) {
-			continue;
-		}
-		let supersedes = match &newest {
-			Some((best, _)) => update_version_is_newer(&components, best),
-			None => true,
-		};
-		if supersedes {
+		let best = newest.as_ref().map_or(&current, |(best, _)| best);
+		if update_version_is_newer(&components, best) {
 			newest = Some((components, update_version_display(&name).to_string()));
 		}
 	}

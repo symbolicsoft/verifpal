@@ -6,13 +6,9 @@ use std::sync::{Arc, LazyLock};
 
 use crate::equivalence::{equivalent_primitives, memoised_pair};
 use crate::hashing::primitive_hash;
-use crate::resolution::constant_used_by_principal;
-use crate::rewrite::perform_primitive_rewrite;
 use crate::types::*;
 
-pub(crate) use crate::resolution::{
-	ResolveMemo, resolve_ps_values, resolve_trace_constant, resolve_trace_term,
-};
+pub(crate) use crate::resolution::{resolve_trace_constant, resolve_trace_term};
 
 pub(crate) fn subterms(v: &Value) -> impl Iterator<Item = &Value> {
 	let mut seen = IdSet::default();
@@ -67,7 +63,7 @@ impl ValueNames {
 
 pub(crate) const COPY_BASE: ValueId = 0x0400_0000;
 
-pub(crate) const COPY_STRIDE: ValueId = 0x0400_0000;
+const COPY_STRIDE: ValueId = 0x0400_0000;
 
 pub(crate) const MAX_COPIES: u32 = 30;
 
@@ -104,23 +100,10 @@ pub(crate) fn value_nil() -> Value {
 	STATIC_NIL.clone()
 }
 
-pub(crate) fn find_equivalent(v: &Value, values: &[Value]) -> Option<usize> {
-	values
-		.iter()
-		.position(|existing| v.equivalent(existing, true))
-}
-
-pub(crate) fn push_unique_value(values: &mut Vec<Value>, v: Value) -> bool {
-	if find_equivalent(&v, values).is_none() {
+pub(crate) fn push_unique_value(values: &mut Vec<Value>, v: Value) {
+	if !values.iter().any(|existing| v.equivalent(existing, true)) {
 		values.push(v);
-		true
-	} else {
-		false
 	}
-}
-
-pub(crate) fn find_equivalent_constant(c: &Constant, constants: &[Constant]) -> Option<usize> {
-	constants.iter().position(|existing| c.equivalent(existing))
 }
 
 impl Value {
@@ -157,16 +140,6 @@ impl Value {
 	pub(crate) fn constant_leaves(&self) -> impl Iterator<Item = &Constant> {
 		subterms(self).filter_map(Value::as_constant)
 	}
-	pub fn collect_constants(&self, out: &mut Vec<Constant>) {
-		match self {
-			Value::Constant(c) => out.push(c.clone()),
-			Value::Primitive(p) => {
-				for arg in &p.arguments {
-					arg.collect_constants(out);
-				}
-			}
-		}
-	}
 }
 
 impl Constant {
@@ -175,103 +148,6 @@ impl Constant {
 	}
 	pub fn is_nil(&self) -> bool {
 		self.id == 1
-	}
-}
-
-impl PrincipalState {
-	pub fn index_of(&self, c: &Constant) -> Option<usize> {
-		self.index
-			.get(&c.id)
-			.copied()
-			.filter(|&i| i < self.meta.len())
-	}
-	pub fn resolve_constant(&self, c: &Constant, allow_original: bool) -> (Value, Option<usize>) {
-		let i = self.index_of(c);
-		match i {
-			None => (Value::Constant(c.clone()), None),
-			Some(idx) => {
-				let value = if allow_original {
-					self.effective_value(idx)
-				} else {
-					&self.values[idx].value
-				};
-				(value.clone(), Some(idx))
-			}
-		}
-	}
-	pub fn perform_all_rewrites(&mut self) -> Vec<(Primitive, usize)> {
-		let mut failures: Vec<(Primitive, usize)> = Vec::new();
-		let len = self.values.len();
-		for i in 0..len {
-			if let Value::Primitive(p) = &self.values[i].value {
-				let p_clone = p.clone();
-				let failed = perform_primitive_rewrite(&p_clone, i, self);
-				failures.extend(failed.map(|p| (p, i)));
-			}
-		}
-		failures
-	}
-	pub fn resolve_all_values(&mut self) -> VResult<()> {
-		let n = self.values.len();
-		let mut resolved = Vec::with_capacity(n);
-		let mut memo = ResolveMemo::new(n);
-		let ps_ref: &PrincipalState = &*self;
-		for i in 0..n {
-			let use_original = ps_ref.should_use_original(i);
-			let sv = &ps_ref.values[i];
-			let value =
-				resolve_ps_values(&sv.value, &sv.value, i, ps_ref, use_original, &mut memo)?;
-			let pre_rewrite = if sv.value.same_term(&sv.pre_rewrite) {
-				value.clone()
-			} else {
-				resolve_ps_values(
-					&sv.pre_rewrite,
-					&sv.pre_rewrite,
-					i,
-					ps_ref,
-					use_original,
-					&mut memo,
-				)?
-			};
-			resolved.push((value, pre_rewrite));
-		}
-		for (sv, (value, pre_rewrite)) in self.values.iter_mut().zip(resolved) {
-			if let Some(value) = value {
-				sv.value = value;
-			}
-			if let Some(pre_rewrite) = pre_rewrite {
-				sv.pre_rewrite = pre_rewrite;
-			}
-		}
-		Ok(())
-	}
-}
-
-impl ProtocolTrace {
-	pub fn index_of(&self, c: &Constant) -> Option<usize> {
-		self.index.get(&c.id).copied()
-	}
-	pub fn principal_name(&self, id: PrincipalId) -> &str {
-		if id == crate::principal::ATTACKER_ID {
-			return crate::principal::ATTACKER_NAME;
-		}
-		self.principal_ids
-			.iter()
-			.position(|&p| p == id)
-			.and_then(|i| self.principals.get(i))
-			.map(String::as_str)
-			.unwrap_or("")
-	}
-	pub fn constant_used_by(&self, principal_id: PrincipalId, c: &Constant) -> bool {
-		constant_used_by_principal(self, principal_id, c)
-	}
-	pub fn constant_used_by_any(&self, c: &Constant) -> bool {
-		if &*c.name == "nil" {
-			return true;
-		}
-		self.principal_ids
-			.iter()
-			.any(|&pid| constant_used_by_principal(self, pid, c))
 	}
 }
 
@@ -318,14 +194,11 @@ impl AttackerState {
 	}
 
 	pub fn knows_hashed(&self, v: &Value, h: u64) -> Option<KnownIdx> {
-		if let Some(indices) = self.known_map.get(&h) {
-			for &i in indices {
-				if v.equivalent(&self.known[i], true) {
-					return Some(KnownIdx(i));
-				}
-			}
-		}
-		None
+		self.known_map
+			.get(&h)?
+			.iter()
+			.find(|&&i| v.equivalent(&self.known[i], true))
+			.map(|&i| KnownIdx(i))
 	}
 }
 
@@ -334,7 +207,6 @@ mod tests {
 	use super::*;
 	use crate::primitive::*;
 	use crate::testutil::*;
-	use std::sync::Arc;
 
 	#[test]
 	fn session_bands_stay_below_the_solver_ranges() {
@@ -376,25 +248,15 @@ mod tests {
 	}
 
 	#[test]
-	fn find_equivalent_in_slice() {
-		let a = make_constant("find_a");
-		let b = make_constant("find_b");
-		let c = make_constant("find_a");
-		let slice = vec![a.clone(), b.clone()];
-		assert_eq!(find_equivalent(&c, &slice), Some(0));
-		let d = make_constant("find_d");
-		assert_eq!(find_equivalent(&d, &slice), None);
-	}
-
-	#[test]
 	fn push_unique_no_duplicates() {
 		let a = make_constant("push_a");
 		let b = make_constant("push_b");
 		let mut v = vec![];
-		assert!(push_unique_value(&mut v, a.clone()));
-		assert!(push_unique_value(&mut v, b));
-		assert!(!push_unique_value(&mut v, a));
+		push_unique_value(&mut v, a.clone());
+		push_unique_value(&mut v, b);
+		push_unique_value(&mut v, make_constant("push_a"));
 		assert_eq!(v.len(), 2);
+		assert!(v[0].equivalent(&a, true));
 	}
 
 	#[test]
@@ -417,33 +279,12 @@ mod tests {
 	}
 
 	#[test]
-	fn principal_state_index_of() {
-		let c = Constant {
-			name: Arc::from("ps_idx_a"),
-			id: test_value_id("ps_idx_a"),
-			..Constant::default()
-		};
-		let meta = vec![make_slot_meta(&c, true)];
-		let values = vec![make_slot_values(&make_constant("ps_idx_a"), 0)];
-		let ps = make_principal_state("Alice", 0, meta, values);
-		assert_eq!(ps.index_of(&c), Some(0));
-
-		let other = Constant {
-			name: Arc::from("ps_idx_b"),
-			id: test_value_id("ps_idx_b"),
-			..Constant::default()
-		};
-		assert_eq!(ps.index_of(&other), None);
-	}
-
-	#[test]
-	fn collect_constants_from_primitive() {
-		let a = make_constant("cc_a");
-		let b = make_constant("cc_b");
-		let p = make_primitive(PRIM_ENC, vec![a, b], 0);
-		let mut out = Vec::new();
-		p.collect_constants(&mut out);
-		assert_eq!(out.len(), 2);
+	fn trace_index_of() {
+		let a = make_constant("ps_idx_a");
+		let km = make_trace(vec![make_trace_slot(&a, &a, 0)]);
+		assert_eq!(km.index_of(a.as_constant().unwrap()), Some(0));
+		let other = make_constant("ps_idx_b");
+		assert_eq!(km.index_of(other.as_constant().unwrap()), None);
 	}
 
 	#[test]
@@ -451,9 +292,6 @@ mod tests {
 		let a = make_constant("constant_leaves_a");
 		let b = make_constant("constant_leaves_b");
 		let mut term = make_primitive(PRIM_HASH, vec![a.clone(), a.clone(), b.clone()], 0);
-		let mut occurrences = Vec::new();
-		term.collect_constants(&mut occurrences);
-		assert_eq!(occurrences.len(), 3);
 		for _ in 0..40 {
 			term = make_primitive(PRIM_HASH, vec![term.clone(), term.clone(), term], 0);
 		}

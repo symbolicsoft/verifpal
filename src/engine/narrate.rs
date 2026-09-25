@@ -4,7 +4,7 @@
 use std::sync::Arc;
 
 use super::exec::{Context, Execution};
-use super::knowledge::{Knowledge, Origin};
+use super::knowledge::Origin;
 use super::program::Event;
 use crate::primitive::primitive_name;
 use crate::types::*;
@@ -17,9 +17,8 @@ pub(crate) struct Narrator<'a, 'b> {
 	names: Names,
 	unshaped: Names,
 	honest_names: Names,
-	cutoff: std::cell::Cell<usize>,
+	cutoff: usize,
 	gated: Vec<(usize, usize)>,
-	pub(crate) lines: Vec<String>,
 	pub(crate) steps: Vec<TraceStep>,
 	explained: Vec<Value>,
 }
@@ -115,22 +114,6 @@ impl Names {
 	}
 }
 
-fn prefix(knowledge: &Knowledge, len: usize) -> AttackerState {
-	let state = &knowledge.state;
-	let len = len.min(state.known.len());
-	let mut out = AttackerState::new();
-	out.current_phase = state.current_phase;
-	out.known = Arc::new(state.known[..len].to_vec());
-	let mut map: IdMap<u64, Vec<usize>> = IdMap::default();
-	for (i, v) in out.known.iter().enumerate() {
-		map.entry(v.hash_value()).or_default().push(i);
-	}
-	out.known_map = Arc::new(map);
-	out.derivations = Arc::new(state.derivations[..len.min(state.derivations.len())].to_vec());
-	out.reused = state.reused.clone();
-	out
-}
-
 fn head(p: &Primitive) -> String {
 	match crate::primitive::primitive_threshold(p.id) {
 		Some(_) => format!("{}[{}]", primitive_name(p.id), p.threshold),
@@ -148,21 +131,15 @@ impl<'a, 'b> Narrator<'a, 'b> {
 			unshaped: names.unshaped(),
 			names,
 			honest_names: Names::of(cx, honest, honest),
-			cutoff: std::cell::Cell::new(ex.knowledge.len()),
+			cutoff: ex.knowledge.len(),
 			gated: Vec::new(),
-			lines: Vec::new(),
 			steps: Vec::new(),
 			explained: Vec::new(),
 		}
 	}
 
 	fn available(&self, v: &Value) -> bool {
-		if self
-			.ex
-			.knowledge
-			.knows(v)
-			.is_some_and(|i| i < self.cutoff.get())
-		{
+		if self.ex.knowledge.knows(v).is_some_and(|i| i < self.cutoff) {
 			return true;
 		}
 		match v {
@@ -204,13 +181,17 @@ impl<'a, 'b> Narrator<'a, 'b> {
 		)
 	}
 
-	fn named(&self, names: &Names, v: &Value, exclude: &[&str]) -> String {
-		if let Some(name) = names.lookup(v, exclude) {
-			return name.to_string();
-		}
+	fn spell(&self, names: &Names, v: &Value, exclude: &[&str]) -> String {
 		match v {
 			Value::Constant(c) => c.to_string(),
 			Value::Primitive(p) => self.render(names, p, exclude),
+		}
+	}
+
+	fn named(&self, names: &Names, v: &Value, exclude: &[&str]) -> String {
+		match names.lookup(v, exclude) {
+			Some(name) => name.to_string(),
+			None => self.spell(names, v, exclude),
 		}
 	}
 
@@ -219,23 +200,13 @@ impl<'a, 'b> Narrator<'a, 'b> {
 	}
 
 	pub(crate) fn spelled(&self, v: &Value, exclude: &[&str]) -> String {
-		match v {
-			Value::Constant(c) => c.to_string(),
-			Value::Primitive(p) => self.render(&self.names, p, exclude),
-		}
+		self.spell(&self.names, v, exclude)
 	}
 
 	fn delivered(&self, v: &Value, exclude: &[&str]) -> String {
 		match self.names.lookup(v, exclude) {
 			Some(name) if !self.names.shaped(name) => name.to_string(),
 			_ => self.spelled(v, exclude),
-		}
-	}
-
-	fn spelled_honest(&self, v: &Value, exclude: &[&str]) -> String {
-		match v {
-			Value::Constant(c) => c.to_string(),
-			Value::Primitive(p) => self.render(&self.honest_names, p, exclude),
 		}
 	}
 
@@ -262,26 +233,22 @@ impl<'a, 'b> Narrator<'a, 'b> {
 	}
 
 	fn say(&mut self, line: String) {
-		self.push(TraceStep::new("derive", line));
+		self.steps.push(TraceStep::new("derive", line));
 	}
 
-	fn push(&mut self, step: TraceStep) {
-		self.lines
-			.push(format!("{}. {}", self.lines.len() + 1, step.text));
-		self.steps.push(step);
-	}
-
-	fn route(
-		&self,
-		delivery: &super::program::Delivery,
+	fn say_routed(
+		&mut self,
+		(sender, recipient): (usize, usize),
 		kind: &'static str,
 		text: String,
-	) -> TraceStep {
+		values: Vec<TraceValue>,
+	) {
 		let runs = &self.cx.program.runs;
 		let mut step = TraceStep::new(kind, text);
-		step.sender = Some(runs[delivery.sender].name.clone());
-		step.recipient = Some(runs[delivery.recipient].name.clone());
-		step
+		step.sender = Some(runs[sender].name.clone());
+		step.recipient = Some(runs[recipient].name.clone());
+		step.values = values;
+		self.steps.push(step);
 	}
 
 	fn done(&mut self, v: &Value) -> bool {
@@ -296,12 +263,13 @@ impl<'a, 'b> Narrator<'a, 'b> {
 		if self.done(v) {
 			return;
 		}
-		let outer = self.cutoff.replace(len);
-		self.narrate(v, len);
-		self.cutoff.set(outer);
+		let outer = std::mem::replace(&mut self.cutoff, len);
+		self.narrate(v);
+		self.cutoff = outer;
 	}
 
-	fn narrate(&mut self, v: &Value, len: usize) {
+	fn narrate(&mut self, v: &Value) {
+		let len = self.cutoff;
 		let knowledge = &self.ex.knowledge;
 		let known = knowledge.knows(v).filter(|&i| i < len);
 		if known.is_none()
@@ -311,69 +279,30 @@ impl<'a, 'b> Narrator<'a, 'b> {
 			for argument in &built.arguments {
 				self.explain(argument, len);
 			}
-			let shown = self.subject(v);
-			self.say(format!("Attacker constructs {shown}."));
+			self.constructs(v);
 			return;
 		}
 		let Some(i) = known else {
-			let state = prefix(knowledge, len);
+			let keep: Vec<bool> = (0..knowledge.len()).map(|at| at < len).collect();
+			let restricted = knowledge.state.retaining(&keep);
+			let state = restricted.as_deref().unwrap_or(&knowledge.state);
 			if let Value::Primitive(p) = v
 				&& let Some(built) =
-					crate::theory::can_reconstruct_primitive(p, self.cx.carrier, &state)
+					crate::theory::can_reconstruct_primitive(p, &self.cx.km.capabilities, state)
 			{
-				let mut ingredients = built.from.clone();
-				match &built.forged {
-					Some(Forged::Reuse(pair)) => ingredients.extend(pair.iter().cloned()),
-					Some(Forged::Assumption {
-						capability: Capability::Malleable,
-						of,
-					}) => ingredients.push(of.clone()),
-					_ => {}
-				}
-				for ingredient in &ingredients {
+				for ingredient in built.ingredients() {
 					self.explain(ingredient, len);
 				}
-				let shown = self.subject(v);
-				let line = match &built.forged {
-					Some(Forged::Assumption {
-						capability: capability @ Capability::Malleable,
-						of,
-					}) => format!(
-						"Under the declared `{}` assumption, Attacker reshapes {} into {shown}.",
-						capability.name(),
-						self.term(of, &[])
-					),
-					Some(Forged::Assumption { capability, .. }) => format!(
-						"Under the declared `{}` assumption, Attacker forges {shown}.",
-						capability.name()
-					),
-					Some(Forged::Reuse(with)) => format!(
-						"Attacker forges {shown} under the {} shared by {} and {}.",
-						crate::primitive::reuse_fixed_names(&with[0]),
-						self.term(&with[0], &[]),
-						self.term(&with[1], &[])
-					),
-					None if built.combined => format!(
-						"Attacker combines {shown} out of the partial signatures {}.",
-						self.list(&built.from)
-					),
-					None => format!("Attacker constructs {shown}."),
-				};
-				self.say(line);
+				self.derives(&super::knowledge::reconstruction(built), v);
 				return;
 			}
-			let mut inputs = crate::theory::KnowledgeInputs::new(self.cx.carrier, &state);
-			let used: Vec<usize> = inputs
-				.of_value(v)
-				.map(|found| found.into_iter().map(|idx| idx.get()).collect())
-				.unwrap_or_default();
-			for idx in used {
-				let ingredient = state.known[idx].clone();
+			let mut inputs = crate::theory::KnowledgeInputs::new(&self.cx.km.capabilities, state);
+			for idx in inputs.of_value(v).unwrap_or_default() {
+				let ingredient = state.known[idx.get()].clone();
 				self.explain(&ingredient, len);
 			}
 			if matches!(v, Value::Primitive(_)) {
-				let shown = self.subject(v);
-				self.say(format!("Attacker constructs {shown}."));
+				self.constructs(v);
 			}
 			return;
 		};
@@ -403,90 +332,89 @@ impl<'a, 'b> Narrator<'a, 'b> {
 					let ingredient = ingredient.clone();
 					self.explain(&ingredient, len);
 				}
-				let line = match &record {
-					DerivationRecord::Decomposed { of, using } => {
-						for u in using {
-							self.explain(u, len);
-						}
-						format!(
-							"Attacker opens {} with {}, obtaining {}.",
-							self.term(of, &[]),
-							self.list(using),
-							self.term(v, &[])
-						)
-					}
-					DerivationRecord::Reconstructed { .. } => {
-						format!("Attacker constructs {}.", self.subject(v))
-					}
-					DerivationRecord::Combined { from } => format!(
-						"Attacker combines {} out of the partial signatures {}.",
-						self.subject(v),
-						self.list(from)
-					),
-					DerivationRecord::Recomposed { using, .. } => format!(
-						"Attacker recomposes {} from enough of its shares ({}).",
-						self.term(v, &[]),
-						self.list(using)
-					),
-					DerivationRecord::Fragment { of } => format!(
-						"Attacker splits {} and takes {}.",
-						self.term(of, &[]),
-						self.term(v, &[])
-					),
-					DerivationRecord::Rewritten { of, using, .. } => {
-						for u in using {
-							self.explain(u, len);
-						}
-						let name = match of {
-							Value::Primitive(p) => primitive_name(p.id),
-							Value::Constant(_) => "a rewrite",
-						};
-						format!(
-							"Attacker applies {name} to {}, obtaining {}.",
-							self.list(using),
-							self.subject(v)
-						)
-					}
-					DerivationRecord::Broken { of, capability, .. } => match capability {
-						Capability::Weak => format!(
-							"Attacker breaks {} under the declared `{}` assumption, obtaining {}.",
-							self.term(of, &[]),
-							capability.name(),
-							self.term(v, &[])
-						),
-						Capability::Malleable => format!(
-							"Under the declared `{}` assumption, Attacker reshapes {} into {}.",
-							capability.name(),
-							self.term(of, &[]),
-							self.subject(v)
-						),
-						_ => format!(
-							"Under the declared `{}` assumption, Attacker forges {}.",
-							capability.name(),
-							self.subject(v)
-						),
-					},
-					DerivationRecord::Reused { of, with } => format!(
-						"Attacker recovers {} from {}: {} shares its {}.",
-						self.term(v, &[]),
-						self.term(of, &[]),
-						self.term(with, &[]),
-						crate::primitive::reuse_fixed_names(of)
-					),
-					DerivationRecord::ReusedForge { with, .. } => format!(
-						"Attacker forges {} under the {} shared by {} and {}.",
-						self.subject(v),
-						crate::primitive::reuse_fixed_names(&with[0]),
-						self.term(&with[0], &[]),
-						self.term(&with[1], &[])
-					),
-					DerivationRecord::Initial
-					| DerivationRecord::Leaked { .. }
-					| DerivationRecord::Obtained { .. } => return,
-				};
-				self.say(line);
+				self.derives(&record, v);
 			}
 		}
+	}
+
+	fn constructs(&mut self, v: &Value) {
+		let shown = self.subject(v);
+		self.say(format!("Attacker constructs {shown}."));
+	}
+
+	fn derives(&mut self, record: &DerivationRecord, v: &Value) {
+		let line = match record {
+			DerivationRecord::Decomposed { of, using } => format!(
+				"Attacker opens {} with {}, obtaining {}.",
+				self.term(of, &[]),
+				self.list(using),
+				self.term(v, &[])
+			),
+			DerivationRecord::Reconstructed { .. } => return self.constructs(v),
+			DerivationRecord::Combined { from } => format!(
+				"Attacker combines {} out of the partial signatures {}.",
+				self.subject(v),
+				self.list(from)
+			),
+			DerivationRecord::Recomposed { using, .. } => format!(
+				"Attacker recomposes {} from enough of its shares ({}).",
+				self.term(v, &[]),
+				self.list(using)
+			),
+			DerivationRecord::Fragment { of } => format!(
+				"Attacker splits {} and takes {}.",
+				self.term(of, &[]),
+				self.term(v, &[])
+			),
+			DerivationRecord::Rewritten { of, using, .. } => {
+				let name = match of {
+					Value::Primitive(p) => primitive_name(p.id),
+					Value::Constant(_) => "a rewrite",
+				};
+				format!(
+					"Attacker applies {name} to {}, obtaining {}.",
+					self.list(using),
+					self.subject(v)
+				)
+			}
+			DerivationRecord::Broken { of, capability, .. } => match capability {
+				Capability::Weak => format!(
+					"Attacker breaks {} under the declared `{}` assumption, obtaining {}.",
+					self.term(of, &[]),
+					capability.name(),
+					self.term(v, &[])
+				),
+				Capability::Malleable => format!(
+					"Under the declared `{}` assumption, Attacker reshapes {} into {}.",
+					capability.name(),
+					self.term(of, &[]),
+					self.subject(v)
+				),
+				_ => format!(
+					"Under the declared `{}` assumption, Attacker forges {}.",
+					capability.name(),
+					self.subject(v)
+				),
+			},
+			DerivationRecord::Reused { of, with } => format!(
+				"Attacker recovers {} from {}: {} shares its {}.",
+				self.term(v, &[]),
+				self.term(of, &[]),
+				self.term(with, &[]),
+				crate::primitive::reuse_fixed_names(of)
+			),
+			DerivationRecord::ReusedForge { with, .. } => format!(
+				"Attacker forges {} under the {} shared by {} and {}.",
+				self.subject(v),
+				crate::primitive::reuse_fixed_names(&with[0]),
+				self.term(&with[0], &[]),
+				self.term(&with[1], &[])
+			),
+			DerivationRecord::Initial
+			| DerivationRecord::Leaked { .. }
+			| DerivationRecord::Obtained { .. } => return,
+		};
+		self.say(line);
 	}
 
 	fn received_at(&self, run: usize, slot: usize) -> usize {
@@ -584,8 +512,6 @@ impl<'a, 'b> Narrator<'a, 'b> {
 				"{} to {}",
 				program.runs[delivery.sender].name, program.runs[delivery.recipient].name
 			);
-			let mut names = Vec::new();
-			let mut values = Vec::new();
 			let mut was = Vec::new();
 			let mut items = Vec::new();
 			let mut replayed = Vec::new();
@@ -604,20 +530,19 @@ impl<'a, 'b> Narrator<'a, 'b> {
 				let shown = self.spelled(&value, &[&name]);
 				self.done(&value);
 				replayed.push(slot);
-				let mut step = self.route(
-					delivery,
+				self.say_routed(
+					(delivery.sender, delivery.recipient),
 					"replay",
 					format!(
 						"Attacker replays {name} ({route}) from another {axis}, where it is {shown}."
 					),
+					vec![TraceValue {
+						name,
+						installed: Some(shown),
+						was: None,
+						guarded: false,
+					}],
 				);
-				step.values = vec![TraceValue {
-					name,
-					installed: Some(shown),
-					was: None,
-					guarded: false,
-				}];
-				self.push(step);
 			}
 			for (k, &(slot, _)) in delivery.slots.iter().enumerate() {
 				let Some(h) = self.ex.runs[run].held(slot) else {
@@ -631,15 +556,13 @@ impl<'a, 'b> Narrator<'a, 'b> {
 				let own: [&str; 1] = [&constant];
 				self.explain(&value, before);
 				let previous = self.honest.runs[run].held(slot).map(|honest| &honest.value);
-				let displaced = previous.map(|honest| self.spelled_honest(honest, &own));
+				let displaced = previous.map(|honest| self.spell(&self.honest_names, honest, &own));
 				let mut shown = self.delivered(&value, &own);
 				if displaced.as_ref() == Some(&shown)
 					&& previous.is_some_and(|honest| !honest.equivalent(&value, true))
 				{
 					shown = self.named(&self.unshaped, &value, &own);
 				}
-				names.push(constant.clone());
-				values.push(shown.clone());
 				let shown_was = previous.filter(|honest| {
 					!honest.equivalent(&value, true)
 						&& honest
@@ -665,13 +588,13 @@ impl<'a, 'b> Narrator<'a, 'b> {
 					}
 				}
 				items.push(TraceValue {
-					name: constant.clone(),
+					name: constant,
 					installed: Some(shown),
 					was: displaced,
 					guarded: false,
 				});
 			}
-			if names.is_empty() {
+			if items.is_empty() {
 				continue;
 			}
 			let note = if was.is_empty() {
@@ -679,17 +602,22 @@ impl<'a, 'b> Narrator<'a, 'b> {
 			} else {
 				format!(" ({})", was.join("; "))
 			};
-			let mut step = self.route(
-				delivery,
-				"mutations",
-				format!(
-					"Attacker replaces {} (sent by {route}) with {}.{note}",
-					names.join(", "),
-					values.join(", "),
-				),
+			let names: Vec<&str> = items.iter().map(|item| item.name.as_str()).collect();
+			let values: Vec<&str> = items
+				.iter()
+				.filter_map(|item| item.installed.as_deref())
+				.collect();
+			let text = format!(
+				"Attacker replaces {} (sent by {route}) with {}.{note}",
+				names.join(", "),
+				values.join(", "),
 			);
-			step.values = items;
-			self.push(step);
+			self.say_routed(
+				(delivery.sender, delivery.recipient),
+				"mutations",
+				text,
+				items,
+			);
 		}
 	}
 
@@ -706,22 +634,21 @@ impl<'a, 'b> Narrator<'a, 'b> {
 	pub(crate) fn received(&mut self, run: usize, slot: usize, sender: usize) {
 		let runs = &self.cx.program.runs;
 		let name = self.cx.km.slots[slot].constant.to_string();
-		let mut step = TraceStep::new(
-			"received",
-			format!(
-				"{} received {name} from {}.",
-				runs[run].name, runs[sender].name
-			),
+		let text = format!(
+			"{} received {name} from {}.",
+			runs[run].name, runs[sender].name
 		);
-		step.sender = Some(runs[sender].name.clone());
-		step.recipient = Some(runs[run].name.clone());
-		step.values = vec![TraceValue {
-			name,
-			installed: None,
-			was: None,
-			guarded: false,
-		}];
-		self.push(step);
+		self.say_routed(
+			(sender, run),
+			"received",
+			text,
+			vec![TraceValue {
+				name,
+				installed: None,
+				was: None,
+				guarded: false,
+			}],
+		);
 	}
 
 	pub(crate) fn built_from(&mut self, slot: usize, value: &Value) {
@@ -735,7 +662,7 @@ impl<'a, 'b> Narrator<'a, 'b> {
 		if leaves.is_empty() {
 			return;
 		}
-		self.push(TraceStep::new(
+		self.steps.push(TraceStep::new(
 			"static",
 			format!(
 				"No value {} is built from is generated fresh: {}.",
@@ -749,7 +676,7 @@ impl<'a, 'b> Narrator<'a, 'b> {
 		for (c, v) in resolved {
 			let name = c.to_string();
 			let shown = self.spelled(v, &[&name]);
-			self.push(TraceStep::new(
+			self.steps.push(TraceStep::new(
 				"resolves",
 				format!("In this state {c} resolves to {shown}."),
 			));
@@ -816,10 +743,15 @@ impl<'a, 'b> Narrator<'a, 'b> {
 		);
 		step.principal = Some(principal);
 		self.gated.push((run, slot));
-		self.push(step);
+		self.steps.push(step);
 	}
 
 	pub(crate) fn trace(&self) -> String {
-		self.lines.join("\n")
+		self.steps
+			.iter()
+			.enumerate()
+			.map(|(i, step)| format!("{}. {}", i + 1, step.text))
+			.collect::<Vec<_>>()
+			.join("\n")
 	}
 }

@@ -8,11 +8,10 @@ use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 
 use crate::info;
-use crate::lsp::state::{Document, Documents};
-use crate::report::{ModelReport, Run};
+use crate::lsp::state::Document;
+use crate::report::{Assumption, ModelReport, Run};
 use crate::sessions::{DEFAULT_SESSIONS, MAX_SESSIONS};
 use crate::types::*;
-use crate::verify::VerifyReport;
 
 const FILE_NAME: &str = "workbench.vp";
 
@@ -26,7 +25,7 @@ struct WasmVerify {
 	error: String,
 	results: Vec<WasmResult>,
 	code: String,
-	assumptions: Vec<WasmAssumption>,
+	assumptions: Vec<Assumption>,
 	scenarios: Vec<WasmScenario>,
 	messages: Vec<String>,
 }
@@ -49,14 +48,6 @@ struct WasmResult {
 }
 
 #[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct WasmAssumption {
-	term: String,
-	capability: String,
-	from_phase: i32,
-}
-
-#[derive(Serialize)]
 struct WasmPretty {
 	ok: bool,
 	error: String,
@@ -69,7 +60,7 @@ struct WasmAnalyze {
 	error: String,
 	code: String,
 	results: Vec<WasmResult>,
-	assumptions: Vec<WasmAssumption>,
+	assumptions: Vec<Assumption>,
 	scenarios: Vec<WasmScenario>,
 	messages: Vec<String>,
 	sessions: u8,
@@ -134,17 +125,6 @@ fn results_of(results: &[VerifyResult]) -> Vec<WasmResult> {
 		.collect()
 }
 
-fn assumptions_of(assumptions: &[(Value, Capability, i32)]) -> Vec<WasmAssumption> {
-	assumptions
-		.iter()
-		.map(|(term, capability, onset)| WasmAssumption {
-			term: term.to_string(),
-			capability: capability.name().to_string(),
-			from_phase: *onset,
-		})
-		.collect()
-}
-
 fn scenarios_of(scenarios: &[ScenarioSummary]) -> Vec<WasmScenario> {
 	scenarios
 		.iter()
@@ -170,7 +150,7 @@ fn wasm_verify_inner(input: &str) -> VResult<WasmVerify> {
 		error: String::new(),
 		code: VerifyResult::results_code(&results),
 		results: results_of(&results),
-		assumptions: assumptions_of(ctx.assumptions()),
+		assumptions: Assumption::list(ctx.assumptions()),
 		scenarios: scenarios_of(ctx.scenarios()),
 		messages: info::wasm_messages_drain(),
 	})
@@ -241,24 +221,17 @@ fn analyze_options(options: &str) -> Result<(u8, AnalyzeOptions), String> {
 	Ok((sessions, options))
 }
 
-fn analyze_model(
-	input: &str,
-	sessions: u8,
-	options: &AnalyzeOptions,
-) -> VResult<(VerifyReport, String)> {
-	let m = crate::parser::parse_string(FILE_NAME, input)?;
-	crate::verify::verify_parsed(m, sessions, options.auto_queries)
-}
-
 fn analyze(input: &str, sessions: u8, options: &AnalyzeOptions) -> WasmAnalyze {
-	let (payload, outcome, source) = match analyze_model(input, sessions, options) {
-		Ok((report, source)) => (
+	let analyzed = crate::parser::parse_string(FILE_NAME, input)
+		.and_then(|m| crate::verify::verify_parsed(m, sessions, options.auto_queries));
+	let (payload, outcome) = match analyzed {
+		Ok((report, _)) => (
 			WasmAnalyze {
 				ok: true,
 				error: String::new(),
 				code: report.code.clone(),
 				results: results_of(&report.results),
-				assumptions: assumptions_of(&report.assumptions),
+				assumptions: Assumption::list(&report.assumptions),
 				scenarios: scenarios_of(&report.scenarios),
 				messages: Vec::new(),
 				sessions: report.sessions,
@@ -266,21 +239,16 @@ fn analyze(input: &str, sessions: u8, options: &AnalyzeOptions) -> WasmAnalyze {
 				html: None,
 			},
 			Ok(report),
-			source,
 		),
 		Err(e) => {
 			let error = e.to_string();
-			(
-				WasmAnalyze::failed(error.clone()),
-				Err(error),
-				input.to_string(),
-			)
+			(WasmAnalyze::failed(error.clone()), Err(error))
 		}
 	};
 	let run = Run::of(
 		VERSION,
 		&[(FILE_NAME.to_string(), outcome)],
-		std::slice::from_ref(&source),
+		&[input.to_string()],
 	);
 	let html = options.report.then(|| crate::html::html_report(&run));
 	WasmAnalyze {
@@ -324,24 +292,22 @@ pub fn wasm_analyze(input: &str, options: &str) -> String {
 	)
 }
 
-fn uri() -> Option<Uri> {
-	Uri::from_str(URI).ok()
-}
-
-fn documents(input: &str) -> Documents {
-	let mut docs = Documents::new(PositionEncodingKind::UTF16);
-	docs.open(URI.to_string(), FILE_NAME.to_string(), 1, input.to_string());
-	docs
+fn document(input: &str) -> Option<Document> {
+	let uri = Uri::from_str(URI).ok()?;
+	Some(Document::new(
+		uri,
+		1,
+		input.to_string(),
+		&PositionEncodingKind::UTF16,
+	))
 }
 
 #[wasm_bindgen]
 pub fn wasm_check(input: &str) -> String {
 	let _quiet = info::InfoQuiet::new();
-	let docs = documents(input);
-	let diagnostics = match (docs.get(URI), uri()) {
-		(Some(doc), Some(uri)) => crate::lsp::diagnostics::for_document(doc, &uri),
-		_ => Vec::new(),
-	};
+	let diagnostics = document(input)
+		.map(|doc| crate::lsp::diagnostics::for_document(&doc))
+		.unwrap_or_default();
 	serialize(&WasmCheck { diagnostics }, r#"{"diagnostics":[]}"#)
 }
 
@@ -362,15 +328,15 @@ fn refuse(error: String) -> WasmLanguage {
 	}
 }
 
-fn language(doc: &Document, uri: &Uri, request: &LanguageRequest) -> WasmLanguage {
+fn language(doc: &Document, request: &LanguageRequest) -> WasmLanguage {
 	use crate::lsp::language;
 	let at = Position::new(request.line, request.character);
 	match request.method.as_str() {
 		"hover" => answer(language::hover(doc, at)),
 		"completion" => answer(language::completions(doc, at)),
 		"signatureHelp" => answer(language::signature_help(doc, at)),
-		"definition" => answer(language::definition(doc, at, uri)),
-		"references" => answer(language::references(doc, at, uri)),
+		"definition" => answer(language::definition(doc, at)),
+		"references" => answer(language::references(doc, at)),
 		"highlights" => answer(language::highlights(doc, at)),
 		"prepareRename" => answer(language::prepare_rename(doc, at)),
 		"rename" => match &request.new_name {
@@ -390,13 +356,10 @@ fn language(doc: &Document, uri: &Uri, request: &LanguageRequest) -> WasmLanguag
 pub fn wasm_language(input: &str, request: &str) -> String {
 	let _quiet = info::InfoQuiet::new();
 	let payload = match serde_json::from_str::<LanguageRequest>(request) {
-		Ok(request) => {
-			let docs = documents(input);
-			match (docs.get(URI), uri()) {
-				(Some(doc), Some(uri)) => language(doc, &uri, &request),
-				_ => refuse("the document could not be opened".to_string()),
-			}
-		}
+		Ok(request) => match document(input) {
+			Some(doc) => language(&doc, &request),
+			None => refuse("the document could not be opened".to_string()),
+		},
 		Err(e) => refuse(format!("invalid request: {e}")),
 	};
 	serialize(
@@ -407,8 +370,8 @@ pub fn wasm_language(input: &str, request: &str) -> String {
 
 fn suggest(input: &str) -> VResult<Vec<String>> {
 	let m = crate::parser::parse_string_queries_optional(FILE_NAME, input)?;
-	let (km, ps) = crate::sanity::sanity(&m).map_err(|e| e.located(&m.file_name, &m.source))?;
-	Ok(crate::autoquery::auto_queries(&m, &km, &ps)
+	let km = crate::sanity::sanity(&m).map_err(|e| e.located(&m.file_name, &m.source))?;
+	Ok(crate::autoquery::auto_queries(&m, &km)
 		.iter()
 		.map(|q| q.to_string())
 		.collect())

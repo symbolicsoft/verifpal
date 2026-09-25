@@ -3,10 +3,11 @@
 
 use std::sync::Arc;
 
-use crate::primitive::{Reveal, primitive_core_reveals_args, reuse_rule};
+use crate::hashing::TermSet;
+use crate::primitive::{primitive_core_reveals_args, recompose_rule, reuse_rule};
 use crate::theory::{
 	can_break_weak, can_decompose, can_recompose, can_reconstruct_primitive, can_rewrite,
-	obtainable, reduce_once, reused_pair,
+	obtainable, reused_pair, revealed,
 };
 use crate::types::*;
 
@@ -18,13 +19,28 @@ pub(crate) enum Origin {
 	Derived(DerivationRecord),
 }
 
+impl Origin {
+	fn record(&self) -> DerivationRecord {
+		match self {
+			Origin::Initial => DerivationRecord::Initial,
+			Origin::Wire { slot, .. } => DerivationRecord::Obtained {
+				slot: SlotIdx(*slot),
+			},
+			Origin::Leak { slot, .. } => DerivationRecord::Leaked {
+				slot: SlotIdx(*slot),
+			},
+			Origin::Derived(record) => record.clone(),
+		}
+	}
+}
+
 #[derive(Clone, Default)]
 struct Candidates {
 	recon: Vec<Value>,
 	forward: Vec<(Value, Value)>,
 	splits: Vec<Value>,
-	seen: IdMap<u64, Vec<Value>>,
-	seen_forward: IdMap<u64, Vec<Value>>,
+	seen: TermSet,
+	seen_forward: TermSet,
 }
 
 impl Candidates {
@@ -32,12 +48,8 @@ impl Candidates {
 		self.walk(value);
 		if let Value::Primitive(p) = pre {
 			let (reduces, reduced) = can_rewrite(p);
-			if reduces && !reduced.equivalent(pre, true) {
-				let bucket = self.seen_forward.entry(pre.hash_value()).or_default();
-				if !bucket.iter().any(|held| held.equivalent(pre, true)) {
-					bucket.push(pre.clone());
-					self.forward.push((pre.clone(), reduced));
-				}
+			if reduces && !reduced.equivalent(pre, true) && self.seen_forward.insert(pre.clone()) {
+				self.forward.push((pre.clone(), reduced));
 			}
 		}
 	}
@@ -46,16 +58,14 @@ impl Candidates {
 		let Value::Primitive(p) = value else {
 			return;
 		};
-		let bucket = self.seen.entry(value.hash_value()).or_default();
-		if bucket.iter().any(|held| held.equivalent(value, true)) {
+		if !self.seen.insert(value.clone()) {
 			return;
 		}
-		bucket.push(value.clone());
 		for arg in &p.arguments {
 			self.walk(arg);
 		}
 		if p.threshold > 0
-			&& crate::primitive::primitive_get(p.id).is_ok_and(|spec| spec.recompose.is_some())
+			&& recompose_rule(p.id).is_some()
 			&& !self.splits.iter().any(|held| held.equivalent(value, false))
 		{
 			self.splits.push(value.clone());
@@ -67,32 +77,25 @@ impl Candidates {
 #[derive(Clone)]
 pub(crate) struct Knowledge {
 	pub(crate) state: Arc<AttackerState>,
-	pub(crate) origins: Arc<Vec<Origin>>,
+	origins: Arc<Vec<Origin>>,
 	pub(crate) protocol: Arc<Vec<(Value, Value, bool)>>,
-	pub(crate) built: Arc<IdMap<u64, Vec<Value>>>,
-	built_len: usize,
+	pub(crate) built: Arc<TermSet>,
 	candidates: Arc<Candidates>,
-	closed: usize,
-	closed_protocol: usize,
-	closed_built: usize,
-	closed_phase: i32,
+	closed: bool,
 }
 
 impl Knowledge {
 	pub(crate) fn new(phase: i32) -> Knowledge {
-		let mut state = AttackerState::new();
-		state.current_phase = phase;
 		Knowledge {
-			state: Arc::new(state),
+			state: Arc::new(AttackerState {
+				current_phase: phase,
+				..AttackerState::default()
+			}),
 			origins: Arc::new(Vec::new()),
 			protocol: Arc::new(Vec::new()),
-			built: Arc::new(IdMap::default()),
-			built_len: 0,
+			built: Arc::new(TermSet::default()),
 			candidates: Arc::new(Candidates::default()),
-			closed: 0,
-			closed_protocol: 0,
-			closed_built: 0,
-			closed_phase: phase,
+			closed: true,
 		}
 	}
 
@@ -100,15 +103,12 @@ impl Knowledge {
 		self.state.known.len()
 	}
 
-	pub(crate) fn phase(&self) -> i32 {
-		self.state.current_phase
-	}
-
 	pub(crate) fn set_phase(&mut self, phase: i32) {
 		if self.state.current_phase != phase {
 			let state = Arc::make_mut(&mut self.state);
 			state.current_phase = phase;
 			state.chain = next_chain();
+			self.closed = false;
 		}
 	}
 
@@ -121,24 +121,12 @@ impl Knowledge {
 	}
 
 	pub(crate) fn learn(&mut self, v: &Value, origin: Origin) -> bool {
-		let known = self.state.knows(v);
-		if known.is_some() && matches!(origin, Origin::Derived(_)) {
-			return false;
-		}
-		let derivation = match &origin {
-			Origin::Derived(d) => d.clone(),
-			Origin::Wire { slot, .. } => DerivationRecord::Obtained {
-				slot: SlotIdx(*slot),
-			},
-			Origin::Leak { slot, .. } => DerivationRecord::Leaked {
-				slot: SlotIdx(*slot),
-			},
-			Origin::Initial => DerivationRecord::Initial,
-		};
-		if let Some(at) = known {
-			if !self.state.derivations[at.get()].ingredients().is_empty() {
+		if let Some(at) = self.state.knows(v) {
+			if !matches!(origin, Origin::Derived(_))
+				&& !self.state.derivations[at.get()].ingredients().is_empty()
+			{
 				let state = Arc::make_mut(&mut self.state);
-				Arc::make_mut(&mut state.derivations)[at.get()] = derivation;
+				Arc::make_mut(&mut state.derivations)[at.get()] = origin.record();
 				state.chain = next_chain();
 			}
 			return false;
@@ -150,15 +138,35 @@ impl Knowledge {
 			.entry(v.hash_value())
 			.or_default()
 			.push(at);
-		Arc::make_mut(&mut state.derivations).push(derivation);
+		Arc::make_mut(&mut state.derivations).push(origin.record());
 		state.chain = next_chain();
 		Arc::make_mut(&mut self.origins).push(origin);
+		self.closed = false;
+		true
+	}
+
+	pub(crate) fn has_reused(&self, pair: &[Value; 2]) -> bool {
+		self.state
+			.reused
+			.iter()
+			.any(|held| held[0].equivalent(&pair[0], true) && held[1].equivalent(&pair[1], true))
+	}
+
+	pub(crate) fn note_reused(&mut self, pair: &[Value; 2]) -> bool {
+		if self.has_reused(pair) {
+			return false;
+		}
+		let state = Arc::make_mut(&mut self.state);
+		Arc::make_mut(&mut state.reused).push(pair.clone());
+		state.chain = next_chain();
+		self.closed = false;
 		true
 	}
 
 	pub(crate) fn note_protocol(&mut self, value: &Value, pre: &Value, own: bool) {
 		Arc::make_mut(&mut self.protocol).push((value.clone(), pre.clone(), own));
 		Arc::make_mut(&mut self.candidates).note(value, pre);
+		self.closed = false;
 	}
 
 	pub(crate) fn note_computed(&mut self, declared: &Value, pre: &Value, value: &Value) {
@@ -177,72 +185,42 @@ impl Knowledge {
 	}
 
 	pub(crate) fn note_built(&mut self, term: &Value) {
-		let key = term.hash_value();
-		if self
-			.built
-			.get(&key)
-			.is_some_and(|bucket| bucket.iter().any(|held| held.equivalent(term, true)))
-		{
-			return;
+		if !self.built.contains(term) {
+			Arc::make_mut(&mut self.built).insert(term.clone());
+			self.closed = false;
 		}
-		Arc::make_mut(&mut self.built)
-			.entry(key)
-			.or_default()
-			.push(term.clone());
-		self.built_len += 1;
 	}
 
-	pub(crate) fn is_closed(&self) -> bool {
-		self.closed == self.len()
-			&& self.closed_protocol == self.protocol.len()
-			&& self.closed_built == self.built_len
-			&& self.closed_phase == self.phase()
+	pub(crate) fn derivable(&mut self, v: &Value, capabilities: &CapabilityIndex) -> bool {
+		self.close(capabilities);
+		obtainable(v, capabilities, &self.state)
 	}
 
-	pub(crate) fn derivable(&mut self, v: &Value, ps: &PrincipalState) -> bool {
-		self.close(ps);
-		obtainable(v, ps, &self.state)
-	}
-
-	pub(crate) fn close(&mut self, ps: &PrincipalState) {
-		if self.is_closed() {
+	pub(crate) fn close(&mut self, capabilities: &CapabilityIndex) {
+		if self.closed {
 			return;
 		}
 		loop {
 			let snapshot = Arc::clone(&self.state);
 			let candidates = Arc::clone(&self.candidates);
 			let learned = {
-				let _memo = crate::theory::DeductionMemo::scoped(ps, &snapshot);
-				pass(ps, &snapshot, &candidates)
+				let _memo = crate::theory::DeductionMemo::scoped(capabilities, &snapshot);
+				pass(capabilities, &snapshot, &candidates)
 			};
 			let mut progress = false;
-			for (v, origin) in learned {
-				progress |= self.learn(&v, origin);
+			for (v, record) in learned {
+				progress |= self.learn(&v, Origin::Derived(record));
 			}
-			let pairs = reuse_pairs(ps, &self.state, &self.built);
+			let pairs = reuse_pairs(capabilities, &self.state, &self.built);
 			for pair in pairs {
-				if !self.state.reused.iter().any(|held| {
-					held[0].equivalent(&pair[0], true) && held[1].equivalent(&pair[1], true)
-				}) {
-					let state = Arc::make_mut(&mut self.state);
-					Arc::make_mut(&mut state.reused).push(pair.clone());
-					state.chain = next_chain();
-					progress = true;
-				}
+				progress |= self.note_reused(&pair);
 				let Value::Primitive(p) = &pair[0] else {
 					continue;
 				};
 				let Some(rule) = reuse_rule(p.id) else {
 					continue;
 				};
-				for reveal in &rule.reveals {
-					let revealed = match *reveal {
-						Reveal::Argument(index) => match p.arguments.get(index) {
-							Some(argument) => reduce_once(argument),
-							None => continue,
-						},
-						Reveal::Output(output) => Value::Primitive(Arc::new(p.with_output(output))),
-					};
+				for revealed in revealed(p, &rule.reveals) {
 					progress |= self.learn(
 						&revealed,
 						Origin::Derived(DerivationRecord::Reused {
@@ -256,29 +234,26 @@ impl Knowledge {
 				break;
 			}
 		}
-		self.closed = self.len();
-		self.closed_protocol = self.protocol.len();
-		self.closed_built = self.built_len;
-		self.closed_phase = self.phase();
+		self.closed = true;
 	}
 }
 
 fn pass(
-	ps: &PrincipalState,
+	capabilities: &CapabilityIndex,
 	attacker: &AttackerState,
 	candidates: &Candidates,
-) -> Vec<(Value, Origin)> {
-	let mut out: Vec<(Value, Origin)> = Vec::new();
-	let push = |out: &mut Vec<(Value, Origin)>, v: Value, d: DerivationRecord| {
+) -> Vec<(Value, DerivationRecord)> {
+	let mut out: Vec<(Value, DerivationRecord)> = Vec::new();
+	let push = |out: &mut Vec<(Value, DerivationRecord)>, v: Value, d: DerivationRecord| {
 		if attacker.knows(&v).is_none() && !out.iter().any(|(held, _)| held.equivalent(&v, true)) {
-			out.push((v, Origin::Derived(d)));
+			out.push((v, d));
 		}
 	};
 	for known in attacker.known.iter() {
 		let Value::Primitive(p) = known else {
 			continue;
 		};
-		if let Some(result) = can_decompose(p, ps, attacker) {
+		if let Some(result) = can_decompose(p, capabilities, attacker) {
 			for revealed in result.revealed {
 				push(
 					&mut out,
@@ -290,7 +265,7 @@ fn pass(
 				);
 			}
 		}
-		if let Some(revealed) = can_break_weak(p, ps, attacker) {
+		if let Some(revealed) = can_break_weak(p, capabilities, attacker) {
 			for r in revealed {
 				push(
 					&mut out,
@@ -303,7 +278,7 @@ fn pass(
 				);
 			}
 		}
-		for (v, d) in rewrite_build(known, p, ps, attacker) {
+		for (v, d) in rewrite_build(known, p, capabilities, attacker) {
 			push(&mut out, v, d);
 		}
 		if primitive_core_reveals_args(p.id) {
@@ -323,31 +298,16 @@ fn pass(
 		if attacker.knows(value).is_some() {
 			continue;
 		}
-		let Some(built) = can_reconstruct_primitive(p, ps, attacker) else {
+		let Some(built) = can_reconstruct_primitive(p, capabilities, attacker) else {
 			continue;
 		};
-		let derivation = match built.forged {
-			Some(Forged::Assumption { capability, of }) => DerivationRecord::Broken {
-				of,
-				capability,
-				using: built.from,
-			},
-			Some(Forged::Reuse(with)) => DerivationRecord::ReusedForge {
-				with,
-				using: built.from,
-			},
-			None if built.combined => DerivationRecord::Combined { from: built.from },
-			None => DerivationRecord::Reconstructed { from: built.from },
-		};
-		push(&mut out, value.clone(), derivation);
+		push(&mut out, value.clone(), reconstruction(built));
 	}
 	for value in &candidates.splits {
 		let Value::Primitive(p) = value else {
 			continue;
 		};
-		if let Some(rule) = crate::primitive::primitive_get(p.id)
-			.ok()
-			.and_then(|spec| spec.recompose.as_ref())
+		if let Some(rule) = recompose_rule(p.id)
 			&& p.arguments
 				.get(rule.reveal)
 				.is_some_and(|secret| attacker.knows(secret).is_some())
@@ -372,7 +332,10 @@ fn pass(
 		let Value::Primitive(p) = pre else {
 			continue;
 		};
-		if p.arguments.iter().all(|arg| obtainable(arg, ps, attacker)) {
+		if p.arguments
+			.iter()
+			.all(|arg| obtainable(arg, capabilities, attacker))
+		{
 			push(
 				&mut out,
 				reduced.clone(),
@@ -387,20 +350,33 @@ fn pass(
 	out
 }
 
+pub(crate) fn reconstruction(built: ReconstructResult) -> DerivationRecord {
+	match built.forged {
+		Some(Forged::Assumption { capability, of }) => DerivationRecord::Broken {
+			of,
+			capability,
+			using: built.from,
+		},
+		Some(Forged::Reuse(with)) => DerivationRecord::ReusedForge {
+			with,
+			using: built.from,
+		},
+		None if built.combined => DerivationRecord::Combined { from: built.from },
+		None => DerivationRecord::Reconstructed { from: built.from },
+	}
+}
+
 fn rewrite_build(
 	value: &Value,
 	inner: &Arc<Primitive>,
-	ps: &PrincipalState,
+	capabilities: &CapabilityIndex,
 	attacker: &AttackerState,
 ) -> Vec<(Value, DerivationRecord)> {
 	let mut out = Vec::new();
-	if can_decompose(inner, ps, attacker).is_some() {
+	if can_decompose(inner, capabilities, attacker).is_some() {
 		return out;
 	}
-	for spec in crate::primitive::primitives_rewriting(inner.id) {
-		let Some(rule) = spec.rewrite.as_ref() else {
-			continue;
-		};
+	for (spec, rule) in crate::primitive::primitives_rewriting(inner.id) {
 		if spec.definition_check
 			&& spec.rebuild.is_none()
 			&& spec.combine.is_empty()
@@ -426,7 +402,7 @@ fn rewrite_build(
 					candidates.extend(p.arguments.iter().cloned());
 				}
 				for candidate in candidates {
-					if obtainable(&candidate, ps, attacker)
+					if obtainable(&candidate, capabilities, attacker)
 						&& !pool.iter().any(|held| held.equivalent(&candidate, true))
 					{
 						pool.push(candidate);
@@ -466,19 +442,7 @@ fn rewrite_build(
 						));
 					}
 				}
-				let mut digit = 0;
-				loop {
-					if digit == choice.len() {
-						break;
-					}
-					choice[digit] += 1;
-					if choice[digit] < pool.len() {
-						break;
-					}
-					choice[digit] = 0;
-					digit += 1;
-				}
-				if digit == choice.len() {
+				if !advance(&mut choice, pool.len()) {
 					break;
 				}
 			}
@@ -487,12 +451,23 @@ fn rewrite_build(
 	out
 }
 
+fn advance(choice: &mut [usize], base: usize) -> bool {
+	for digit in choice {
+		*digit += 1;
+		if *digit < base {
+			return true;
+		}
+		*digit = 0;
+	}
+	false
+}
+
 fn reuse_pairs(
-	ps: &PrincipalState,
+	capabilities: &CapabilityIndex,
 	attacker: &AttackerState,
-	built: &IdMap<u64, Vec<Value>>,
+	built: &TermSet,
 ) -> Vec<[Value; 2]> {
-	let _memo = crate::theory::DeductionMemo::ensure(ps, attacker);
+	let _memo = crate::theory::DeductionMemo::ensure(capabilities, attacker);
 	let mut buckets: IdMap<u64, Vec<usize>> = IdMap::default();
 	for (i, known) in attacker.known.iter().enumerate() {
 		let Value::Primitive(p) = known else {
@@ -504,16 +479,13 @@ fn reuse_pairs(
 		if rule.fixed.iter().all(|&at| {
 			p.arguments
 				.get(at)
-				.is_some_and(|a| obtainable(a, ps, attacker))
+				.is_some_and(|a| obtainable(a, capabilities, attacker))
 		}) {
 			continue;
 		}
-		let mints = can_reconstruct_primitive(p, ps, attacker).is_some_and(|b| b.forged.is_some());
-		if mints
-			&& !built
-				.get(&known.hash_value())
-				.is_some_and(|terms| terms.iter().any(|term| term.equivalent(known, true)))
-		{
+		let mints = can_reconstruct_primitive(p, capabilities, attacker)
+			.is_some_and(|b| b.forged.is_some());
+		if mints && !built.contains(known) {
 			continue;
 		}
 		let mut key = u64::from(p.id);

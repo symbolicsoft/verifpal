@@ -2,8 +2,11 @@
  * SPDX-License-Identifier: GPL-3.0-only */
 
 use std::cell::Cell;
-use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
+use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
+
+use crate::types::*;
 
 fn read_lock<T>(lock: &RwLock<T>) -> RwLockReadGuard<'_, T> {
 	lock.read().unwrap_or_else(|e| e.into_inner())
@@ -18,7 +21,7 @@ thread_local! {
 	static CURRENT_GENERATION: Cell<u64> = const { Cell::new(0) };
 }
 
-static ANALYSIS_GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static ANALYSIS_GENERATION: AtomicU64 = AtomicU64::new(0);
 
 static LIVE_GENERATIONS: RwLock<Vec<u64>> = RwLock::new(Vec::new());
 
@@ -28,9 +31,7 @@ pub(crate) fn live_generations() -> usize {
 }
 
 pub(crate) fn next_generation() -> u64 {
-	let generation = ANALYSIS_GENERATION.fetch_add(1, Ordering::Relaxed) + 1;
-	write_lock(&LIVE_GENERATIONS).push(generation);
-	generation
+	ANALYSIS_GENERATION.fetch_add(1, Ordering::Relaxed) + 1
 }
 
 pub(crate) fn enter_generation(generation: u64) {
@@ -46,6 +47,7 @@ pub(crate) struct GenerationGuard(u64);
 impl GenerationGuard {
 	pub(crate) fn enter() -> GenerationGuard {
 		let generation = next_generation();
+		write_lock(&LIVE_GENERATIONS).push(generation);
 		enter_generation(generation);
 		GenerationGuard(generation)
 	}
@@ -138,17 +140,13 @@ fn analysis_count_reset() {
 	ANALYSIS_COUNT.with(|c| c.set(0));
 }
 
-use crate::types::*;
-
 pub(crate) struct VerifyContext {
 	results: RwLock<Vec<VerifyResult>>,
-	unresolved: AtomicI32,
+	unresolved: AtomicUsize,
 	file_name: String,
-	states: Vec<PrincipalState>,
-	depth_cuts: RwLock<IdSet<(PrincipalId, usize)>>,
-	truncations: RwLock<Vec<(Truncation, Vec<usize>)>>,
+	truncations: RwLock<BTreeMap<Truncation, Vec<usize>>>,
 	sessions: u8,
-	honest: Option<IdMap<PrincipalId, i32>>,
+	corrupt_from: Option<IdMap<PrincipalId, i32>>,
 	scenarios: Vec<ScenarioSummary>,
 	assumptions: Vec<(Value, Capability, i32)>,
 	basis: RwLock<(u64, i32, usize, crate::hashing::TermSet)>,
@@ -159,10 +157,9 @@ pub(crate) struct VerifyContext {
 impl VerifyContext {
 	pub(crate) fn new(
 		m: &Model,
-		states: &[PrincipalState],
 		variants: Vec<Vec<Query>>,
 		sessions: u8,
-		honest: Option<IdMap<PrincipalId, i32>>,
+		corrupt_from: Option<IdMap<PrincipalId, i32>>,
 		scenarios: Vec<ScenarioSummary>,
 		assumptions: Vec<(Value, Capability, i32)>,
 	) -> Self {
@@ -176,17 +173,14 @@ impl VerifyContext {
 				r
 			})
 			.collect();
-		let unresolved = results.len() as i32;
 		analysis_count_reset();
 		VerifyContext {
+			unresolved: AtomicUsize::new(results.len()),
 			results: RwLock::new(results),
-			unresolved: AtomicI32::new(unresolved),
 			file_name: m.file_name.clone(),
-			states: states.to_vec(),
-			depth_cuts: RwLock::new(IdSet::default()),
-			truncations: RwLock::new(Vec::new()),
+			truncations: RwLock::new(BTreeMap::new()),
 			sessions,
-			honest,
+			corrupt_from,
 			scenarios,
 			assumptions,
 			basis: RwLock::new((0, -1, 0, crate::hashing::TermSet::default())),
@@ -203,33 +197,18 @@ impl VerifyContext {
 		self.cancel.load(Ordering::Relaxed)
 	}
 
-	pub(crate) fn note_depth_cut(&self, principal: PrincipalId, slot: usize) -> bool {
-		let first = write_lock(&self.depth_cuts).insert((principal, slot));
-		if first {
-			self.note_truncation(Truncation::TermDepth);
-		}
-		first
-	}
-
 	pub(crate) fn note_truncation(&self, kind: Truncation) {
+		if read_lock(&self.truncations).contains_key(&kind) {
+			return;
+		}
 		let outstanding: Vec<usize> = read_lock(&self.results)
 			.iter()
 			.filter(|result| !result.resolved)
 			.map(|result| result.query_index)
 			.collect();
-		let mut state = write_lock(&self.truncations);
-		match state.iter_mut().find(|(seen, _)| *seen == kind) {
-			Some((_, reached)) => {
-				for index in outstanding {
-					if !reached.contains(&index) {
-						reached.push(index);
-					}
-				}
-				reached.sort_unstable();
-			}
-			None => state.push((kind, outstanding)),
-		}
-		state.sort_by_key(|(kind, _)| *kind);
+		write_lock(&self.truncations)
+			.entry(kind)
+			.or_insert(outstanding);
 	}
 
 	pub(crate) fn claims_apply_at(&self, principal: PrincipalId, phase: i32) -> bool {
@@ -237,19 +216,19 @@ impl VerifyContext {
 	}
 
 	pub(crate) fn is_honest_at(&self, principal: PrincipalId, phase: i32) -> bool {
-		match &self.honest {
-			None => true,
-			Some(honest) => honest
+		self.corrupt_from.as_ref().is_none_or(|corrupt_from| {
+			corrupt_from
 				.get(&principal)
-				.is_some_and(|&corrupt_from| phase < corrupt_from),
-		}
+				.is_some_and(|&corrupt_from| phase < corrupt_from)
+		})
 	}
 
 	fn nothing_is_honest_at(&self, phase: i32) -> bool {
-		match &self.honest {
-			None => false,
-			Some(honest) => honest.values().all(|&corrupt_from| phase >= corrupt_from),
-		}
+		self.corrupt_from.as_ref().is_some_and(|corrupt_from| {
+			corrupt_from
+				.values()
+				.all(|&corrupt_from| phase >= corrupt_from)
+		})
 	}
 
 	pub(crate) fn scenarios(&self) -> &[ScenarioSummary] {
@@ -258,29 +237,19 @@ impl VerifyContext {
 
 	#[cfg(test)]
 	pub(crate) fn truncations(&self) -> Vec<Truncation> {
-		read_lock(&self.truncations)
-			.iter()
-			.map(|(kind, _)| *kind)
-			.collect()
-	}
-
-	fn truncations_for(&self, query_index: usize) -> Vec<Truncation> {
-		read_lock(&self.truncations)
-			.iter()
-			.filter(|(_, reached)| reached.contains(&query_index))
-			.map(|(kind, _)| *kind)
-			.collect()
+		read_lock(&self.truncations).keys().copied().collect()
 	}
 
 	pub(crate) fn finalize_envelopes(&self) {
-		let scoped: Vec<(usize, Vec<Truncation>)> = read_lock(&self.results)
-			.iter()
-			.map(|vr| (vr.query_index, self.truncations_for(vr.query_index)))
-			.collect();
-		for (vr, (_, truncations)) in write_lock(&self.results).iter_mut().zip(scoped) {
+		let truncations = read_lock(&self.truncations).clone();
+		for vr in write_lock(&self.results).iter_mut() {
 			vr.envelope = Envelope {
 				sessions: self.sessions,
-				truncations,
+				truncations: truncations
+					.iter()
+					.filter(|(_, reached)| reached.contains(&vr.query_index))
+					.map(|(&kind, _)| kind)
+					.collect(),
 			};
 		}
 	}
@@ -307,10 +276,6 @@ impl VerifyContext {
 		}
 		*covered = attacker.known.len();
 		set.clone()
-	}
-
-	pub(crate) fn principal_states(&self) -> &[PrincipalState] {
-		&self.states
 	}
 
 	pub(crate) fn assumptions(&self) -> &[(Value, Capability, i32)] {
@@ -352,12 +317,11 @@ impl VerifyContext {
 
 	pub(crate) fn query_counts(&self) -> (usize, usize) {
 		let total = read_lock(&self.results).len();
-		let remaining = self.unresolved.load(Ordering::SeqCst).max(0) as usize;
-		(total.saturating_sub(remaining), total)
+		(total - self.unresolved.load(Ordering::SeqCst), total)
 	}
 
 	pub(crate) fn all_resolved(&self) -> bool {
-		self.unresolved.load(Ordering::SeqCst) <= 0
+		self.unresolved.load(Ordering::SeqCst) == 0
 	}
 
 	pub(crate) fn analysis_count_increment(&self) {
@@ -473,7 +437,7 @@ mod tests {
 			confidentiality? trc_m\n\
 			]\n";
 		let m = parse_string("trc.vp", src).expect("parse");
-		let ctx = VerifyContext::new(&m, &[], Vec::new(), 2, None, Vec::new(), Vec::new());
+		let ctx = VerifyContext::new(&m, Vec::new(), 2, None, Vec::new(), Vec::new());
 		ctx.finalize_envelopes();
 		assert!(ctx.truncations().is_empty());
 		assert!(ctx.results_get()[0].envelope.exhausted());
@@ -492,8 +456,8 @@ mod tests {
 			confidentiality? tdc_m\n\
 			]\n";
 		let m = parse_string("tdc.vp", src).expect("parse");
-		let ctx = VerifyContext::new(&m, &[], Vec::new(), 2, None, Vec::new(), Vec::new());
-		ctx.note_depth_cut(1, 0);
+		let ctx = VerifyContext::new(&m, Vec::new(), 2, None, Vec::new(), Vec::new());
+		ctx.note_truncation(Truncation::TermDepth);
 		ctx.finalize_envelopes();
 		assert_eq!(ctx.truncations(), vec![Truncation::TermDepth]);
 		assert!(!ctx.results_get()[0].envelope.exhausted());
@@ -515,11 +479,11 @@ mod tests {
 			confidentiality? tdq_n\n\
 			]\n";
 		let m = parse_string("tdq.vp", src).expect("parse");
-		let ctx = VerifyContext::new(&m, &[], Vec::new(), 2, None, Vec::new(), Vec::new());
+		let ctx = VerifyContext::new(&m, Vec::new(), 2, None, Vec::new(), Vec::new());
 		let mut resolved = crate::types::VerifyResult::new(&m.queries[0], 0);
 		resolved.resolved = true;
 		assert!(ctx.results_put(&resolved, &crate::engine::query::Verdict::for_test()));
-		ctx.note_depth_cut(1, 0);
+		ctx.note_truncation(Truncation::TermDepth);
 		ctx.finalize_envelopes();
 		let results = ctx.results_get();
 		assert!(
@@ -547,20 +511,18 @@ mod tests {
 			]\n";
 		let m = parse_string("cat.vp", src).expect("parse");
 
-		let plain = VerifyContext::new(&m, &[], Vec::new(), 2, None, Vec::new(), Vec::new());
+		let plain = VerifyContext::new(&m, Vec::new(), 2, None, Vec::new(), Vec::new());
 		assert!(plain.claims_apply_at(1, 0));
 		assert!(plain.claims_apply_at(9, 0));
 
 		let mut honest: IdMap<PrincipalId, i32> = IdMap::default();
 		honest.insert(1, i32::MAX);
-		let mixed =
-			VerifyContext::new(&m, &[], Vec::new(), 2, Some(honest), Vec::new(), Vec::new());
+		let mixed = VerifyContext::new(&m, Vec::new(), 2, Some(honest), Vec::new(), Vec::new());
 		assert!(mixed.claims_apply_at(1, 0));
 		assert!(!mixed.claims_apply_at(2, 0));
 
 		let corrupt = VerifyContext::new(
 			&m,
-			&[],
 			Vec::new(),
 			2,
 			Some(IdMap::default()),
@@ -589,7 +551,7 @@ mod tests {
 			confidentiality? fev_m\n\
 			]\n";
 		let m = parse_string("fev.vp", src).expect("parse");
-		let ctx = VerifyContext::new(&m, &[], Vec::new(), 2, None, Vec::new(), Vec::new());
+		let ctx = VerifyContext::new(&m, Vec::new(), 2, None, Vec::new(), Vec::new());
 		assert!(!ctx.all_resolved());
 		ctx.finalize_envelopes();
 		assert!(!ctx.all_resolved());

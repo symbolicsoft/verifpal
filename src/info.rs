@@ -26,7 +26,7 @@ thread_local! {
 	static QUIET_DEPTH: Cell<usize> = const { Cell::new(0) };
 	static DEDUCTIONS_SHOWN: Cell<usize> = const { Cell::new(0) };
 	static DEDUCTIONS_SUPPRESSED: Cell<usize> = const { Cell::new(0) };
-	static VERBOSITY: Cell<u8> = const { Cell::new(2) };
+	static VERBOSITY: Cell<Verbosity> = const { Cell::new(Verbosity::Normal) };
 }
 
 #[cfg(feature = "cli")]
@@ -48,16 +48,11 @@ const STATUS_INTERVAL: std::time::Duration = std::time::Duration::from_millis(80
 const STATUS_WIDTH: usize = 96;
 
 pub fn set_verbosity(level: Verbosity) {
-	VERBOSITY.with(|v| v.set(level as u8));
+	VERBOSITY.set(level);
 }
 
 pub(crate) fn verbosity() -> Verbosity {
-	match VERBOSITY.with(|v| v.get()) {
-		0 => Verbosity::Silent,
-		1 => Verbosity::Quiet,
-		3 => Verbosity::Verbose,
-		_ => Verbosity::Normal,
-	}
+	VERBOSITY.get()
 }
 
 fn level_is_visible(level: InfoLevel) -> bool {
@@ -77,7 +72,7 @@ fn chrome_is_visible() -> bool {
 }
 
 pub(crate) fn info_is_quiet() -> bool {
-	QUIET_DEPTH.with(|d| d.get() > 0)
+	QUIET_DEPTH.get() > 0
 }
 
 fn emit(line: String) {
@@ -96,8 +91,8 @@ fn status_enabled() -> bool {
 pub(crate) fn info_status_begin() {
 	#[cfg(feature = "cli")]
 	{
-		STATUS_START.with(|c| c.set(Some(std::time::Instant::now())));
-		STATUS_LAST.with(|c| c.set(None));
+		STATUS_START.set(Some(std::time::Instant::now()));
+		STATUS_LAST.set(None);
 	}
 	#[cfg(all(feature = "wasm", target_arch = "wasm32", not(feature = "cli")))]
 	WASM_STATUS_START.set(Some(js_sys::Date::now()));
@@ -105,7 +100,7 @@ pub(crate) fn info_status_begin() {
 
 #[cfg(feature = "cli")]
 pub(crate) fn info_status_elapsed() -> Option<std::time::Duration> {
-	STATUS_START.with(|c| c.get()).map(|start| start.elapsed())
+	STATUS_START.get().map(|start| start.elapsed())
 }
 
 #[cfg(all(feature = "wasm", target_arch = "wasm32", not(feature = "cli")))]
@@ -126,12 +121,12 @@ pub(crate) fn info_status_update(_text: impl FnOnce() -> String) {
 			return;
 		}
 		let now = std::time::Instant::now();
-		if let Some(last) = STATUS_LAST.with(|c| c.get())
+		if let Some(last) = STATUS_LAST.get()
 			&& now.duration_since(last) < STATUS_INTERVAL
 		{
 			return;
 		}
-		STATUS_LAST.with(|c| c.set(Some(now)));
+		STATUS_LAST.set(Some(now));
 		status_draw(&_text());
 	}
 	#[cfg(all(feature = "wasm", target_arch = "wasm32"))]
@@ -146,27 +141,27 @@ fn status_draw(text: &str) {
 	let mut err = std::io::stderr();
 	let _ = write!(err, "\r\u{1b}[2K{}", trimmed.dimmed());
 	let _ = err.flush();
-	STATUS_DRAWN.with(|c| c.set(true));
+	STATUS_DRAWN.set(true);
 }
 
-pub(crate) fn info_status_erase() {
+fn info_status_erase() {
 	#[cfg(feature = "cli")]
 	{
-		if !STATUS_DRAWN.with(|c| c.get()) {
+		if !STATUS_DRAWN.get() {
 			return;
 		}
 		use std::io::Write;
 		let mut err = std::io::stderr();
 		let _ = write!(err, "\r\u{1b}[2K");
 		let _ = err.flush();
-		STATUS_DRAWN.with(|c| c.set(false));
+		STATUS_DRAWN.set(false);
 	}
 }
 
 pub(crate) fn info_status_end() {
 	info_status_erase();
 	#[cfg(feature = "cli")]
-	STATUS_LAST.with(|c| c.set(None));
+	STATUS_LAST.set(None);
 	#[cfg(all(feature = "wasm", target_arch = "wasm32", not(feature = "cli")))]
 	WASM_STATUS_START.set(None);
 }
@@ -180,10 +175,7 @@ pub(crate) fn info_elapsed_text(elapsed: std::time::Duration) -> String {
 }
 
 pub(crate) fn info_blank_line() {
-	if cfg!(target_arch = "wasm32") {
-		return;
-	}
-	if !chrome_is_visible() {
+	if cfg!(target_arch = "wasm32") || !chrome_is_visible() {
 		return;
 	}
 	info_status_erase();
@@ -191,25 +183,22 @@ pub(crate) fn info_blank_line() {
 }
 
 pub(crate) fn info_reset_deductions() {
-	DEDUCTIONS_SHOWN.with(|c| c.set(0));
-	DEDUCTIONS_SUPPRESSED.with(|c| c.set(0));
+	DEDUCTIONS_SHOWN.set(0);
+	DEDUCTIONS_SUPPRESSED.set(0);
 }
 
 pub(crate) fn info_deductions_suppressed() -> usize {
-	DEDUCTIONS_SUPPRESSED.with(|c| c.get())
+	DEDUCTIONS_SUPPRESSED.get()
 }
 
 pub(crate) fn info_deduction(message: impl FnOnce() -> String) {
 	if info_is_quiet() || !level_is_visible(InfoLevel::Deduction) {
 		return;
 	}
-	let shown = DEDUCTIONS_SHOWN.with(|c| c.get());
+	let shown = DEDUCTIONS_SHOWN.get();
 	if shown >= DEDUCTION_MESSAGE_LIMIT {
-		let suppressed = DEDUCTIONS_SUPPRESSED.with(|c| {
-			let next = c.get() + 1;
-			c.set(next);
-			next
-		});
+		let suppressed = DEDUCTIONS_SUPPRESSED.get() + 1;
+		DEDUCTIONS_SUPPRESSED.set(suppressed);
 		if suppressed == 1 {
 			info_message(
 				&format!(
@@ -217,20 +206,19 @@ pub(crate) fn info_deduction(message: impl FnOnce() -> String) {
 					DEDUCTION_MESSAGE_LIMIT
 				),
 				InfoLevel::Info,
-				false,
 			);
 		}
 		return;
 	}
-	DEDUCTIONS_SHOWN.with(|c| c.set(shown + 1));
-	info_message(&message(), InfoLevel::Deduction, true);
+	DEDUCTIONS_SHOWN.set(shown + 1);
+	info_line(&message(), InfoLevel::Deduction, true);
 }
 
 pub(crate) fn info_analysis_result(headline: &str, full: impl FnOnce() -> String) {
 	match verbosity() {
 		Verbosity::Silent | Verbosity::Quiet => {}
-		Verbosity::Normal => info_message(headline, InfoLevel::Result, true),
-		Verbosity::Verbose => info_message(&full(), InfoLevel::Result, true),
+		Verbosity::Normal => info_line(headline, InfoLevel::Result, true),
+		Verbosity::Verbose => info_line(&full(), InfoLevel::Result, true),
 	}
 }
 
@@ -240,22 +228,15 @@ pub(crate) struct InfoQuiet;
 #[cfg(any(test, feature = "wasm"))]
 impl InfoQuiet {
 	pub(crate) fn new() -> InfoQuiet {
-		QUIET_DEPTH.with(|d| d.set(d.get() + 1));
+		QUIET_DEPTH.set(QUIET_DEPTH.get() + 1);
 		InfoQuiet
-	}
-}
-
-#[cfg(test)]
-impl Default for InfoQuiet {
-	fn default() -> Self {
-		InfoQuiet::new()
 	}
 }
 
 #[cfg(any(test, feature = "wasm"))]
 impl Drop for InfoQuiet {
 	fn drop(&mut self) {
-		QUIET_DEPTH.with(|d| d.set(d.get().saturating_sub(1)));
+		QUIET_DEPTH.set(QUIET_DEPTH.get().saturating_sub(1));
 	}
 }
 
@@ -288,8 +269,9 @@ fn wasm_push(msg: String) {
 }
 
 pub fn info_banner(version: &str) {
+	let plain = format!("Verifpal {version} - https://verifpal.com");
 	if cfg!(target_arch = "wasm32") {
-		wasm_push(format!("Verifpal {} - https://verifpal.com", version));
+		wasm_push(plain);
 		return;
 	}
 	if !chrome_is_visible() {
@@ -297,7 +279,7 @@ pub fn info_banner(version: &str) {
 	}
 	#[cfg(feature = "cli")]
 	if color_output_support() {
-		emit("\u{2500}".repeat(50).dimmed().to_string());
+		emit(rule());
 		emit(format!(
 			"  {} {} {} {}",
 			"\u{25c6}".green(),
@@ -305,26 +287,28 @@ pub fn info_banner(version: &str) {
 			version.dimmed(),
 			"\u{00b7} https://verifpal.com".dimmed()
 		));
-		emit("\u{2500}".repeat(50).dimmed().to_string());
+		emit(rule());
 		return;
 	}
-	emit(format!("Verifpal {} - https://verifpal.com", version));
+	emit(plain);
 }
 
 pub(crate) fn info_separator() {
-	if cfg!(target_arch = "wasm32") {
-		return;
-	}
-	if !chrome_is_visible() {
+	if cfg!(target_arch = "wasm32") || !chrome_is_visible() {
 		return;
 	}
 	info_status_erase();
 	#[cfg(feature = "cli")]
 	if color_output_support() {
-		emit("\u{2500}".repeat(50).dimmed().to_string());
+		emit(rule());
 		return;
 	}
 	emit("-".repeat(50));
+}
+
+#[cfg(feature = "cli")]
+fn rule() -> String {
+	"\u{2500}".repeat(50).dimmed().to_string()
 }
 
 fn level_columns(
@@ -360,7 +344,11 @@ fn level_styling(level: InfoLevel) -> (Color, bool, bool, bool) {
 	}
 }
 
-pub fn info_message(msg: &str, level: InfoLevel, show_analysis: bool) {
+pub fn info_message(msg: &str, level: InfoLevel) {
+	info_line(msg, level, false);
+}
+
+fn info_line(msg: &str, level: InfoLevel, show_analysis: bool) {
 	if info_is_quiet() {
 		return;
 	}
@@ -423,41 +411,44 @@ fn info_message_color(msg: &str, level: InfoLevel, analysis_count: usize) {
 	));
 }
 
+const TRACE_INDENT: &str = "            ";
+
 pub(crate) fn info_verify_result_summary(
 	mutated_info: &str,
 	summary: &str,
 	option_results: &[QueryOptionResult],
 ) -> String {
-	let indent = "            ";
 	#[cfg(feature = "cli")]
 	if color_output_support() {
-		return info_verify_result_summary_color(mutated_info, summary, option_results, indent);
+		return info_verify_result_summary_color(mutated_info, summary, option_results);
 	}
-	info_verify_result_summary_plain(mutated_info, summary, option_results, indent)
+	info_verify_result_summary_plain(mutated_info, summary, option_results)
+}
+
+fn trace_lines(mutated_info: &str) -> impl Iterator<Item = &str> {
+	mutated_info
+		.split('\n')
+		.map(str::trim)
+		.filter(|line| !line.is_empty())
 }
 
 fn info_verify_result_summary_plain(
 	mutated_info: &str,
 	summary: &str,
 	option_results: &[QueryOptionResult],
-	indent: &str,
 ) -> String {
 	let mut output = String::new();
 	if !mutated_info.is_empty() {
-		output.push_str(&format!("\n{}Attack trace:", indent));
-		for line in mutated_info.split('\n') {
-			let trimmed = line.trim();
-			if trimmed.is_empty() {
-				continue;
-			}
-			output.push_str(&format!("\n{}| {}", indent, trimmed));
+		output.push_str(&format!("\n{TRACE_INDENT}Attack trace:"));
+		for line in trace_lines(mutated_info) {
+			output.push_str(&format!("\n{TRACE_INDENT}| {line}"));
 		}
-		output.push_str(&format!("\n{}> {}", indent, summary));
+		output.push_str(&format!("\n{TRACE_INDENT}> {summary}"));
 	} else {
-		output.push_str(&format!("\n{}{}", indent, summary));
+		output.push_str(&format!("\n{TRACE_INDENT}{summary}"));
 	}
 	for o in option_results {
-		output.push_str(&format!("\n{}! {}", indent, o.summary));
+		output.push_str(&format!("\n{TRACE_INDENT}! {}", o.summary));
 	}
 	output
 }
@@ -467,36 +458,31 @@ fn info_verify_result_summary_color(
 	mutated_info: &str,
 	summary: &str,
 	option_results: &[QueryOptionResult],
-	indent: &str,
 ) -> String {
 	let mut output = String::new();
 	if !mutated_info.is_empty() {
 		output.push_str(&format!(
-			"\n{}{} {}",
-			indent,
+			"\n{TRACE_INDENT}{} {}",
 			"\u{256d}\u{2500}".dimmed(),
 			"Attack trace:".dimmed().italic()
 		));
-		for line in mutated_info.split('\n') {
-			let trimmed = line.trim();
-			if trimmed.is_empty() {
-				continue;
-			}
-			output.push_str(&format!("\n{}{} {}", indent, "\u{2502}".dimmed(), trimmed));
+		for line in trace_lines(mutated_info) {
+			output.push_str(&format!("\n{TRACE_INDENT}{} {line}", "\u{2502}".dimmed()));
 		}
 		output.push_str(&format!(
-			"\n{}{} {}",
-			indent,
+			"\n{TRACE_INDENT}{} {}",
 			"\u{2570}\u{25b8}".dimmed(),
 			summary.on_red().white().bold()
 		));
 	} else {
-		output.push_str(&format!("\n{}{}", indent, summary.on_red().white().bold()));
+		output.push_str(&format!(
+			"\n{TRACE_INDENT}{}",
+			summary.on_red().white().bold()
+		));
 	}
 	for o in option_results {
 		output.push_str(&format!(
-			"\n{}{} {}",
-			indent,
+			"\n{TRACE_INDENT}{} {}",
 			"\u{25b2}".yellow(),
 			o.summary.yellow().italic()
 		));
@@ -504,43 +490,32 @@ fn info_verify_result_summary_color(
 	output
 }
 
-pub(crate) fn info_literal_number(n: usize, title_case: bool) -> Cow<'static, str> {
-	if n > 9 {
-		let ordinal = n + 1;
-		let suffix = match (ordinal % 10, ordinal % 100) {
-			(_, 11..=13) => "th",
-			(1, _) => "st",
-			(2, _) => "nd",
-			(3, _) => "rd",
-			_ => "th",
-		};
-		return format!("{}{}", ordinal, suffix).into();
+fn ordinal(n: usize) -> Cow<'static, str> {
+	const WORDS: [&str; 10] = [
+		"First", "Second", "Third", "Fourth", "Fifth", "Sixth", "Seventh", "Eighth", "Ninth",
+		"Tenth",
+	];
+	if let Some(word) = WORDS.get(n) {
+		return Cow::Borrowed(word);
 	}
-	let words = if title_case {
-		&[
-			"First", "Second", "Third", "Fourth", "Fifth", "Sixth", "Seventh", "Eighth", "Ninth",
-			"Tenth",
-		]
-	} else {
-		&[
-			"first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth",
-			"tenth",
-		]
+	let ordinal = n + 1;
+	let suffix = match (ordinal % 10, ordinal % 100) {
+		(_, 11..=13) => "th",
+		(1, _) => "st",
+		(2, _) => "nd",
+		(3, _) => "rd",
+		_ => "th",
 	};
-	Cow::Borrowed(words[n])
+	format!("{ordinal}{suffix}").into()
 }
 
 pub(crate) fn info_output_text(revealed: &Value) -> String {
 	match revealed {
 		Value::Constant(_) => revealed.to_string(),
-		Value::Primitive(p) => {
-			if primitive_has_single_output(p.id) {
-				format!("Output of {}", revealed)
-			} else {
-				let prefix = format!("{} output", info_literal_number(p.output, true));
-				format!("{} of {}", prefix, revealed)
-			}
+		Value::Primitive(p) if primitive_has_single_output(p.id) => {
+			format!("Output of {revealed}")
 		}
+		Value::Primitive(p) => format!("{} output of {revealed}", ordinal(p.output)),
 	}
 }
 

@@ -3,13 +3,12 @@
 
 mod diagram;
 
-use std::collections::HashMap;
-
-use crate::msc::{self, Group, Lanes, staged};
-use crate::report::{Analysis, DISCLAIMER, ModelReport, QueryReport, ReportStep, Run};
-use crate::template::{Ctx, Dialect, escape_html, render, templates};
+use crate::msc::{Chart, Group, staged};
+use crate::report::{Analysis, DISCLAIMER, ModelReport, QueryReport, Run};
+use crate::template::{Ctx, Dialect, escape_html, render, strip_header, templates};
 use crate::tokens::{Token, TokenKind};
-use crate::util::{article, plural};
+use crate::types::TraceStep;
+use crate::util::plural;
 
 static HTML: Dialect = Dialect {
 	open: "{{",
@@ -41,7 +40,7 @@ const JS: &str = include_str!("report.js");
 
 pub fn html_report(run: &Run) -> String {
 	let subject = match run.models.as_slice() {
-		[only] => format!(" \u{00b7} {}", crate::report::short_name(only)),
+		[only] => format!(" \u{00b7} {}", only.short_name()),
 		_ => String::new(),
 	};
 	let models = run
@@ -63,57 +62,50 @@ pub fn html_report(run: &Run) -> String {
 	out
 }
 
-fn strip_header(raw: &str) -> &str {
-	match raw.trim_start().strip_prefix("/*") {
-		Some(after) => after.split_once("*/").map(|(_, tail)| tail).unwrap_or(raw),
-		None => raw,
-	}
-	.trim_ascii()
-}
-
 fn attacked(model: &ModelReport) -> bool {
 	model.analysis.as_ref().is_none_or(|a| a.attacks > 0)
 }
 
-fn code_pairs(code: &str) -> Vec<Ctx> {
-	let mut out = Vec::new();
-	let mut chars = code.chars();
-	while let (Some(kind), Some(digit)) = (chars.next(), chars.next()) {
-		out.push(
+fn code_pairs(a: &Analysis) -> Vec<Ctx> {
+	a.code_pairs()
+		.map(|pair| {
 			Ctx::new()
-				.text("pclass", if digit == '0' { "pass" } else { "fail" })
-				.text("pair", format!("{kind}{digit}")),
-		);
-	}
-	out
+				.text("pclass", if pair.ends_with('0') { "pass" } else { "fail" })
+				.text("pair", pair)
+		})
+		.collect()
+}
+
+fn lines<'a>(texts: impl IntoIterator<Item = &'a String>) -> Vec<Ctx> {
+	texts
+		.into_iter()
+		.map(|text| Ctx::new().text("text", text.as_str()))
+		.collect()
 }
 
 fn run_index(run: &Run) -> Vec<Ctx> {
 	if run.models.len() < 2 {
 		return Vec::new();
 	}
-	let total = run.models.len();
-	let analysed = run.models.iter().filter(|m| m.analysis.is_some()).count();
-	let broken = total - analysed;
-	let hit = run
-		.models
-		.iter()
-		.filter_map(|m| m.analysis.as_ref())
-		.filter(|a| a.attacks > 0)
-		.count();
+	let tally = run.tally();
+	let failed = tally.failed();
 	let mut parts: Vec<String> = Vec::new();
-	if hit > 0 {
-		parts.push(format!("{hit} of {total} models have attacks."));
-	} else if analysed > 0 {
+	if tally.attacked > 0 {
 		parts.push(format!(
-			"No attacks found in {analysed} model{}.",
-			plural(analysed)
+			"{} of {} models have attacks.",
+			tally.attacked, tally.models
+		));
+	} else if tally.analysed > 0 {
+		parts.push(format!(
+			"No attacks found in {} model{}.",
+			tally.analysed,
+			plural(tally.analysed)
 		));
 	}
-	if broken > 0 {
+	if failed > 0 {
 		parts.push(format!(
-			"{broken} model{} failed to analyse.",
-			plural(broken)
+			"{failed} model{} failed to analyse.",
+			plural(failed)
 		));
 	}
 	let rows = run
@@ -139,11 +131,7 @@ fn run_index(run: &Run) -> Vec<Ctx> {
 				.flag("failed", model.analysis.is_none())
 				.list(
 					"code",
-					model
-						.analysis
-						.as_ref()
-						.map(|a| code_pairs(&a.code))
-						.unwrap_or_default(),
+					model.analysis.as_ref().map(code_pairs).unwrap_or_default(),
 				)
 				.text("meta", meta)
 		})
@@ -152,7 +140,7 @@ fn run_index(run: &Run) -> Vec<Ctx> {
 		Ctx::new()
 			.text(
 				"tally_class",
-				if hit > 0 || broken > 0 {
+				if tally.attacked > 0 || failed > 0 {
 					"fail"
 				} else {
 					"pass"
@@ -164,38 +152,25 @@ fn run_index(run: &Run) -> Vec<Ctx> {
 }
 
 fn model_ctx(model: &ModelReport, index: usize) -> Ctx {
-	let hits = model
-		.analysis
-		.as_ref()
-		.map(crate::report::attacked_values)
-		.unwrap_or_default();
 	let mut ctx = Ctx::new()
 		.num("index", index)
 		.text("failing", if attacked(model) { "yes" } else { "no" })
 		.text("file", model.file.as_str())
 		.flag("analysed", model.analysis.is_some())
-		.list(
-			"error",
-			model
-				.error
-				.iter()
-				.map(|e| Ctx::new().text("text", e.as_str()))
-				.collect(),
-		)
-		.list("diagram", protocol_diagram(model, &hits, index));
+		.list("error", lines(&model.error))
+		.list("diagram", protocol_diagram(model, index));
 	let (pane, marked) = source_pane(model, index);
 	ctx = ctx.list("source", pane);
 	ctx = match &model.analysis {
 		Some(a) => ctx
 			.text("attacker", a.attacker.as_str())
-			.text("attacker_class", a.attacker.as_str())
 			.num("sessions", a.sessions)
 			.text("plural", plural(a.sessions as usize))
 			.num("elapsed", a.elapsed_ms)
-			.list("code", code_pairs(&a.code))
+			.list("code", code_pairs(a))
 			.list("verdicts", vec![verdicts_ctx(a, index, &marked)])
 			.list("traces", traces(a, model, index, &marked))
-			.list("scope", vec![scope_ctx(a)]),
+			.list("scope", vec![Ctx::new().text("text", a.scope())]),
 		None => ctx
 			.list("code", Vec::new())
 			.list("verdicts", Vec::new())
@@ -239,7 +214,7 @@ fn verdict_ctx(q: &QueryReport, model_index: usize, query_index: usize, marked: 
 			format!("Holds ({})", q.envelope.summary),
 		)
 	};
-	let target = if crate::report::has_trace(q) {
+	let target = if q.has_trace() {
 		format!("#trace-m{model_index}-q{query_index}")
 	} else if marked {
 		format!("#src-m{model_index}-q{query_index}")
@@ -279,23 +254,17 @@ fn verdict_ctx(q: &QueryReport, model_index: usize, query_index: usize, marked: 
 				String::new()
 			},
 		)
-		.list(
-			"preconditions",
-			q.preconditions
-				.iter()
-				.map(|p| Ctx::new().text("text", p.as_str()))
-				.collect(),
-		)
+		.list("preconditions", lines(&q.preconditions))
 }
 
-fn counted(count: usize, items: Vec<Ctx>) -> Vec<Ctx> {
+fn counted(items: Vec<Ctx>) -> Vec<Ctx> {
 	if items.is_empty() {
 		return Vec::new();
 	}
 	vec![
 		Ctx::new()
-			.num("count", count)
-			.text("plural", plural(count))
+			.num("count", items.len())
+			.text("plural", plural(items.len()))
 			.list("items", items),
 	]
 }
@@ -346,22 +315,10 @@ fn callouts(a: &Analysis) -> Vec<Ctx> {
 				)
 				.text(
 					"peer",
-					match scenario.corrupt_from {
-						None => "honest peer".to_string(),
-						Some(0) => "corrupt peer".to_string(),
-						Some(phase) => format!("peer corrupt from phase {phase}"),
-					},
+					crate::types::peer_description(scenario.corrupt_from),
 				)
 		})
 		.collect::<Vec<Ctx>>();
-	let lines = |texts: &[String]| -> Vec<Ctx> {
-		texts
-			.iter()
-			.map(|t| Ctx::new().text("text", t.as_str()))
-			.collect()
-	};
-	let assumption_count = assumptions.len();
-	let scenario_count = scenarios.len();
 	if assumptions.is_empty()
 		&& scenarios.is_empty()
 		&& a.provenance.is_empty()
@@ -371,51 +328,18 @@ fn callouts(a: &Analysis) -> Vec<Ctx> {
 	}
 	vec![
 		Ctx::new()
-			.list("assumptions", counted(assumption_count, assumptions))
-			.list("scenarios", counted(scenario_count, scenarios))
+			.list("assumptions", counted(assumptions))
+			.list("scenarios", counted(scenarios))
 			.list("provenance", listed(lines(&a.provenance)))
 			.list("notes", listed(lines(&a.notes))),
 	]
-}
-
-fn scope_ctx(a: &Analysis) -> Ctx {
-	let reasons: Vec<&str> = {
-		let mut seen: Vec<&str> = Vec::new();
-		for q in &a.queries {
-			for t in &q.envelope.truncations {
-				if !seen.contains(&t.as_str()) {
-					seen.push(t);
-				}
-			}
-		}
-		seen
-	};
-	let mut text = format!(
-		"Every verdict above was reached against {} {} attacker, with each principal running {} \
-		 concurrent session{}, over exactly the model as written. An attack is a witness and \
-		 stands on its own. A query reported as holding says only that this search found no \
-		 attack at those parameters: the search space this engine defines was explored, which is \
-		 never the space of all attacks.",
-		article(&a.attacker),
-		a.attacker,
-		a.sessions,
-		plural(a.sessions as usize)
-	);
-	if !reasons.is_empty() {
-		text.push_str(&format!(
-			" Some searches in this run stopped short even of that ({}), so their holds cover \
-			 less still.",
-			reasons.join(", ")
-		));
-	}
-	Ctx::new().text("text", text)
 }
 
 fn traces(a: &Analysis, model: &ModelReport, index: usize, marked: &[usize]) -> Vec<Ctx> {
 	a.queries
 		.iter()
 		.enumerate()
-		.filter(|(_, q)| crate::report::has_trace(q))
+		.filter(|(_, q)| q.has_trace())
 		.map(|(qi, q)| {
 			let back = if marked.contains(&qi) {
 				format!("#src-m{index}-q{qi}")
@@ -429,13 +353,7 @@ fn traces(a: &Analysis, model: &ModelReport, index: usize, marked: &[usize]) -> 
 				.text("query", q.query.as_str())
 				.list("diagram", attack_diagram(q, model, index, qi))
 				.list("steps", trace_steps(q))
-				.list(
-					"notes",
-					q.notes
-						.iter()
-						.map(|text| Ctx::new().text("text", text.as_str()))
-						.collect(),
-				)
+				.list("notes", lines(&q.notes))
 		})
 		.collect()
 }
@@ -445,22 +363,24 @@ fn trace_steps(q: &QueryReport) -> Vec<Ctx> {
 		.iter()
 		.map(|group| match group {
 			Group::One(n, step) => step_ctx(&n.to_string(), step),
-			Group::Run(_, _, held) if held.len() == 1 => step_ctx(&group.step(), held[0].1),
-			Group::Run(_, _, held) => Ctx::new()
-				.flag("folded", true)
-				.text("step", group.step())
-				.text("label", format!("{} derivation steps", held.len()))
-				.list(
-					"steps",
-					held.iter()
-						.map(|(n, step)| step_ctx(&n.to_string(), step))
-						.collect(),
-				),
+			Group::Run(held) => match held.as_slice() {
+				[(n, step)] => step_ctx(&n.to_string(), step),
+				_ => Ctx::new()
+					.flag("folded", true)
+					.text("step", group.step())
+					.text("label", format!("{} derivation steps", held.len()))
+					.list(
+						"steps",
+						held.iter()
+							.map(|(n, step)| step_ctx(&n.to_string(), step))
+							.collect(),
+					),
+			},
 		})
 		.collect()
 }
 
-fn step_ctx(step: &str, s: &ReportStep) -> Ctx {
+fn step_ctx(step: &str, s: &TraceStep) -> Ctx {
 	let wire = s.kind == "mutations"
 		&& !s.values.is_empty()
 		&& s.sender.is_some()
@@ -468,7 +388,7 @@ fn step_ctx(step: &str, s: &ReportStep) -> Ctx {
 	Ctx::new()
 		.flag("folded", false)
 		.text("step", step)
-		.text("kind", s.kind.as_str())
+		.text("kind", s.kind)
 		.flag("wire", wire)
 		.text("sender", s.sender.clone().unwrap_or_default())
 		.text("recipient", s.recipient.clone().unwrap_or_default())
@@ -476,7 +396,7 @@ fn step_ctx(step: &str, s: &ReportStep) -> Ctx {
 		.list("values", if wire { trace_values(s) } else { Vec::new() })
 }
 
-fn trace_values(s: &ReportStep) -> Vec<Ctx> {
+fn trace_values(s: &TraceStep) -> Vec<Ctx> {
 	s.values
 		.iter()
 		.map(|v| {
@@ -494,12 +414,12 @@ fn trace_values(s: &ReportStep) -> Vec<Ctx> {
 		.collect()
 }
 
-fn protocol_diagram(
-	model: &ModelReport,
-	hits: &HashMap<String, Vec<usize>>,
-	index: usize,
-) -> Vec<Ctx> {
-	let rows = msc::protocol_rows(model, hits);
+fn protocol_diagram(model: &ModelReport, index: usize) -> Vec<Ctx> {
+	let hits = model
+		.analysis
+		.as_ref()
+		.map(Analysis::attacked_values)
+		.unwrap_or_default();
 	let caption = if hits.is_empty() {
 		"Protocol sequence. Guarded values are written in brackets.".to_string()
 	} else {
@@ -510,9 +430,9 @@ fn protocol_diagram(
 	let figure = diagram::Figure {
 		id: format!("m{index}p"),
 		caption,
-		described: true,
 	};
-	diagram::draw(figure, Lanes::of(&rows), &rows)
+	Chart::protocol(model, &hits)
+		.map(|chart| diagram::draw(figure, &chart))
 		.into_iter()
 		.collect()
 }
@@ -523,16 +443,14 @@ fn attack_diagram(
 	index: usize,
 	query_index: usize,
 ) -> Vec<Ctx> {
-	let (rows, lanes) = msc::attack_rows(q, model);
-	if lanes.is_empty() {
-		return Vec::new();
-	}
 	let figure = diagram::Figure {
 		id: format!("m{index}t{query_index}"),
 		caption: String::new(),
-		described: false,
 	};
-	diagram::draw(figure, lanes, &rows).into_iter().collect()
+	Chart::attack(q, model)
+		.map(|chart| diagram::draw(figure, &chart))
+		.into_iter()
+		.collect()
 }
 
 fn source_pane(model: &ModelReport, index: usize) -> (Vec<Ctx>, Vec<usize>) {
@@ -579,12 +497,8 @@ fn source_pane(model: &ModelReport, index: usize) -> (Vec<Ctx>, Vec<usize>) {
 	(vec![Ctx::new().list("chunks", chunks)], marked)
 }
 
-fn chunk(kind: &'static str) -> Ctx {
-	let mut ctx = Ctx::new();
-	for name in ["mark", "token", "plain"] {
-		ctx = ctx.flag(name, name == kind);
-	}
-	ctx
+fn chunk(kind: &str) -> Ctx {
+	Ctx::new().one_of(&["mark", "token", "plain"], kind)
 }
 
 fn highlight(source: &str, from: usize, to: usize, tokens: &[Token], out: &mut Vec<Ctx>) {
@@ -637,10 +551,9 @@ fn token_class(kind: TokenKind) -> Option<&'static str> {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::msc::{Row, Value};
-	use crate::report::DiagramRow;
+	use crate::msc::{Lanes, Route, Row, Value};
 	use crate::report::{
-		Assumption, Binding, DiagramValue, EnvelopeReport, ScenarioReport, SourceRange,
+		Assumption, Binding, DiagramRow, DiagramValue, EnvelopeReport, ScenarioReport, SourceRange,
 	};
 	use crate::types::TraceValue;
 
@@ -685,13 +598,13 @@ mod tests {
 		}
 	}
 
-	fn derive(text: &str) -> ReportStep {
-		ReportStep::new("derive".to_string(), text.to_string())
+	fn derive(text: &str) -> TraceStep {
+		TraceStep::new("derive", text.to_string())
 	}
 
-	fn mutation() -> ReportStep {
-		ReportStep {
-			kind: "mutations".to_string(),
+	fn mutation() -> TraceStep {
+		TraceStep {
+			kind: "mutations",
 			text: "Attacker replaces ga with PUBKEY(nil).".to_string(),
 			sender: Some("Alice".to_string()),
 			recipient: Some("Bob".to_string()),
@@ -705,9 +618,9 @@ mod tests {
 		}
 	}
 
-	fn gate() -> ReportStep {
-		ReportStep {
-			kind: "gate".to_string(),
+	fn gate() -> TraceStep {
+		TraceStep {
+			kind: "gate",
 			text: "Bob's AEAD_DEC(k, n, e, ad)? passes.".to_string(),
 			sender: None,
 			recipient: None,
@@ -887,74 +800,31 @@ mod tests {
 
 	#[test]
 	fn columns_are_sized_to_the_widest_thing_they_have_to_hold() {
-		let narrow = vec![Row::Wire {
-			num: Some(1),
-			hop: None,
+		let wire = |hop: usize, from: &str, to: &str, name: &str| Row::Wire {
+			hop: Some(hop),
 			step: None,
-			from: "A".to_string(),
-			to: "B".to_string(),
-			via: None,
-			forged: false,
-			replay: false,
+			from: from.to_string(),
+			to: to.to_string(),
+			route: Route::Direct,
 			values: vec![Value {
-				name: "x".to_string(),
+				name: name.to_string(),
 				guarded: false,
-				hit: false,
-				changed: false,
-				queries: vec![],
-			}],
-		}];
-		let wide = vec![Row::Wire {
-			num: Some(1),
-			hop: None,
-			step: None,
-			from: "A".to_string(),
-			to: "B".to_string(),
-			via: None,
-			forged: false,
-			replay: false,
-			values: vec![Value {
-				name: "a_very_long_constant_name_indeed_much_longer".to_string(),
-				guarded: false,
-				hit: false,
-				changed: false,
-				queries: vec![],
-			}],
-		}];
-		// Four lanes, so the width floor a sparse diagram gets is well below
-		// what the long label needs and the label is what decides the column.
-		let filler = || Row::Wire {
-			num: Some(2),
-			hop: None,
-			step: None,
-			from: "C".to_string(),
-			to: "D".to_string(),
-			via: None,
-			forged: false,
-			replay: false,
-			values: vec![Value {
-				name: "y".to_string(),
-				guarded: false,
-				hit: false,
-				changed: false,
 				queries: vec![],
 			}],
 		};
-		let mut narrow = narrow;
-		let mut wide = wide;
-		narrow.push(filler());
-		wide.push(filler());
-		let of = |rows: &Vec<Row>| {
+		let of = |label: &str| {
+			let rows = vec![wire(1, "A", "B", label), wire(2, "C", "D", "y")];
+			let chart = Chart {
+				lanes: Lanes::of(&rows),
+				rows,
+			};
 			let ctx = diagram::draw(
 				diagram::Figure {
 					id: "d".to_string(),
 					caption: String::new(),
-					described: false,
 				},
-				Lanes::of(rows),
-				rows,
-			)
-			.unwrap();
+				&chart,
+			);
 			let html = render(&DIAGRAM, &ctx);
 			html.split("width=\"")
 				.nth(1)
@@ -963,7 +833,7 @@ mod tests {
 				.unwrap()
 		};
 		assert!(
-			of(&wide) > of(&narrow),
+			of("a_very_long_constant_name_indeed_much_longer") > of("x"),
 			"a long label must widen its column"
 		);
 	}
@@ -1072,7 +942,7 @@ mod tests {
 			wire(1, "Alice", "Bob", &[("ga", false)]),
 			DiagramRow::Leak {
 				principal: "Bob".to_string(),
-				values: vec![crate::report::DiagramValue {
+				values: vec![DiagramValue {
 					name: "sk".to_string(),
 					guarded: false,
 				}],
@@ -1468,16 +1338,16 @@ mod tests {
 			derive("Attacker observes ga on the wire."),
 			mutation(),
 			gate(),
-			ReportStep {
-				kind: "bypass".to_string(),
+			TraceStep {
+				kind: "bypass",
 				text: "Alice's SIGNVERIF check is defeated, accepting PUBKEY(nil).".to_string(),
 				sender: None,
 				recipient: None,
 				principal: Some("Alice".to_string()),
 				values: vec![],
 			},
-			ReportStep {
-				kind: "replay".to_string(),
+			TraceStep {
+				kind: "replay",
 				text: "Attacker replays e1 from another session.".to_string(),
 				sender: Some("Bob".to_string()),
 				recipient: Some("Alice".to_string()),
@@ -1540,7 +1410,7 @@ mod tests {
 				wire(2, "Bob", "Alice", &[("gb", false)]),
 				DiagramRow::Leak {
 					principal: "Bob".to_string(),
-					values: vec![crate::report::DiagramValue {
+					values: vec![DiagramValue {
 						name: "m".to_string(),
 						guarded: false,
 					}],

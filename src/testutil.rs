@@ -16,8 +16,45 @@ pub(crate) fn test_value_id(name: &str) -> ValueId {
 		.expect("test interner exhausted")
 }
 
-pub(crate) fn make_trace() -> ProtocolTrace {
-	ProtocolTrace::default()
+pub(crate) fn make_trace(slots: Vec<TraceSlot>) -> ProtocolTrace {
+	let index = slots
+		.iter()
+		.enumerate()
+		.map(|(i, slot)| (slot.constant.id, i))
+		.collect();
+	ProtocolTrace {
+		slots,
+		index,
+		..ProtocolTrace::default()
+	}
+}
+
+pub(crate) fn make_trace_slot(c: &Value, value: &Value, creator: PrincipalId) -> TraceSlot {
+	TraceSlot {
+		declared_span: Span::default(),
+		constant: c.as_constant().expect("a constant names the slot").clone(),
+		initial_value: value.clone(),
+		creator,
+		known_by: vec![],
+		sent_by: vec![],
+		declared_at: 0,
+		phases: vec![],
+		mutatable_to: vec![],
+		delivery_phase: None,
+	}
+}
+
+pub(crate) fn make_wire_slot(c: &Value, value: &Value, creator: PrincipalId) -> TraceSlot {
+	TraceSlot {
+		sent_by: vec![SendEvent {
+			sender: creator,
+			recipient: 0,
+			declared_at: 0,
+			phase: 0,
+			guarded: false,
+		}],
+		..make_trace_slot(c, value, creator)
+	}
 }
 
 pub(crate) fn trace_constant(km: &ProtocolTrace, name: &str) -> Value {
@@ -68,64 +105,5 @@ pub(crate) fn make_attacker_state(known: Vec<Value>) -> AttackerState {
 		known: Arc::new(known),
 		known_map: Arc::new(known_map),
 		chain: crate::types::next_chain(),
-	}
-}
-
-pub(crate) fn make_principal_state(
-	name: &str,
-	id: PrincipalId,
-	mut meta: Vec<SlotMeta>,
-	values: Vec<SlotValues>,
-) -> PrincipalState {
-	let mut index = IdMap::default();
-	for (m, v) in meta.iter_mut().zip(values.iter()) {
-		m.creator = v.provenance.creator;
-	}
-	for (i, m) in meta.iter().enumerate() {
-		index.insert(m.constant.id, i);
-	}
-	PrincipalState {
-		name: name.to_string(),
-		id,
-		meta: Arc::new(meta),
-		values,
-		index: Arc::new(index),
-		leaks: Arc::new(Vec::new()),
-		halted_at: None,
-		forwarded: false,
-		foreign_halts: Vec::new(),
-		starved: Vec::new(),
-		capabilities: Arc::new(CapabilityIndex::default()),
-	}
-}
-
-pub(crate) fn make_slot_meta(c: &Constant, creator_is_self: bool) -> SlotMeta {
-	SlotMeta {
-		constant: c.clone(),
-		creator: 0,
-		guard: false,
-		known: true,
-		wire: if creator_is_self { vec![] } else { vec![0] },
-		known_by: vec![],
-		sent_at: None,
-		declared_at: 0,
-		mutatable_to: vec![],
-		delivery_phases: vec![],
-		phase: vec![0],
-	}
-}
-
-pub(crate) fn make_slot_values(v: &Value, creator: PrincipalId) -> SlotValues {
-	SlotValues {
-		installed_at: None,
-		addressed: false,
-		value: v.clone(),
-		pre_rewrite: v.clone(),
-		original: v.clone(),
-		provenance: Provenance {
-			creator,
-			sender: creator,
-			attacker_tainted: false,
-		},
 	}
 }

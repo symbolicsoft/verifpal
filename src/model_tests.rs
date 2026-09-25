@@ -4820,3 +4820,31 @@ fn test_oracle_output_hashed() {
 		run_model_sessions("oracle_output_hashed_guarded.vp", sessions, "a0");
 	}
 }
+
+#[test]
+fn test_unlink_supplied_witness() {
+	for sessions in [1, 2] {
+		run_model_sessions("unlink_supplied_witness_only.vp", sessions, "u0");
+		run_model_sessions("unlink_supplied_witness_masks.vp", sessions, "u1");
+	}
+}
+
+#[test]
+fn test_unlink_signature_and_its_key() {
+	for sessions in [1, 2] {
+		run_model_sessions("unlink_signature_and_its_key.vp", sessions, "u1");
+		run_model_sessions(
+			"unlink_signature_and_its_key_unverifiable.vp",
+			sessions,
+			"u0",
+		);
+	}
+}
+
+#[test]
+fn test_equivalence_held_values_are_compared() {
+	for sessions in [1, 2] {
+		run_model_sessions("equivalence_borrowed_while_starved.vp", sessions, "e1");
+		run_model_sessions("equivalence_knows_creator_halts.vp", sessions, "e1");
+	}
+}

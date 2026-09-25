@@ -21,25 +21,25 @@ pub(crate) struct Controllable {
 impl Controllable {
 	pub(crate) fn of(
 		km: &ProtocolTrace,
-		ps: &PrincipalState,
+		principal: PrincipalId,
 		attacker: &AttackerState,
 	) -> Controllable {
 		Controllable {
-			principal: ps.id,
+			principal,
 			phase: attacker.current_phase,
-			slots: (0..ps.values.len())
-				.map(|i| attacker_controllable(i, km, ps, attacker))
+			slots: (0..km.slots.len())
+				.map(|i| attacker_controllable(i, km, principal, attacker))
 				.collect(),
 		}
 	}
 
 	pub(crate) fn admits(
 		&self,
-		ps: &PrincipalState,
+		principal: PrincipalId,
 		attacker: &AttackerState,
 		slot: usize,
 	) -> bool {
-		self.principal == ps.id
+		self.principal == principal
 			&& self.phase == attacker.current_phase
 			&& self.slots.get(slot).copied().unwrap_or(false)
 	}
@@ -206,56 +206,42 @@ fn term_depth_outside(
 	}
 }
 
-pub(crate) fn attacker_controllable(
+fn attacker_controllable(
 	idx: usize,
 	km: &ProtocolTrace,
-	ps: &PrincipalState,
+	principal: PrincipalId,
 	attacker: &AttackerState,
 ) -> bool {
-	let Some(meta) = ps.meta.get(idx) else {
+	let Some(slot) = km.slots.get(idx) else {
 		return false;
 	};
-	if idx >= ps.values.len() {
+	if slot.constant.is_nil() {
 		return false;
 	}
-	if meta.constant.is_nil() {
-		return false;
-	}
-	if meta.guard {
-		if !meta
-			.mutatable_to
-			.contains(&ps.values[idx].provenance.sender)
-		{
+	if slot.guarded_for(principal) {
+		if !slot.mutation_reaches(slot.sender_to(principal)) {
 			return false;
 		}
-	} else if ps.values[idx].provenance.creator == ps.id || meta.wire.is_empty() {
+	} else if slot.creator == principal || slot.sent_by.is_empty() {
 		return false;
 	}
-	if !meta
-		.delivery_phases
-		.iter()
-		.map(|&(_, phase)| phase)
-		.min()
+	if !slot
+		.delivery_phase
 		.is_some_and(|phase| phase <= attacker.current_phase)
 	{
 		return false;
 	}
-	if !km.constant_used_by(ps.id, &meta.constant)
-		&& meta.sent_at.is_none()
-		&& !km.equivalence_queried.contains(&meta.constant.id)
+	if !km.constant_used_by(principal, &slot.constant)
+		&& !slot.sent_from(principal)
+		&& !km.equivalence_queried.contains(&slot.constant.id)
 	{
 		return false;
 	}
 	true
 }
 
-pub(crate) fn attacker_authored(
-	ground: &Value,
-	slot: usize,
-	km: &ProtocolTrace,
-	ps: &PrincipalState,
-) -> bool {
-	let honest = &ps.values[slot].value;
+pub(crate) fn attacker_authored(ground: &Value, slot: usize, km: &ProtocolTrace) -> bool {
+	let honest = &km.slots[slot].initial_value;
 	let trace_reduct = match honest {
 		Value::Constant(c) => HONEST_REDUCTS.with(|cache| {
 			cache

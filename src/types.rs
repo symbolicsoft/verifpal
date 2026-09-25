@@ -5,6 +5,7 @@ use std::borrow::Cow;
 use std::fmt;
 use std::hash::{BuildHasherDefault, Hasher};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
 
 pub use crate::capability::{Capabilities, Capability, CapabilityIndex, Reach};
 
@@ -526,8 +527,6 @@ impl KnownIdx {
 }
 
 pub type PrincipalId = u8;
-pub type Need = (PrincipalId, SlotIdx, Value);
-pub type Constraint = Vec<Need>;
 
 pub type ValueId = u32;
 pub type PrimitiveId = u8;
@@ -559,6 +558,29 @@ pub struct Comment {
 	pub style: CommentStyle,
 }
 
+#[derive(Clone, Debug, Default)]
+pub struct LineComments {
+	pub leading: Vec<Comment>,
+	pub trailing: Option<Comment>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct BracketComments {
+	pub leading: Vec<Comment>,
+	pub opening: Option<Comment>,
+	pub tail: Vec<Comment>,
+	pub closing: Option<Comment>,
+}
+
+impl BracketComments {
+	pub fn is_empty(&self) -> bool {
+		self.leading.is_empty()
+			&& self.opening.is_none()
+			&& self.tail.is_empty()
+			&& self.closing.is_none()
+	}
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Declaration {
 	Knows,
@@ -577,6 +599,14 @@ pub enum QueryKind {
 }
 
 impl QueryKind {
+	pub const ALL: [QueryKind; 5] = [
+		QueryKind::Confidentiality,
+		QueryKind::Authentication,
+		QueryKind::Freshness,
+		QueryKind::Unlinkability,
+		QueryKind::Equivalence,
+	];
+
 	pub fn name(self) -> &'static str {
 		match self {
 			QueryKind::Confidentiality => "confidentiality",
@@ -643,22 +673,6 @@ impl Value {
 			_ => None,
 		}
 	}
-
-	pub fn try_as_primitive(&self) -> VResult<&Primitive> {
-		match self {
-			Value::Primitive(p) => Ok(p),
-			_ => Err(VerifpalError::internal(
-				format!("expected Primitive, got {}", self.variant_name()).into(),
-			)),
-		}
-	}
-
-	fn variant_name(&self) -> &'static str {
-		match self {
-			Value::Constant(_) => "Constant",
-			Value::Primitive(_) => "Primitive",
-		}
-	}
 }
 
 #[derive(Clone, Debug, Default)]
@@ -673,42 +687,39 @@ pub struct Constant {
 }
 
 #[derive(Debug, Default)]
-pub struct HashCell(std::sync::atomic::AtomicU64, std::sync::atomic::AtomicU8);
+pub struct HashCell(AtomicU64, AtomicU8);
 
 impl Clone for HashCell {
 	fn clone(&self) -> Self {
 		HashCell(
-			std::sync::atomic::AtomicU64::new(self.0.load(std::sync::atomic::Ordering::Relaxed)),
-			std::sync::atomic::AtomicU8::new(self.1.load(std::sync::atomic::Ordering::Relaxed)),
+			AtomicU64::new(self.0.load(Ordering::Relaxed)),
+			AtomicU8::new(self.1.load(Ordering::Relaxed)),
 		)
 	}
 }
 
 impl HashCell {
 	pub fn get(&self) -> Option<u64> {
-		match self.0.load(std::sync::atomic::Ordering::Relaxed) {
+		match self.0.load(Ordering::Relaxed) {
 			0 => None,
 			cached => Some(cached),
 		}
 	}
 	pub fn set(&self, hash: u64) {
-		self.0.store(hash, std::sync::atomic::Ordering::Relaxed);
+		self.0.store(hash, Ordering::Relaxed);
 	}
 	pub fn clear(&self) {
-		self.0.store(0, std::sync::atomic::Ordering::Relaxed);
+		self.0.store(0, Ordering::Relaxed);
 	}
 	pub fn has_variables(&self) -> Option<bool> {
-		match self.1.load(std::sync::atomic::Ordering::Relaxed) {
+		match self.1.load(Ordering::Relaxed) {
 			0 => None,
 			1 => Some(false),
 			_ => Some(true),
 		}
 	}
 	pub fn set_has_variables(&self, has: bool) {
-		self.1.store(
-			if has { 2 } else { 1 },
-			std::sync::atomic::Ordering::Relaxed,
-		);
+		self.1.store(if has { 2 } else { 1 }, Ordering::Relaxed);
 	}
 }
 
@@ -773,19 +784,6 @@ impl Primitive {
 		}
 		changed.map(|arguments| self.with_arguments(arguments))
 	}
-
-	pub fn try_map_arguments(
-		&self,
-		mut f: impl FnMut(&Value) -> VResult<Option<Value>>,
-	) -> VResult<Option<Primitive>> {
-		let mut changed: Option<Vec<Value>> = None;
-		for (i, a) in self.arguments.iter().enumerate() {
-			if let Some(mapped) = f(a)? {
-				changed.get_or_insert_with(|| self.arguments.clone())[i] = mapped;
-			}
-		}
-		Ok(changed.map(|arguments| self.with_arguments(arguments)))
-	}
 }
 
 #[derive(Clone, Default)]
@@ -816,8 +814,7 @@ pub struct Scenario {
 	pub principal: PrincipalId,
 	pub principal_name: Arc<str>,
 	pub bindings: Vec<(Constant, Constant)>,
-	pub leading_comments: Vec<Comment>,
-	pub trailing_comment: Option<Comment>,
+	pub comments: LineComments,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -827,17 +824,11 @@ pub struct ScenarioSummary {
 	pub corrupt_from: Option<i32>,
 }
 
-impl ScenarioSummary {
-	pub fn honest(&self) -> bool {
-		self.corrupt_from.is_none_or(|phase| phase > 0)
-	}
-
-	pub fn peer(&self) -> String {
-		match self.corrupt_from {
-			None => "honest peer".to_string(),
-			Some(0) => "corrupt peer".to_string(),
-			Some(phase) => format!("peer corrupt from phase {phase}"),
-		}
+pub(crate) fn peer_description(corrupt_from: Option<i32>) -> String {
+	match corrupt_from {
+		None => "honest peer".to_string(),
+		Some(0) => "corrupt peer".to_string(),
+		Some(phase) => format!("peer corrupt from phase {phase}"),
 	}
 }
 
@@ -859,19 +850,12 @@ pub struct Model {
 	pub file_name: String,
 	pub source: Source,
 	pub attacker: AttackerKind,
+	pub attacker_comments: LineComments,
 	pub blocks: Vec<Block>,
 	pub scenarios: Vec<Scenario>,
-	pub scenarios_leading_comments: Vec<Comment>,
-	pub scenarios_header_trailing: Option<Comment>,
-	pub scenarios_tail_comments: Vec<Comment>,
-	pub scenarios_closing_trailing: Option<Comment>,
+	pub scenarios_comments: BracketComments,
 	pub queries: Vec<Query>,
-	pub pre_attacker_comments: Vec<Comment>,
-	pub attacker_trailing: Option<Comment>,
-	pub queries_leading_comments: Vec<Comment>,
-	pub queries_header_trailing: Option<Comment>,
-	pub queries_tail_comments: Vec<Comment>,
-	pub queries_closing_trailing: Option<Comment>,
+	pub queries_comments: BracketComments,
 	pub tail_comments: Vec<Comment>,
 }
 
@@ -996,11 +980,11 @@ impl Envelope {
 	}
 
 	pub fn summary(&self) -> String {
-		if self.truncations.is_empty() {
+		if self.exhausted() {
 			return format!(
 				"search exhausted at {} session{}",
 				self.sessions,
-				if self.sessions == 1 { "" } else { "s" }
+				crate::util::plural(self.sessions.into())
 			);
 		}
 		let reasons: Vec<&str> = self.truncations.iter().map(|t| t.name()).collect();
@@ -1115,13 +1099,10 @@ pub struct Principal {
 	pub id: PrincipalId,
 	pub span: Span,
 	pub expressions: Vec<Expression>,
-	pub leading_comments: Vec<Comment>,
-	pub header_trailing: Option<Comment>,
-	pub tail_comments: Vec<Comment>,
-	pub closing_trailing: Option<Comment>,
+	pub comments: BracketComments,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct Message {
 	pub span: Span,
 	pub sender: PrincipalId,
@@ -1129,31 +1110,14 @@ pub struct Message {
 	pub recipient: PrincipalId,
 	pub recipient_name: Arc<str>,
 	pub constants: Vec<Constant>,
-	pub leading_comments: Vec<Comment>,
-	pub trailing_comment: Option<Comment>,
-}
-
-impl Default for Message {
-	fn default() -> Self {
-		Message {
-			span: Span::default(),
-			sender: 0,
-			sender_name: Arc::from(""),
-			recipient: 0,
-			recipient_name: Arc::from(""),
-			constants: Vec::new(),
-			leading_comments: Vec::new(),
-			trailing_comment: None,
-		}
-	}
+	pub comments: LineComments,
 }
 
 #[derive(Clone, Debug, Default)]
 pub struct Phase {
 	pub span: Span,
 	pub number: i32,
-	pub leading_comments: Vec<Comment>,
-	pub trailing_comment: Option<Comment>,
+	pub comments: LineComments,
 }
 
 #[derive(Clone, Debug)]
@@ -1163,8 +1127,7 @@ pub struct Query {
 	pub constants: Vec<Constant>,
 	pub message: Message,
 	pub options: Vec<QueryOption>,
-	pub leading_comments: Vec<Comment>,
-	pub trailing_comment: Option<Comment>,
+	pub comments: LineComments,
 }
 
 impl Query {
@@ -1216,8 +1179,7 @@ impl Message {
 pub struct QueryOption {
 	pub kind: QueryOptionKind,
 	pub message: Message,
-	pub leading_comments: Vec<Comment>,
-	pub trailing_comment: Option<Comment>,
+	pub comments: LineComments,
 }
 
 #[derive(Clone, Debug)]
@@ -1232,8 +1194,17 @@ pub struct Expression {
 	pub qualifier: Option<Qualifier>,
 	pub constants: Vec<Constant>,
 	pub assigned: Option<Value>,
-	pub leading_comments: Vec<Comment>,
-	pub trailing_comment: Option<Comment>,
+	pub comments: LineComments,
+}
+
+impl Expression {
+	pub(crate) fn declares_secret(&self) -> bool {
+		match self.kind {
+			Declaration::Generates => true,
+			Declaration::Knows => self.qualifier == Some(Qualifier::Private),
+			Declaration::Assignment | Declaration::Leaks => false,
+		}
+	}
 }
 
 #[derive(Clone, Debug)]
@@ -1246,6 +1217,8 @@ pub struct TraceSlot {
 	pub sent_by: Vec<SendEvent>,
 	pub declared_at: i32,
 	pub phases: Vec<i32>,
+	pub mutatable_to: Vec<PrincipalId>,
+	pub delivery_phase: Option<i32>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1261,6 +1234,60 @@ impl TraceSlot {
 	pub fn known_by_principal(&self, pid: PrincipalId) -> bool {
 		self.creator == pid || self.known_by.iter().any(|&(recipient, _)| recipient == pid)
 	}
+
+	pub(crate) fn sender_to(&self, pid: PrincipalId) -> PrincipalId {
+		self.known_by
+			.iter()
+			.find(|&&(recipient, _)| recipient == pid)
+			.map_or(self.creator, |&(_, from)| from)
+	}
+
+	pub(crate) fn guarded_for(&self, pid: PrincipalId) -> bool {
+		self.sent_by
+			.iter()
+			.any(|event| event.guarded && (event.recipient == pid || self.creator == pid))
+	}
+
+	pub(crate) fn sent_from(&self, pid: PrincipalId) -> bool {
+		self.sent_by.iter().any(|event| event.sender == pid)
+	}
+
+	pub(crate) fn disclosed(&self) -> bool {
+		!self.sent_by.is_empty() || self.constant.leaked
+	}
+
+	pub(crate) fn mutation_reaches(&self, pid: PrincipalId) -> bool {
+		self.mutatable_to.contains(&pid)
+	}
+
+	pub(crate) fn substitution_phase(&self, recipient: PrincipalId) -> Option<i32> {
+		self.substitution_phase_from(recipient, &mut Vec::new())
+	}
+
+	fn substitution_phase_from(
+		&self,
+		recipient: PrincipalId,
+		visiting: &mut Vec<PrincipalId>,
+	) -> Option<i32> {
+		if visiting.contains(&recipient) {
+			return None;
+		}
+		visiting.push(recipient);
+		let earliest = self
+			.sent_by
+			.iter()
+			.filter(|event| event.recipient == recipient)
+			.filter_map(|event| {
+				if event.guarded {
+					self.substitution_phase_from(event.sender, visiting)
+				} else {
+					Some(event.phase)
+				}
+			})
+			.min();
+		visiting.pop();
+		earliest
+	}
 }
 
 #[derive(Clone, Debug, Default)]
@@ -1271,18 +1298,37 @@ pub struct ProtocolTrace {
 	pub index: IdMap<ValueId, usize>,
 	pub max_phase: i32,
 	pub used_by: IdMap<ValueId, IdSet<PrincipalId>>,
-	pub leaks: Arc<Vec<LeakEvent>>,
+	pub leaks: Vec<LeakEvent>,
 	pub session_siblings: IdMap<ValueId, Arc<Vec<ValueId>>>,
 	pub copy_siblings: IdMap<ValueId, Arc<Vec<ValueId>>>,
 	pub interchangeable: IdMap<PrincipalId, PrincipalId>,
 	pub actors: IdMap<PrincipalId, PrincipalId>,
 	pub scenario_bound: IdSet<ValueId>,
 	pub equivalence_queried: IdSet<ValueId>,
+	pub capabilities: CapabilityIndex,
 }
 
 impl ProtocolTrace {
-	pub(crate) fn interchangeable_with(&self, a: PrincipalId, b: PrincipalId) -> bool {
-		Self::grouped(&self.interchangeable, a, b)
+	pub fn index_of(&self, c: &Constant) -> Option<usize> {
+		self.index.get(&c.id).copied()
+	}
+
+	pub fn principal_name(&self, id: PrincipalId) -> &str {
+		if id == crate::principal::ATTACKER_ID {
+			return crate::principal::ATTACKER_NAME;
+		}
+		self.principal_ids
+			.iter()
+			.position(|&p| p == id)
+			.and_then(|i| self.principals.get(i))
+			.map(String::as_str)
+			.unwrap_or("")
+	}
+
+	pub fn constant_used_by(&self, principal_id: PrincipalId, c: &Constant) -> bool {
+		self.used_by
+			.get(&c.id)
+			.is_some_and(|principals| principals.contains(&principal_id))
 	}
 
 	pub(crate) fn same_actor(&self, a: PrincipalId, b: PrincipalId) -> bool {
@@ -1290,7 +1336,7 @@ impl ProtocolTrace {
 	}
 
 	pub(crate) fn interchangeable_for(&self, a: PrincipalId, b: PrincipalId, slot: usize) -> bool {
-		if self.interchangeable_with(a, b) {
+		if Self::grouped(&self.interchangeable, a, b) {
 			return true;
 		}
 		if !self.same_actor(a, b) || self.scenario_bound.is_empty() {
@@ -1310,37 +1356,6 @@ impl ProtocolTrace {
 	fn grouped(map: &IdMap<PrincipalId, PrincipalId>, a: PrincipalId, b: PrincipalId) -> bool {
 		a == b || map.get(&a).copied().unwrap_or(a) == map.get(&b).copied().unwrap_or(b)
 	}
-
-	pub(crate) fn substitution_phase(&self, slot: usize, recipient: PrincipalId) -> Option<i32> {
-		self.substitution_phase_from(slot, recipient, &mut Vec::new())
-	}
-
-	fn substitution_phase_from(
-		&self,
-		slot: usize,
-		recipient: PrincipalId,
-		visiting: &mut Vec<PrincipalId>,
-	) -> Option<i32> {
-		let trace_slot = self.slots.get(slot)?;
-		if visiting.contains(&recipient) {
-			return None;
-		}
-		visiting.push(recipient);
-		let earliest = trace_slot
-			.sent_by
-			.iter()
-			.filter(|event| event.recipient == recipient)
-			.filter_map(|event| {
-				if event.guarded {
-					self.substitution_phase_from(slot, event.sender, visiting)
-				} else {
-					Some(event.phase)
-				}
-			})
-			.min();
-		visiting.pop();
-		earliest
-	}
 }
 
 #[derive(Clone, Debug)]
@@ -1348,157 +1363,6 @@ pub struct LeakEvent {
 	pub constant_id: ValueId,
 	pub principal_id: PrincipalId,
 	pub declared_at: i32,
-	pub phase: i32,
-}
-
-#[derive(Clone, Debug)]
-pub struct SlotMeta {
-	pub constant: Constant,
-	pub creator: PrincipalId,
-	pub guard: bool,
-	pub known: bool,
-	pub wire: Vec<PrincipalId>,
-	pub known_by: Vec<(PrincipalId, PrincipalId)>,
-	pub sent_at: Option<i32>,
-	pub declared_at: i32,
-	pub mutatable_to: Vec<PrincipalId>,
-	pub delivery_phases: Vec<(PrincipalId, i32)>,
-	pub phase: Vec<i32>,
-}
-
-#[derive(Clone, Debug)]
-pub struct Provenance {
-	pub creator: PrincipalId,
-	pub sender: PrincipalId,
-	pub attacker_tainted: bool,
-}
-
-#[derive(Clone, Debug)]
-pub struct SlotValues {
-	pub value: Value,
-	pub pre_rewrite: Value,
-	pub original: Value,
-	pub installed_at: Option<i32>,
-	pub addressed: bool,
-	pub provenance: Provenance,
-}
-
-impl SlotValues {
-	pub fn set_value(&mut self, v: Value) {
-		if !self.provenance.attacker_tainted {
-			self.original = v.clone();
-		}
-		self.value = v;
-	}
-
-	pub fn perceived(&self) -> &Value {
-		&self.original
-	}
-}
-
-#[derive(Clone, Debug)]
-pub struct PrincipalState {
-	pub name: String,
-	pub id: PrincipalId,
-	pub meta: Arc<Vec<SlotMeta>>,
-	pub values: Vec<SlotValues>,
-	pub index: Arc<IdMap<ValueId, usize>>,
-	pub leaks: Arc<Vec<LeakEvent>>,
-	pub halted_at: Option<i32>,
-	pub foreign_halts: Vec<(PrincipalId, Option<usize>, i32)>,
-	pub starved: Vec<usize>,
-	pub capabilities: Arc<CapabilityIndex>,
-	pub forwarded: bool,
-}
-
-impl PrincipalState {
-	pub fn event_reached(&self, principal: PrincipalId, declared_at: i32) -> bool {
-		if principal == self.id {
-			return self
-				.halted_at
-				.is_none_or(|halted_at| declared_at <= halted_at);
-		}
-		self.foreign_halts
-			.iter()
-			.find(|&&(halted, _, _)| halted == principal)
-			.is_none_or(|&(_, _, reached)| declared_at <= reached)
-	}
-
-	pub fn answers_for(&self, constants: &[Constant]) -> bool {
-		if !self.forwarded {
-			return true;
-		}
-		constants.iter().all(|c| {
-			self.index_of(c)
-				.and_then(|i| self.meta.get(i))
-				.is_some_and(|meta| meta.known)
-		})
-	}
-
-	pub fn slot_unreached(&self, i: usize) -> bool {
-		let Some(meta) = self.meta.get(i) else {
-			return false;
-		};
-		self.foreign_halts
-			.iter()
-			.any(|&(principal, at, _)| principal == meta.creator && at.is_some_and(|at| i >= at))
-	}
-
-	pub fn slot_starved(&self, i: usize) -> bool {
-		self.starved.binary_search(&i).is_ok()
-	}
-
-	pub fn withheld_by_own_halt(&self, i: usize) -> bool {
-		let (Some(halted_at), Some(sm)) = (self.halted_at, self.meta.get(i)) else {
-			return false;
-		};
-		let sent = sm.sent_at.is_some();
-		let sent_before_halt = sm.sent_at.is_some_and(|sent_at| sent_at <= halted_at);
-		let leaked = self
-			.leaks
-			.iter()
-			.any(|leak| leak.constant_id == sm.constant.id && leak.principal_id == self.id);
-		let leaked_before_halt = self.leaks.iter().any(|leak| {
-			leak.constant_id == sm.constant.id
-				&& leak.principal_id == self.id
-				&& leak.declared_at <= halted_at
-		});
-		(sent || leaked) && !sent_before_halt && !leaked_before_halt
-	}
-
-	pub fn should_use_original(&self, i: usize) -> bool {
-		!self.values[i].provenance.attacker_tainted
-			|| self.values[i].provenance.creator == self.id
-			|| !self.meta[i].known
-			|| !self.meta[i].wire.contains(&self.id)
-	}
-
-	pub fn effective_value(&self, i: usize) -> &Value {
-		if self.should_use_original(i) {
-			self.values[i].perceived()
-		} else {
-			&self.values[i].value
-		}
-	}
-
-	pub fn mutation_reaches(&self, slot: usize, principal: PrincipalId) -> bool {
-		let Some(meta) = self.meta.get(slot) else {
-			return false;
-		};
-		if !meta.mutatable_to.contains(&principal) {
-			return false;
-		}
-		if principal != self.id && self.values.get(slot).is_some_and(|sv| sv.addressed) {
-			return false;
-		}
-		match self.values.get(slot).and_then(|sv| sv.installed_at) {
-			None => true,
-			Some(at) => meta
-				.delivery_phases
-				.iter()
-				.any(|&(who, phase)| who == principal && phase >= at),
-		}
-	}
 }
 
 #[derive(Clone, Debug)]
@@ -1548,38 +1412,6 @@ pub enum DerivationRecord {
 }
 
 impl DerivationRecord {
-	pub fn same_route(&self, other: &DerivationRecord) -> bool {
-		let same_terms = |a: &[&Value], b: &[&Value]| {
-			a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| x.equivalent(y, true))
-		};
-		match (self, other) {
-			(DerivationRecord::Initial, DerivationRecord::Initial) => true,
-			(DerivationRecord::Leaked { slot: a }, DerivationRecord::Leaked { slot: b }) => a == b,
-			(DerivationRecord::Obtained { slot: a }, DerivationRecord::Obtained { slot: b }) => {
-				a == b
-			}
-			(
-				DerivationRecord::Broken {
-					of: a,
-					capability: ca,
-					..
-				},
-				DerivationRecord::Broken {
-					of: b,
-					capability: cb,
-					..
-				},
-			) => ca == cb && a.equivalent(b, true),
-			(DerivationRecord::Fragment { of: a }, DerivationRecord::Fragment { of: b }) => {
-				a.equivalent(b, true)
-			}
-			_ => {
-				std::mem::discriminant(self) == std::mem::discriminant(other)
-					&& same_terms(&self.ingredients(), &other.ingredients())
-			}
-		}
-	}
-
 	pub fn ingredients(&self) -> Vec<&Value> {
 		match self {
 			DerivationRecord::Decomposed { of, using } => {
@@ -1616,17 +1448,6 @@ impl DerivationRecord {
 			| DerivationRecord::Obtained { .. } => vec![],
 		}
 	}
-
-	pub fn reads_from_state(&self) -> bool {
-		matches!(
-			self,
-			DerivationRecord::Leaked { .. }
-				| DerivationRecord::Obtained { .. }
-				| DerivationRecord::Reconstructed { .. }
-				| DerivationRecord::Combined { .. }
-				| DerivationRecord::Rewritten { built: false, .. }
-		)
-	}
 }
 
 #[derive(Clone, Debug)]
@@ -1639,10 +1460,10 @@ pub struct AttackerState {
 	pub chain: u64,
 }
 
-static CHAINS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+static CHAINS: AtomicU64 = AtomicU64::new(1);
 
 pub(crate) fn next_chain() -> u64 {
-	CHAINS.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+	CHAINS.fetch_add(1, Ordering::Relaxed)
 }
 
 impl Default for AttackerState {
@@ -1655,12 +1476,6 @@ impl Default for AttackerState {
 			reused: Arc::new(vec![]),
 			chain: next_chain(),
 		}
-	}
-}
-
-impl AttackerState {
-	pub fn new() -> Self {
-		Self::default()
 	}
 }
 
@@ -1714,17 +1529,10 @@ mod tests {
 		};
 		assert_eq!(reuse.ingredients().len(), 2);
 		let forged = DerivationRecord::ReusedForge {
-			with: [e1.clone(), e2.clone()],
-			using: vec![ad.clone()],
+			with: [e1, e2],
+			using: vec![ad],
 		};
 		assert_eq!(forged.ingredients().len(), 3);
-		assert!(reuse.same_route(&DerivationRecord::Reused {
-			of: e1.clone(),
-			with: e2.clone(),
-		}));
-		assert!(!reuse.same_route(&DerivationRecord::Reused { of: e2, with: e1 }));
-		assert!(!reuse.reads_from_state());
-		assert!(!forged.reads_from_state());
 	}
 
 	#[test]
@@ -1737,102 +1545,6 @@ mod tests {
 
 		assert!(p.as_primitive().is_some());
 		assert!(p.as_constant().is_none());
-	}
-
-	#[test]
-	fn value_try_accessors() {
-		let c = make_constant("try_c");
-		assert!(c.as_constant().is_some());
-		assert!(c.try_as_primitive().is_err());
-	}
-
-	#[test]
-	fn principal_state_should_use_original_creator() {
-		let c = Constant {
-			name: Arc::from("ps_fbm_a"),
-			id: test_value_id("ps_fbm_a"),
-			..Constant::default()
-		};
-		let meta = vec![make_slot_meta(&c, true)];
-		let values = vec![make_slot_values(&make_constant("ps_fbm_a"), 0)];
-		let ps = make_principal_state("Alice", 0, meta, values);
-		assert!(ps.should_use_original(0));
-	}
-
-	#[test]
-	fn principal_state_effective_value_not_mutated() {
-		let c = Constant {
-			name: Arc::from("ps_ev_a"),
-			id: test_value_id("ps_ev_a"),
-			..Constant::default()
-		};
-		let val = make_constant("ps_ev_a");
-		let meta = vec![make_slot_meta(&c, true)];
-		let values = vec![make_slot_values(&val, 0)];
-		let ps = make_principal_state("Alice", 0, meta, values);
-		assert!(ps.effective_value(0).equivalent(&val, true));
-	}
-
-	#[test]
-	fn principal_state_effective_value_mutated() {
-		let c = Constant {
-			name: Arc::from("ps_evm_a"),
-			id: test_value_id("ps_evm_a"),
-			..Constant::default()
-		};
-		let original = make_constant("ps_evm_a");
-		let mutated = make_constant("ps_evm_mutated");
-		let mut meta = make_slot_meta(&c, false);
-		meta.wire = vec![1];
-		let mut sv = make_slot_values(&mutated, 0);
-		sv.original = original.clone();
-		sv.provenance.attacker_tainted = true;
-		sv.provenance.creator = 0;
-		let ps = make_principal_state("Bob", 1, vec![meta], vec![sv]);
-		assert!(ps.effective_value(0).equivalent(&mutated, true));
-	}
-
-	#[test]
-	fn an_install_does_not_make_a_foreign_post_halt_slot_reachable() {
-		let before = make_constant("ps_halt_before");
-		let halt = make_constant("ps_halt_check");
-		let after = make_constant("ps_halt_after");
-		let values = vec![
-			make_slot_values(&before, 2),
-			make_slot_values(&halt, 2),
-			make_slot_values(&after, 2),
-		];
-		let mut ps = make_principal_state(
-			"Alice",
-			1,
-			vec![
-				make_slot_meta(before.as_constant().expect("constant"), false),
-				make_slot_meta(halt.as_constant().expect("constant"), false),
-				make_slot_meta(after.as_constant().expect("constant"), false),
-			],
-			values,
-		);
-		ps.values[2].provenance.creator = crate::principal::ATTACKER_ID;
-		ps.foreign_halts = vec![(2, Some(1), 0)];
-		assert!(ps.slot_unreached(2));
-	}
-
-	#[test]
-	fn one_reached_disclosure_is_not_erased_by_a_later_withheld_one() {
-		let value = make_constant("ps_disclosed_once");
-		let constant = value.as_constant().expect("constant");
-		let mut meta = make_slot_meta(constant, true);
-		meta.sent_at = Some(1);
-		let mut ps =
-			make_principal_state("Alice", 1, vec![meta], vec![make_slot_values(&value, 1)]);
-		ps.halted_at = Some(3);
-		ps.leaks = Arc::new(vec![LeakEvent {
-			constant_id: constant.id,
-			principal_id: 1,
-			declared_at: 5,
-			phase: 0,
-		}]);
-		assert!(!ps.withheld_by_own_halt(0));
 	}
 
 	#[test]
@@ -1857,27 +1569,6 @@ mod tests {
 	}
 
 	#[test]
-	fn slot_values_set_value_not_tainted() {
-		let v1 = make_constant("sv_v1");
-		let v2 = make_constant("sv_v2");
-		let mut sv = make_slot_values(&v1, 0);
-		sv.set_value(v2.clone());
-		assert!(sv.value.equivalent(&v2, true));
-		assert!(sv.original.equivalent(&v2, true));
-	}
-
-	#[test]
-	fn slot_values_set_value_tainted() {
-		let v1 = make_constant("svm_v1");
-		let v2 = make_constant("svm_v2");
-		let mut sv = make_slot_values(&v1, 0);
-		sv.provenance.attacker_tainted = true;
-		sv.set_value(v2.clone());
-		assert!(sv.value.equivalent(&v2, true));
-		assert!(sv.original.equivalent(&v1, true));
-	}
-
-	#[test]
 	fn error_display() {
 		let e = VerifpalError::parse("bad input".into());
 		assert_eq!(format!("{}", e), "parse error: bad input");
@@ -1892,16 +1583,7 @@ mod tests {
 			id: test_value_id("ts_a"),
 			..Constant::default()
 		};
-		let slot = TraceSlot {
-			declared_span: Span::default(),
-			constant: c,
-			initial_value: value_nil(),
-			creator: 0,
-			known_by: vec![],
-			sent_by: vec![],
-			declared_at: 0,
-			phases: vec![0],
-		};
+		let slot = make_trace_slot(&Value::Constant(c), &value_nil(), 0);
 		assert!(slot.known_by_principal(0));
 		assert!(!slot.known_by_principal(1));
 	}
@@ -1914,10 +1596,6 @@ mod tests {
 			..Constant::default()
 		};
 		let slot = TraceSlot {
-			declared_span: Span::default(),
-			constant: c,
-			initial_value: value_nil(),
-			creator: 0,
 			known_by: vec![(1, 0)],
 			sent_by: vec![SendEvent {
 				sender: 0,
@@ -1926,8 +1604,7 @@ mod tests {
 				phase: 0,
 				guarded: false,
 			}],
-			declared_at: 0,
-			phases: vec![0],
+			..make_trace_slot(&Value::Constant(c), &value_nil(), 0)
 		};
 		assert!(slot.known_by_principal(1));
 	}

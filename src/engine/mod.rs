@@ -8,7 +8,6 @@ pub(crate) mod program;
 pub(crate) mod query;
 pub(crate) mod search;
 pub(crate) mod unlink;
-pub(crate) mod view;
 
 use crate::context::VerifyContext;
 use crate::info::info_message;
@@ -18,32 +17,14 @@ use exec::{Context, Execution, Installs, execute};
 use program::Program;
 use query::{Judge, Violation};
 
-pub(crate) fn verify(
-	ctx: &VerifyContext,
-	m: &Model,
-	km: &ProtocolTrace,
-	states: &[PrincipalState],
-) -> VResult<()> {
-	let Some(carrier) = states.first() else {
-		return Ok(());
-	};
+pub(crate) fn verify(ctx: &VerifyContext, m: &Model, km: &ProtocolTrace) -> VResult<()> {
 	let program = Program::of(m, km);
-	let cx = Context::new(&program, km, carrier);
+	let cx = Context::new(&program, km);
 	let root = execute(&cx, &Vec::new());
-	for ps in states {
-		let run = program.run_index(ps.id);
-		crate::verify::check_honest_run(
-			ctx,
-			km,
-			ps,
-			|slot| run.is_some_and(|r| root.runs[r].held(slot).is_some()),
-			|slot| program.phase_of(km.slots[slot].creator, slot),
-		)?;
-	}
+	crate::verify::check_honest_run(ctx, km, &program, &root)?;
 	info_message(
 		&format!("Attacker is configured as {}.", m.attacker),
 		InfoLevel::Info,
-		false,
 	);
 	ctx.analysis_count_increment();
 	for (i, v) in root.knowledge.state.known.iter().enumerate() {
@@ -57,83 +38,51 @@ pub(crate) fn verify(
 			)
 		});
 	}
-	judge(ctx, &cx, &root, &Vec::new(), &root, states);
+	judge(ctx, &cx, &root, &Vec::new(), &root);
 	if m.attacker == AttackerKind::Active && !ctx.all_resolved() {
-		let mut search = search::Search::new(ctx, &cx, states, root);
+		let mut search = search::Search::new(ctx, &cx, root);
 		search.run();
 		search.report_stats();
 	}
 	Ok(())
 }
 
-fn violation_at(
-	ctx: &VerifyContext,
-	cx: &Context,
-	ex: &Execution,
-	honest: &Execution,
-	states: &[PrincipalState],
-	phase: i32,
-	q: &Query,
-) -> Option<(Violation, query::Verdict)> {
-	let claims = |p: PrincipalId| ctx.claims_apply_at(p, phase);
-	Judge {
-		cx,
-		ex: ex.at(phase),
-		whole: ex,
-		honest,
-		states,
-		claims: &claims,
-		views: std::cell::RefCell::new(Vec::new()),
-	}
-	.evaluate(q)
-}
-
-type Found = (Execution, (Violation, query::Verdict));
+type Found = (Violation, query::Verdict);
 
 fn minimal(
-	ctx: &VerifyContext,
 	cx: &Context,
 	installs: &Installs,
-	honest: &Execution,
-	states: &[PrincipalState],
-	phase: i32,
-	q: &Query,
-) -> Option<Found> {
-	let mut kept = installs.clone();
-	let mut best = None;
-	let attempt = |kept: &Installs, drop: &[usize], best: &mut Option<Found>| -> Option<Installs> {
-		let trial: Installs = kept
-			.iter()
-			.enumerate()
-			.filter(|(i, _)| !drop.contains(i))
-			.map(|(_, install)| install.clone())
-			.collect();
-		let ex = execute(cx, &trial);
-		if !ex.stuck.is_empty() {
-			return None;
-		}
-		let found = violation_at(ctx, cx, &ex, honest, states, phase, q)?;
-		*best = Some((ex, found));
-		Some(trial)
-	};
+	violation: impl Fn(&Execution) -> Option<Found>,
+) -> Option<(Execution, Found)> {
 	let message = |(run, slot, _): &(usize, usize, Value)| {
 		(*run, cx.program.runs[*run].step_of_slot.get(slot).copied())
 	};
-	'shrink: loop {
-		for width in 1..=2 {
-			for i in 0..kept.len() {
-				for j in i..kept.len() {
-					if (width == 1) != (i == j) || message(&kept[i]) != message(&kept[j]) {
-						continue;
-					}
-					if let Some(trial) = attempt(&kept, &[i, j], &mut best) {
-						kept = trial;
-						continue 'shrink;
-					}
-				}
+	let mut kept = installs.clone();
+	let mut best = None;
+	loop {
+		let n = kept.len();
+		let singles = (0..n).map(|i| (i, i));
+		let pairs = (0..n)
+			.flat_map(|i| (i + 1..n).map(move |j| (i, j)))
+			.filter(|&(i, j)| message(&kept[i]) == message(&kept[j]));
+		let Some((trial, found)) = singles.chain(pairs).find_map(|(i, j)| {
+			let trial: Installs = kept
+				.iter()
+				.enumerate()
+				.filter(|&(k, _)| k != i && k != j)
+				.map(|(_, install)| install.clone())
+				.collect();
+			let ex = execute(cx, &trial);
+			if !ex.stuck.is_empty() {
+				return None;
 			}
-		}
-		return best;
+			let found = violation(&ex)?;
+			Some((trial, (ex, found)))
+		}) else {
+			return best;
+		};
+		kept = trial;
+		best = Some(found);
 	}
 }
 
@@ -143,30 +92,37 @@ pub(crate) fn judge(
 	ex: &Execution,
 	installs: &Installs,
 	honest: &Execution,
-	states: &[PrincipalState],
-) -> bool {
-	let mut found = false;
-	for phase in 0..=cx.program.max_phase {
+) {
+	for phase in 0..=cx.km.max_phase {
+		let claims = |p: PrincipalId| ctx.claims_apply_at(p, phase);
+		let violation = |ex: &Execution, q: &Query| {
+			Judge {
+				cx,
+				ex: ex.at(phase),
+				whole: ex,
+				honest,
+				claims: &claims,
+			}
+			.evaluate(q)
+		};
 		for result in ctx.results_get() {
 			if result.resolved {
 				continue;
 			}
-			for q in std::iter::once(&result.query).chain(result.variants.iter()) {
-				let Some(first) = violation_at(ctx, cx, ex, honest, states, phase, q) else {
+			for q in std::iter::once(&result.query).chain(&result.variants) {
+				let Some(first) = violation(ex, q) else {
 					continue;
 				};
-				match minimal(ctx, cx, installs, honest, states, phase, q) {
-					Some((smaller, found)) => {
-						report(ctx, cx, smaller.at(phase), honest, &result, q, &found)
-					}
-					None => report(ctx, cx, ex.at(phase), honest, &result, q, &first),
-				}
-				found = true;
+				let smaller = minimal(cx, installs, |ex| violation(ex, q));
+				let (ex, found) = match &smaller {
+					Some((smaller, found)) => (smaller, found),
+					None => (ex, &first),
+				};
+				report(ctx, cx, ex.at(phase), honest, &result, q, found);
 				break;
 			}
 		}
 	}
-	found
 }
 
 fn carries_a_secret(v: &Value, km: &ProtocolTrace) -> bool {
@@ -196,7 +152,7 @@ fn report(
 	honest: &Execution,
 	result: &VerifyResult,
 	q: &Query,
-	(v, verdict): &(Violation, query::Verdict),
+	(v, verdict): &Found,
 ) {
 	let km = cx.km;
 	let program = cx.program;
@@ -215,7 +171,7 @@ fn report(
 			})
 		})
 		.collect();
-	let name = |run: usize| program.runs[run].name.clone();
+	let name = |run: usize| program.runs[run].name.as_str();
 	let mut narrator = narrate::Narrator::new(cx, ex, honest);
 	narrator.installs();
 	let shown = |narrator: &narrate::Narrator, slot: usize, value: &Value| {

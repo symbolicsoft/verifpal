@@ -6,9 +6,11 @@ use crate::primitive::{
 	primitives_with_threshold,
 };
 use crate::principal::PrincipalNames;
+use crate::tokens::{TokenIndex, TokenKind};
 use crate::types::*;
 use crate::util::did_you_mean;
 use crate::value::ValueNames;
+use std::borrow::Cow;
 use std::sync::Arc;
 
 const RESERVED: &[&str] = &[
@@ -35,14 +37,21 @@ const RESERVED: &[&str] = &[
 	"scenarios",
 ];
 
+const DECLARATIONS: [(&str, Declaration); 3] = [
+	("knows", Declaration::Knows),
+	("generates", Declaration::Generates),
+	("leaks", Declaration::Leaks),
+];
+
+const MAX_NESTING: usize = 64;
+
 fn names_a_primitive(lower: &str) -> bool {
-	crate::primitive::primitive_get_enum(&lower.to_uppercase()).is_ok()
+	primitive_get_enum(&lower.to_uppercase()).is_ok()
 }
 
 pub(crate) fn check_reserved(s: &str) -> VResult<()> {
 	let lower = s.to_lowercase();
-	if RESERVED.contains(&lower.as_str())
-		|| names_a_primitive(&lower)
+	if is_reserved_word(&lower)
 		|| lower.starts_with("attacker")
 		|| lower.starts_with(crate::util::ANONYMOUS_PREFIX)
 	{
@@ -59,331 +68,211 @@ pub(crate) fn check_reserved(s: &str) -> VResult<()> {
 	Ok(())
 }
 
-pub(crate) fn reserved_for_principal(lower: &str) -> bool {
+pub(crate) fn is_reserved_word(lower: &str) -> bool {
 	RESERVED.contains(&lower) || names_a_primitive(lower)
 }
 
 fn title_case(s: &str) -> String {
-	let mut result = String::with_capacity(s.len());
 	let mut chars = s.chars();
-	if let Some(first) = chars.next() {
-		for c in first.to_uppercase() {
-			result.push(c);
-		}
-		for c in chars {
-			for lc in c.to_lowercase() {
-				result.push(lc);
-			}
-		}
-	}
-	result
+	let first = chars.next().into_iter().flat_map(char::to_uppercase);
+	first.chain(chars.flat_map(char::to_lowercase)).collect()
+}
+
+fn starts_with_ignoring_case(s: &str, prefix: &str) -> bool {
+	s.as_bytes()
+		.get(..prefix.len())
+		.is_some_and(|head| head.eq_ignore_ascii_case(prefix.as_bytes()))
 }
 
 fn starts_with_keyword(s: &str, keyword: &str) -> bool {
-	if !starts_with_ignoring_case(s, keyword) {
-		return false;
-	}
-	s.as_bytes()
-		.get(keyword.len())
-		.is_none_or(|&b| !b.is_ascii_alphanumeric() && b != b'_')
+	starts_with_ignoring_case(s, keyword)
+		&& s.as_bytes()
+			.get(keyword.len())
+			.is_none_or(|&b| !b.is_ascii_alphanumeric() && b != b'_')
 }
 
-fn starts_with_ignoring_case(s: &str, keyword: &str) -> bool {
-	let (bytes, kw) = (s.as_bytes(), keyword.as_bytes());
-	bytes.len() >= kw.len() && bytes[..kw.len()].eq_ignore_ascii_case(kw)
+fn starts_with_comment(s: &str) -> bool {
+	s.starts_with("//") || s.starts_with("/*")
+}
+
+fn line_end(bytes: &[u8], from: usize) -> usize {
+	bytes[from..]
+		.iter()
+		.position(|&b| b == b'\n')
+		.map_or(bytes.len(), |i| from + i)
+}
+
+fn block_comment_close(bytes: &[u8], from: usize) -> Option<usize> {
+	bytes[from..]
+		.windows(2)
+		.position(|pair| pair == b"*/")
+		.map(|i| from + i)
 }
 
 struct Parser<'a> {
-	input: &'a [u8],
 	source: &'a str,
-	tokens: Option<crate::tokens::TokenIndex>,
 	pos: usize,
+	tokens: TokenIndex,
 	pending_leading: Vec<Comment>,
 	unterminated_block_at: Option<usize>,
 	values: ValueNames,
 	principals: PrincipalNames,
 	unnamed_counter: usize,
 	last_ident: Span,
-	value_end: usize,
+	primitive_end: usize,
 	depth: usize,
-	anonymous_ok: bool,
 	queries_optional: bool,
 }
 
-const MAX_NESTING: usize = 64;
-
 impl<'a> Parser<'a> {
-	fn new(input: &'a str) -> Self {
+	fn new(source: &'a str, queries_optional: bool) -> Self {
 		Parser {
-			input: input.as_bytes(),
-			source: input,
-			tokens: None,
+			source,
 			pos: 0,
-			last_ident: Span::default(),
-			value_end: 0,
-			depth: 0,
-			anonymous_ok: false,
-			queries_optional: false,
+			tokens: TokenIndex::default(),
 			pending_leading: Vec::new(),
 			unterminated_block_at: None,
 			values: ValueNames::new(),
 			principals: PrincipalNames::new(),
 			unnamed_counter: 0,
+			last_ident: Span::default(),
+			primitive_end: 0,
+			depth: 0,
+			queries_optional,
 		}
 	}
 
-	fn principal_id(&mut self, name: &str) -> VResult<(PrincipalId, Arc<str>)> {
-		let id = self.principals.intern(name)?;
-		Ok((id, self.principals.name_of(id)))
+	fn bytes(&self) -> &'a [u8] {
+		self.source.as_bytes()
 	}
 
-	fn record_principal_name(&mut self) -> VResult<()> {
-		let span = self.last_ident;
-		let name = std::str::from_utf8(&self.input[span.start..span.end]).unwrap_or("");
-		let lower = name.to_lowercase();
-		if lower != "attacker" && reserved_for_principal(&lower) {
-			return Err(VerifpalError::parse(
-				format!("`{}` is a reserved word and cannot name a principal", name).into(),
-			)
-			.at(span)
-			.narrow(name.to_string())
-			.note("the language keywords are reserved so that a model cannot shadow them")
-			.help("pick a different name"));
-		}
-		self.record(span, crate::tokens::TokenKind::PrincipalName);
-		Ok(())
-	}
-
-	fn remaining(&self) -> &str {
-		std::str::from_utf8(&self.input[self.pos..]).unwrap_or("")
+	fn remaining(&self) -> &'a str {
+		self.source.get(self.pos..).unwrap_or("")
 	}
 
 	fn at_end(&self) -> bool {
-		self.pos >= self.input.len()
+		self.pos >= self.source.len()
 	}
 
 	fn peek(&self) -> Option<u8> {
-		if self.pos < self.input.len() {
-			Some(self.input[self.pos])
-		} else {
-			None
-		}
+		self.bytes().get(self.pos).copied()
 	}
 
-	fn advance(&mut self) -> Option<u8> {
-		if self.pos < self.input.len() {
-			let c = self.input[self.pos];
+	fn skip_while(&mut self, accept: impl Fn(u8) -> bool) {
+		while self.peek().is_some_and(&accept) {
 			self.pos += 1;
-			Some(c)
-		} else {
-			None
 		}
 	}
 
 	fn skip_whitespace(&mut self) {
-		while self.pos < self.input.len() {
-			let c = self.input[self.pos];
-			if c == b' ' || c == b'\t' || c == b'\n' || c == b'\r' {
-				self.pos += 1;
-			} else {
-				break;
-			}
-		}
+		self.skip_while(|c| matches!(c, b' ' | b'\t' | b'\n' | b'\r'));
 	}
 
-	fn consume_trivia(&mut self) {
-		loop {
-			self.skip_whitespace();
-			let two = if self.pos + 1 < self.input.len() {
-				(self.input[self.pos], self.input[self.pos + 1])
-			} else {
-				(0, 0)
-			};
-			if two == (b'/', b'/') {
-				let at = self.pos;
-				let start = self.pos + 2;
-				while self.pos < self.input.len() && self.input[self.pos] != b'\n' {
-					self.pos += 1;
-				}
-				let end = if self.pos > at && self.input[self.pos - 1] == b'\r' {
-					self.pos - 1
-				} else {
-					self.pos
-				};
-				self.record(Span::new(at, end), crate::tokens::TokenKind::Comment);
-				let text = std::str::from_utf8(&self.input[start..self.pos])
-					.unwrap_or("")
-					.trim_end_matches('\r')
-					.to_string();
-				self.pending_leading.push(Comment {
-					text,
-					style: CommentStyle::Line,
-				});
-			} else if two == (b'/', b'*') {
-				let open = self.pos;
-				self.pos += 2;
-				let start = self.pos;
-				loop {
-					if self.pos + 1 >= self.input.len() {
-						self.pos = self.input.len();
-						self.unterminated_block_at = Some(open);
-						return;
-					}
-					if self.input[self.pos] == b'*' && self.input[self.pos + 1] == b'/' {
-						let end = self.pos;
-						self.pos += 2;
-						self.record(Span::new(open, self.pos), crate::tokens::TokenKind::Comment);
-						let text = std::str::from_utf8(&self.input[start..end])
-							.unwrap_or("")
-							.replace("\r\n", "\n");
-						self.pending_leading.push(Comment {
-							text,
-							style: CommentStyle::Block,
-						});
-						break;
-					}
-					self.pos += 1;
-				}
-			} else {
-				break;
-			}
-		}
+	fn skip_inline_whitespace(&mut self) {
+		self.skip_while(|c| matches!(c, b' ' | b'\t'));
 	}
 
-	fn take_leading(&mut self) -> Vec<Comment> {
-		std::mem::take(&mut self.pending_leading)
+	fn digits(&mut self) -> Span {
+		let start = self.pos;
+		self.skip_while(|c| c.is_ascii_digit());
+		Span::new(start, self.pos)
+	}
+
+	fn text(&self, span: Span) -> &'a str {
+		&self.source[span.start..span.end]
 	}
 
 	fn trimmed_pos(&self) -> usize {
-		let mut p = self.pos;
-		while p > 0 && matches!(self.input[p - 1], b' ' | b'\t') {
-			p -= 1;
-		}
-		p
+		self.source[..self.pos].trim_end_matches([' ', '\t']).len()
 	}
 
-	fn snapshot(&self) -> (usize, usize, usize) {
-		let tokens = self.tokens.as_ref().map_or(0, |t| t.len());
-		(self.pos, self.pending_leading.len(), tokens)
+	fn record(&mut self, span: Span, kind: TokenKind) {
+		self.tokens.push(span, kind, self.source);
 	}
 
-	fn restore(&mut self, (pos, leading_len, tokens): (usize, usize, usize)) {
-		self.pos = pos;
-		self.pending_leading.truncate(leading_len);
-		if let Some(index) = self.tokens.as_mut() {
-			index.truncate(tokens);
-		}
-	}
-
-	fn record(&mut self, span: Span, kind: crate::tokens::TokenKind) {
-		if let Some(index) = self.tokens.as_mut() {
-			index.push(span, kind, self.source);
-		}
-	}
-
-	fn record_from(&mut self, start: usize, kind: crate::tokens::TokenKind) {
+	fn record_from(&mut self, start: usize, kind: TokenKind) {
 		self.record(Span::new(start, self.pos), kind);
 	}
 
-	fn check_unterminated_block(&self) -> VResult<()> {
-		if let Some(pos) = self.unterminated_block_at {
-			return Err(VerifpalError::parse("unterminated block comment".into())
-				.at(Span::at(pos))
-				.labelled("this `/*` is never closed")
-				.help("add the missing `*/`"));
+	fn eat(&mut self, text: &str) -> bool {
+		let found = starts_with_ignoring_case(self.remaining(), text);
+		if found {
+			self.pos += text.len();
 		}
+		found
+	}
+
+	fn eat_token(&mut self, text: &str, kind: TokenKind) -> bool {
+		let start = self.pos;
+		let found = self.eat(text);
+		if found {
+			self.record_from(start, kind);
+		}
+		found
+	}
+
+	fn expect_where(&mut self, text: &str, context: &str) -> VResult<()> {
+		if self.eat(text) {
+			return Ok(());
+		}
+		Err(self.unexpected(if context.is_empty() {
+			format!("expected `{}`", text)
+		} else {
+			format!("expected `{}` {}", text, context)
+		}))
+	}
+
+	fn expect(&mut self, text: &str) -> VResult<()> {
+		self.expect_where(text, "")
+	}
+
+	fn expect_token(&mut self, text: &str, kind: TokenKind) -> VResult<()> {
+		let start = self.pos;
+		self.expect(text)?;
+		self.record_from(start, kind);
 		Ok(())
 	}
 
-	fn try_take_trailing(&mut self) -> Option<Comment> {
-		let saved = self.snapshot();
-		self.skip_inline_whitespace();
-		if self.pos + 1 >= self.input.len() {
-			self.restore(saved);
-			return None;
-		}
-		let two = (self.input[self.pos], self.input[self.pos + 1]);
-		if two == (b'/', b'/') {
-			let at = self.pos;
-			let start = self.pos + 2;
-			self.pos += 2;
-			while self.pos < self.input.len() && self.input[self.pos] != b'\n' {
-				self.pos += 1;
-			}
-			let end = if self.pos > start && self.input[self.pos - 1] == b'\r' {
-				self.pos - 1
-			} else {
-				self.pos
-			};
-			self.record(Span::new(at, end), crate::tokens::TokenKind::Comment);
-			let text = std::str::from_utf8(&self.input[start..end])
-				.unwrap_or("")
-				.to_string();
-			Some(Comment {
-				text,
-				style: CommentStyle::Line,
-			})
-		} else if two == (b'/', b'*') {
-			let at = self.pos;
-			let probe_start = self.pos + 2;
-			let mut probe = probe_start;
-			loop {
-				if probe + 1 >= self.input.len() {
-					self.restore(saved);
-					return None;
-				}
-				let c = self.input[probe];
-				if c == b'\n' {
-					self.restore(saved);
-					return None;
-				}
-				if c == b'*' && self.input[probe + 1] == b'/' {
-					let text = std::str::from_utf8(&self.input[probe_start..probe])
-						.unwrap_or("")
-						.to_string();
-					self.pos = probe + 2;
-					self.record_from(at, crate::tokens::TokenKind::Comment);
-					return Some(Comment {
-						text,
-						style: CommentStyle::Block,
-					});
-				}
-				probe += 1;
-			}
-		} else {
-			self.restore(saved);
-			None
-		}
+	fn word_here(&self) -> &'a str {
+		let rest = self.remaining();
+		let end = rest
+			.find(|c: char| !c.is_alphanumeric() && c != '_')
+			.unwrap_or(rest.len());
+		&rest[..end]
 	}
 
-	fn expect(&mut self, s: &str) -> VResult<()> {
-		self.expect_where(s, "")
-	}
-
-	fn expect_where(&mut self, s: &str, context: &str) -> VResult<()> {
-		let bytes = s.as_bytes();
-		if self.pos + bytes.len() <= self.input.len()
-			&& &self.input[self.pos..self.pos + bytes.len()] == bytes
-		{
-			self.pos += bytes.len();
-			return Ok(());
-		}
-		let message = if context.is_empty() {
-			format!("expected `{}`", s)
-		} else {
-			format!("expected `{}` {}", s, context)
+	fn here(&self) -> Span {
+		let width = match self.word_here() {
+			"" => self.remaining().chars().next().map_or(0, char::len_utf8),
+			word => word.len(),
 		};
-		Err(VerifpalError::parse(message.into())
+		Span::new(self.pos, self.pos + width)
+	}
+
+	fn found_here(&self) -> String {
+		match (self.word_here(), self.remaining().chars().next()) {
+			(_, None) => "end of file".to_string(),
+			("", Some('\n')) => "end of line".to_string(),
+			("", Some(c)) => format!("found `{}`", c),
+			(word, _) => format!("found `{}`", word),
+		}
+	}
+
+	fn unexpected(&self, message: impl Into<Cow<'static, str>>) -> VerifpalError {
+		VerifpalError::parse(message.into())
 			.at(self.here())
-			.labelled(self.found_here()))
+			.labelled(self.found_here())
 	}
 
 	fn unclosed_hint(&self, error: VerifpalError, opened_at: usize) -> VerifpalError {
-		if error.has_labels() || self.delimiter_is_closed(opened_at) {
+		let (opener, closer) = match self.bytes().get(opened_at) {
+			Some(b'[') => (b'[', b']'),
+			Some(b'(') => (b'(', b')'),
+			_ => return error,
+		};
+		if error.has_labels() || self.is_closed(opened_at, opener, closer) {
 			return error;
 		}
-		let opener = self.input.get(opened_at).copied().unwrap_or(b'(');
-		let closer = if opener == b'[' { b']' } else { b')' };
 		error
 			.label(
 				Span::at(opened_at),
@@ -392,34 +281,22 @@ impl<'a> Parser<'a> {
 			.help(format!("add the missing `{}`", closer as char))
 	}
 
-	fn delimiter_is_closed(&self, opened_at: usize) -> bool {
-		let opener = match self.input.get(opened_at).copied() {
-			Some(b) if b == b'[' || b == b'(' => b,
-			_ => return true,
-		};
-		let closer = if opener == b'[' { b']' } else { b')' };
+	fn is_closed(&self, opened_at: usize, opener: u8, closer: u8) -> bool {
+		let bytes = self.bytes();
 		let mut depth = 0usize;
 		let mut at = opened_at;
-		while at < self.input.len() {
-			match self.input[at] {
-				b'/' if self.input.get(at + 1) == Some(&b'/') => {
-					while at < self.input.len() && self.input[at] != b'\n' {
-						at += 1;
-					}
+		while at < bytes.len() {
+			match &bytes[at..] {
+				[b'/', b'/', ..] => {
+					at = line_end(bytes, at);
 					continue;
 				}
-				b'/' if self.input.get(at + 1) == Some(&b'*') => {
-					at += 2;
-					while at + 1 < self.input.len()
-						&& !(self.input[at] == b'*' && self.input[at + 1] == b'/')
-					{
-						at += 1;
-					}
-					at += 2;
+				[b'/', b'*', ..] => {
+					at = block_comment_close(bytes, at + 2).map_or(bytes.len(), |close| close + 2);
 					continue;
 				}
-				b if b == opener => depth += 1,
-				b if b == closer => {
+				[b, ..] if *b == opener => depth += 1,
+				[b, ..] if *b == closer => {
 					depth -= 1;
 					if depth == 0 {
 						return true;
@@ -432,163 +309,193 @@ impl<'a> Parser<'a> {
 		false
 	}
 
-	fn here(&self) -> Span {
-		let rest = self.remaining();
-		let Some(first) = rest.chars().next() else {
-			return Span::at(self.pos);
-		};
-		let word: String = rest
-			.chars()
-			.take_while(|c| c.is_alphanumeric() || *c == '_')
-			.collect();
-		let width = if word.is_empty() {
-			first.len_utf8()
+	fn consume_trivia(&mut self) {
+		loop {
+			self.skip_whitespace();
+			let comment = if self.remaining().starts_with("//") {
+				self.line_comment()
+			} else if self.remaining().starts_with("/*") {
+				let Some(comment) = self.block_comment(false) else {
+					self.unterminated_block_at = Some(self.pos);
+					self.pos = self.source.len();
+					return;
+				};
+				comment
+			} else {
+				return;
+			};
+			self.pending_leading.push(comment);
+		}
+	}
+
+	fn try_take_trailing(&mut self) -> Option<Comment> {
+		let before = self.pos;
+		self.skip_inline_whitespace();
+		let comment = if self.remaining().starts_with("//") {
+			Some(self.line_comment())
+		} else if self.remaining().starts_with("/*") {
+			self.block_comment(true)
 		} else {
-			word.len()
+			None
 		};
-		Span::new(self.pos, self.pos + width)
+		if comment.is_none() {
+			self.pos = before;
+		}
+		comment
 	}
 
-	fn found_here(&self) -> String {
-		let rest = self.remaining();
-		let Some(first) = rest.chars().next() else {
-			return "end of file".to_string();
-		};
-		let word: String = rest
-			.chars()
-			.take_while(|c| c.is_alphanumeric() || *c == '_')
-			.collect();
-		if !word.is_empty() {
-			return format!("found `{}`", word);
-		}
-		match first {
-			'\n' => "end of line".to_string(),
-			c => format!("found `{}`", c),
+	fn line_comment(&mut self) -> Comment {
+		let open = self.pos;
+		self.pos = line_end(self.bytes(), open);
+		let end = open + 2 + self.source[open + 2..self.pos].trim_end_matches('\r').len();
+		self.record(Span::new(open, end), TokenKind::Comment);
+		Comment {
+			text: self.source[open + 2..end].to_string(),
+			style: CommentStyle::Line,
 		}
 	}
 
-	fn matches_keyword(&self, keyword: &str) -> bool {
-		let kw = keyword.as_bytes();
-		self.pos + kw.len() <= self.input.len()
-			&& self.input[self.pos..self.pos + kw.len()].eq_ignore_ascii_case(kw)
+	fn block_comment(&mut self, within_line: bool) -> Option<Comment> {
+		let open = self.pos;
+		let close = block_comment_close(self.bytes(), open + 2)?;
+		let text = &self.remaining()[2..close - open];
+		if within_line && text.contains('\n') {
+			return None;
+		}
+		self.pos = close + 2;
+		self.record_from(open, TokenKind::Comment);
+		Some(Comment {
+			text: text.replace("\r\n", "\n"),
+			style: CommentStyle::Block,
+		})
 	}
 
-	fn expect_keyword(&mut self, keyword: &str) -> VResult<()> {
-		if self.matches_keyword(keyword) {
-			self.pos += keyword.len();
-			return Ok(());
-		}
-		Err(
-			VerifpalError::parse(format!("expected `{}`", keyword).into())
-				.at(self.here())
-				.labelled(self.found_here()),
-		)
+	fn take_leading(&mut self) -> Vec<Comment> {
+		std::mem::take(&mut self.pending_leading)
 	}
 
-	fn try_expect_keyword(&mut self, keyword: &str) -> bool {
-		if self.matches_keyword(keyword) {
-			self.pos += keyword.len();
-			return true;
+	fn line_comments(&mut self, mut leading: Vec<Comment>) -> LineComments {
+		leading.extend(self.take_leading());
+		LineComments {
+			leading,
+			trailing: self.try_take_trailing(),
 		}
-		false
 	}
 
-	fn try_expect(&mut self, s: &str) -> bool {
-		let bytes = s.as_bytes();
-		if self.pos + bytes.len() <= self.input.len()
-			&& &self.input[self.pos..self.pos + bytes.len()] == bytes
-		{
-			self.pos += bytes.len();
-			true
-		} else {
-			false
+	fn check_unterminated_block(&self) -> VResult<()> {
+		if let Some(pos) = self.unterminated_block_at {
+			return Err(VerifpalError::parse("unterminated block comment".into())
+				.at(Span::at(pos))
+				.labelled("this `/*` is never closed")
+				.help("add the missing `*/`"));
 		}
+		Ok(())
 	}
 
 	fn parse_identifier(&mut self) -> VResult<String> {
 		let start = self.pos;
-		self.last_ident = Span::at(start);
-		while self.pos < self.input.len() {
-			let c = self.input[self.pos];
-			if c.is_ascii_alphanumeric() || c == b'_' {
-				self.pos += 1;
-			} else {
-				break;
-			}
-		}
+		self.skip_while(|c| c.is_ascii_alphanumeric() || c == b'_');
+		self.last_ident = Span::new(start, self.pos);
 		if self.pos == start {
-			return Err(VerifpalError::parse("expected a name".into())
-				.at(self.here())
-				.labelled(self.found_here())
+			return Err(self
+				.unexpected("expected a name")
 				.note("a name is made of letters, digits and underscores"));
 		}
-		self.last_ident = Span::new(start, self.pos);
-		let s = std::str::from_utf8(&self.input[start..self.pos])
-			.map_err(|_| VerifpalError::parse("invalid UTF-8 in identifier".into()))?;
-		Ok(s.to_lowercase())
+		Ok(self.text(self.last_ident).to_lowercase())
+	}
+
+	fn parse_principal_name(&mut self) -> VResult<String> {
+		let name = self.parse_identifier()?;
+		let span = self.last_ident;
+		if name != "attacker" && is_reserved_word(&name) {
+			let written = self.text(span);
+			return Err(VerifpalError::parse(
+				format!(
+					"`{}` is a reserved word and cannot name a principal",
+					written
+				)
+				.into(),
+			)
+			.at(span)
+			.narrow(written.to_string())
+			.note("the language keywords are reserved so that a model cannot shadow them")
+			.help("pick a different name"));
+		}
+		self.record(span, TokenKind::PrincipalName);
+		Ok(title_case(&name))
+	}
+
+	fn principal_id(&mut self, name: &str) -> VResult<(PrincipalId, Arc<str>)> {
+		let id = self.principals.intern(name)?;
+		Ok((id, self.principals.name_of(id)))
+	}
+
+	fn message(
+		&mut self,
+		span: Span,
+		sender: &str,
+		recipient: &str,
+		constants: Vec<Constant>,
+	) -> VResult<Message> {
+		let (sender, sender_name) = self.principal_id(sender)?;
+		let (recipient, recipient_name) = self.principal_id(recipient)?;
+		Ok(Message {
+			span,
+			sender,
+			sender_name,
+			recipient,
+			recipient_name,
+			constants,
+			comments: LineComments::default(),
+		})
+	}
+
+	fn parse_route(
+		&mut self,
+		gap: fn(&mut Self),
+		usage: &'static str,
+	) -> VResult<(String, String)> {
+		let sender = self.parse_principal_name()?;
+		gap(self);
+		if !(self.eat_token("->", TokenKind::Arrow) || self.eat_token("\u{2192}", TokenKind::Arrow))
+		{
+			return Err(self
+				.unexpected("expected `->` after the sender's name")
+				.note(usage));
+		}
+		gap(self);
+		let recipient = self.parse_principal_name()?;
+		gap(self);
+		Ok((sender, recipient))
+	}
+
+	fn starts_next_message(&self) -> bool {
+		let rest = self.remaining();
+		let after_name = rest.trim_start_matches(|c: char| c.is_ascii_alphanumeric() || c == '_');
+		let after_gap = after_name.trim_start_matches([' ', '\t', '\n', '\r']);
+		after_name.len() < rest.len()
+			&& (after_gap.starts_with("->") || after_gap.starts_with('\u{2192}'))
 	}
 
 	fn parse_model(&mut self) -> VResult<Model> {
-		if self.input.starts_with(&[0xEF, 0xBB, 0xBF]) {
-			self.pos = 3;
+		if self.source.starts_with('\u{FEFF}') {
+			self.pos = '\u{FEFF}'.len_utf8();
 		}
 		self.consume_trivia();
 		self.check_unterminated_block()?;
-		let mut pre_attacker_comments = self.take_leading();
-
-		let attacker_kw = self.pos;
-		if !self.try_expect_keyword("attacker") {
-			return Err(VerifpalError::parse(
-				"model does not open with an `attacker` block".into(),
-			)
-			.at(self.here())
-			.labelled(self.found_here())
-			.note("every model states which attacker it is analyzed against, before anything else")
-			.help("add `attacker[active]` or `attacker[passive]` as the first line"));
-		}
-		self.record_from(attacker_kw, crate::tokens::TokenKind::Keyword);
-		self.consume_trivia();
-		self.expect("[")?;
-		self.consume_trivia();
-		let attacker_str = self.parse_identifier()?;
-		self.record(self.last_ident, crate::tokens::TokenKind::AttackerMode);
-		let attacker_type = match attacker_str.as_str() {
-			"active" => AttackerKind::Active,
-			"passive" => AttackerKind::Passive,
-			_ => {
-				return Err(VerifpalError::parse(
-					format!("unknown attacker type `{}`", attacker_str).into(),
-				)
-				.at(self.last_ident)
-				.narrow(attacker_str.clone())
-				.note("an attacker is either `active` or `passive`")
-				.suggest(did_you_mean(&attacker_str, ["active", "passive"])));
-			}
-		};
-		self.consume_trivia();
-		self.expect("]")?;
-		pre_attacker_comments.extend(self.take_leading());
-		let attacker_trailing = self.try_take_trailing();
-		self.consume_trivia();
-
+		let (attacker, attacker_comments) = self.parse_attacker()?;
 		let mut blocks = Vec::new();
-		while !self.at_end() {
+		loop {
 			self.consume_trivia();
-			if self.at_end() {
-				break;
-			}
-
-			if starts_with_keyword(self.remaining(), "queries")
-				|| starts_with_keyword(self.remaining(), "scenarios")
+			let rest = self.remaining();
+			if rest.is_empty()
+				|| starts_with_keyword(rest, "queries")
+				|| starts_with_keyword(rest, "scenarios")
 			{
 				break;
 			}
-
-			let block = self.parse_block()?;
-			blocks.push(block);
-			self.consume_trivia();
+			blocks.push(self.parse_block()?);
 		}
-
 		self.check_unterminated_block()?;
 		if blocks.is_empty() {
 			return Err(VerifpalError::parse(
@@ -599,15 +506,7 @@ impl<'a> Parser<'a> {
 			.help("add a principal block, e.g. `principal Alice[ knows private m ]`"));
 		}
 
-		self.consume_trivia();
-		let (
-			scenarios,
-			scenarios_leading_comments,
-			scenarios_header_trailing,
-			scenarios_tail_comments,
-			scenarios_closing_trailing,
-		) = self.parse_scenarios()?;
-
+		let (scenarios_comments, scenarios) = self.parse_scenarios()?;
 		self.consume_trivia();
 		if starts_with_keyword(self.remaining(), "scenarios") {
 			return Err(VerifpalError::parse(
@@ -622,35 +521,7 @@ impl<'a> Parser<'a> {
 			)
 			.help("move these entries into the block above"));
 		}
-		let queries_leading_comments = self.take_leading();
-		let queries_kw = self.pos;
-		let absent = self.queries_optional && self.at_end();
-		if !absent && !self.try_expect_keyword("queries") {
-			if !scenarios.is_empty() {
-				return Err(VerifpalError::parse(
-					"the `scenarios` block must come directly before `queries`".into(),
-				)
-				.at(self.here())
-				.labelled(self.found_here())
-				.note(
-					"a scenario names constants the model has already declared, and \
-					 `queries` closes the model, so the only place the block can go is \
-					 between the two",
-				)
-				.help("move this above the `scenarios` block"));
-			}
-			return Err(VerifpalError::parse("model has no `queries` block".into())
-				.at(self.here())
-				.labelled(self.found_here())
-				.note("a model must ask at least one question, or there is nothing to verify")
-				.help("add `queries[ confidentiality? m ]` at the end of the model"));
-		}
-		let (queries, queries_header_trailing, queries_tail_comments, queries_closing_trailing) =
-			if absent {
-				(Vec::new(), None, Vec::new(), None)
-			} else {
-				self.parse_queries(queries_kw)?
-			};
+		let (queries_comments, queries) = self.parse_queries(!scenarios.is_empty())?;
 		self.consume_trivia();
 		let tail_comments = self.take_leading();
 		self.check_unterminated_block()?;
@@ -660,9 +531,8 @@ impl<'a> Parser<'a> {
 			} else {
 				"content appears after the `queries` block"
 			};
-			return Err(VerifpalError::parse(trailing.into())
-				.at(self.here())
-				.labelled(self.found_here())
+			return Err(self
+				.unexpected(trailing)
 				.note(
 					"`queries` closes the model, so anything after it would never be \
 				 analyzed; this is rejected rather than ignored, because a principal \
@@ -673,161 +543,166 @@ impl<'a> Parser<'a> {
 		Ok(Model {
 			file_name: String::new(),
 			source: Source::default(),
-			attacker: attacker_type,
+			attacker,
+			attacker_comments,
 			blocks,
 			scenarios,
-			scenarios_leading_comments,
-			scenarios_header_trailing,
-			scenarios_tail_comments,
-			scenarios_closing_trailing,
+			scenarios_comments,
 			queries,
-			pre_attacker_comments,
-			attacker_trailing,
-			queries_leading_comments,
-			queries_header_trailing,
-			queries_tail_comments,
-			queries_closing_trailing,
+			queries_comments,
 			tail_comments,
 		})
 	}
 
-	#[allow(clippy::type_complexity)]
-	fn parse_queries(
-		&mut self,
-		queries_kw: usize,
-	) -> VResult<(Vec<Query>, Option<Comment>, Vec<Comment>, Option<Comment>)> {
-		self.record_from(queries_kw, crate::tokens::TokenKind::Keyword);
-		self.skip_whitespace();
-		let queries_bracket = self.pos;
-		self.expect("[")?;
-		let queries_header_trailing = self.try_take_trailing();
+	fn parse_attacker(&mut self) -> VResult<(AttackerKind, LineComments)> {
+		let leading = self.take_leading();
+		if !self.eat_token("attacker", TokenKind::Keyword) {
+			return Err(self
+				.unexpected("model does not open with an `attacker` block")
+				.note(
+					"every model states which attacker it is analyzed against, before anything else",
+				)
+				.help("add `attacker[active]` or `attacker[passive]` as the first line"));
+		}
 		self.consume_trivia();
-		let mut queries = Vec::new();
+		self.expect("[")?;
+		self.consume_trivia();
+		let mode = self.parse_identifier()?;
+		self.record(self.last_ident, TokenKind::AttackerMode);
+		let attacker = match mode.as_str() {
+			"active" => AttackerKind::Active,
+			"passive" => AttackerKind::Passive,
+			_ => {
+				return Err(VerifpalError::parse(
+					format!("unknown attacker type `{}`", mode).into(),
+				)
+				.at(self.last_ident)
+				.narrow(mode.clone())
+				.note("an attacker is either `active` or `passive`")
+				.suggest(did_you_mean(&mode, ["active", "passive"])));
+			}
+		};
+		self.consume_trivia();
+		self.expect("]")?;
+		Ok((attacker, self.line_comments(leading)))
+	}
+
+	fn parse_queries(&mut self, after_scenarios: bool) -> VResult<(BracketComments, Vec<Query>)> {
+		let leading = self.take_leading();
+		if self.queries_optional && self.at_end() {
+			let comments = BracketComments {
+				leading,
+				..BracketComments::default()
+			};
+			return Ok((comments, Vec::new()));
+		}
+		let keyword = Span::new(self.pos, self.pos + "queries".len());
+		if !self.eat_token("queries", TokenKind::Keyword) {
+			if after_scenarios {
+				return Err(self
+					.unexpected("the `scenarios` block must come directly before `queries`")
+					.note(
+						"a scenario names constants the model has already declared, and \
+						 `queries` closes the model, so the only place the block can go is \
+						 between the two",
+					)
+					.help("move this above the `scenarios` block"));
+			}
+			return Err(self
+				.unexpected("model has no `queries` block")
+				.note("a model must ask at least one question, or there is nothing to verify")
+				.help("add `queries[ confidentiality? m ]` at the end of the model"));
+		}
+		self.skip_whitespace();
+		let bracket = self.pos;
+		self.expect("[")?;
+		let opening = self.try_take_trailing();
+		let mut items = Vec::new();
 		loop {
 			self.consume_trivia();
 			if self.peek() == Some(b']') {
 				break;
 			}
 			if self.at_end() {
-				if queries.is_empty() && !self.queries_optional {
+				if items.is_empty() && !self.queries_optional {
 					break;
 				}
 				return Err(self.unclosed_hint(
-					VerifpalError::parse("the `queries` block is never closed".into())
-						.at(self.here())
-						.labelled(self.found_here()),
-					queries_bracket,
+					self.unexpected("the `queries` block is never closed"),
+					bracket,
 				));
 			}
-			let mut leading = self.take_leading();
-			let mut query = self.parse_query()?;
-			leading.extend(self.take_leading());
-			query.leading_comments = leading;
-			query.trailing_comment = self.try_take_trailing();
-			queries.push(query);
-			self.consume_trivia();
+			items.push(self.parse_query()?);
 		}
-		if queries.is_empty() && !self.queries_optional {
+		if items.is_empty() && !self.queries_optional {
 			return Err(VerifpalError::parse("`queries` block is empty".into())
-				.at(Span::new(queries_kw, queries_kw + "queries".len()))
+				.at(keyword)
 				.labelled("no queries here")
 				.note("a model must ask at least one question, or there is nothing to verify")
 				.help("add a query, for example `confidentiality? m`"));
 		}
-		let queries_tail_comments = self.take_leading();
-		let queries_closing_trailing = if self.peek() == Some(b']') {
-			self.advance();
-			self.try_take_trailing()
-		} else {
-			None
+		let tail = self.take_leading();
+		self.expect("]")?;
+		let comments = BracketComments {
+			leading,
+			opening,
+			tail,
+			closing: self.try_take_trailing(),
 		};
-		Ok((
-			queries,
-			queries_header_trailing,
-			queries_tail_comments,
-			queries_closing_trailing,
-		))
+		Ok((comments, items))
 	}
 
-	#[allow(clippy::type_complexity)]
-	fn parse_scenarios(
-		&mut self,
-	) -> VResult<(
-		Vec<Scenario>,
-		Vec<Comment>,
-		Option<Comment>,
-		Vec<Comment>,
-		Option<Comment>,
-	)> {
+	fn parse_scenarios(&mut self) -> VResult<(BracketComments, Vec<Scenario>)> {
 		if !starts_with_keyword(self.remaining(), "scenarios") {
-			return Ok((Vec::new(), Vec::new(), None, Vec::new(), None));
+			return Ok((BracketComments::default(), Vec::new()));
 		}
 		let leading = self.take_leading();
-		let keyword = self.pos;
-		self.expect_keyword("scenarios")?;
-		self.record_from(keyword, crate::tokens::TokenKind::Keyword);
+		self.expect_token("scenarios", TokenKind::Keyword)?;
 		self.skip_whitespace();
-		let open_bracket = self.pos;
+		let bracket = self.pos;
 		self.expect_where("[", "after `scenarios`")?;
-		let header_trailing = self.try_take_trailing();
-		self.consume_trivia();
-		let mut scenarios = Vec::new();
+		let opening = self.try_take_trailing();
+		let mut items = Vec::new();
 		loop {
 			self.consume_trivia();
 			if self.peek() == Some(b']') {
 				break;
 			}
-			let rem = self.remaining();
-			if self.at_end()
-				|| starts_with_keyword(rem, "queries")
-				|| starts_with_keyword(rem, "principal")
-				|| starts_with_keyword(rem, "phase")
+			let rest = self.remaining();
+			if rest.is_empty()
+				|| ["queries", "principal", "phase"]
+					.iter()
+					.any(|keyword| starts_with_keyword(rest, keyword))
 			{
 				return Err(self.unclosed_hint(
-					VerifpalError::parse("the `scenarios` block is never closed".into())
-						.at(self.here())
-						.labelled(self.found_here()),
-					open_bracket,
+					self.unexpected("the `scenarios` block is never closed"),
+					bracket,
 				));
 			}
-			let mut entry_leading = self.take_leading();
-			let mut scenario = self.parse_scenario()?;
-			entry_leading.extend(self.take_leading());
-			scenario.leading_comments = entry_leading;
-			scenario.trailing_comment = self.try_take_trailing();
-			scenarios.push(scenario);
-			self.consume_trivia();
+			items.push(self.parse_scenario()?);
 		}
-		let tail_comments = self.take_leading();
-		let closing_trailing = if self.peek() == Some(b']') {
-			self.advance();
-			self.try_take_trailing()
-		} else {
-			None
-		};
-		Ok((
-			scenarios,
+		let tail = self.take_leading();
+		self.expect("]")?;
+		let comments = BracketComments {
 			leading,
-			header_trailing,
-			tail_comments,
-			closing_trailing,
-		))
+			opening,
+			tail,
+			closing: self.try_take_trailing(),
+		};
+		Ok((comments, items))
 	}
 
 	fn parse_scenario(&mut self) -> VResult<Scenario> {
+		let leading = self.take_leading();
 		let start = self.pos;
-		let name = self.parse_identifier()?;
-		self.record_principal_name()?;
-		let name = title_case(&name);
+		let name = self.parse_principal_name()?;
 		let (principal, principal_name) = self.principal_id(&name)?;
 		self.skip_whitespace();
 		self.expect_where("[", &format!("after `{}` in the `scenarios` block", name))?;
-		self.consume_trivia();
 		let mut bindings = Vec::new();
 		loop {
 			self.consume_trivia();
-			if self.peek() == Some(b']') {
-				self.advance();
+			if self.eat("]") {
 				break;
 			}
 			if self.at_end() {
@@ -843,9 +718,7 @@ impl<'a> Parser<'a> {
 			let value = self.parse_constant()?;
 			bindings.push((target, value));
 			self.consume_trivia();
-			if self.peek() == Some(b',') {
-				self.advance();
-			}
+			self.eat(",");
 		}
 		if bindings.is_empty() {
 			return Err(VerifpalError::parse(
@@ -860,52 +733,33 @@ impl<'a> Parser<'a> {
 			principal,
 			principal_name,
 			bindings,
-			leading_comments: Vec::new(),
-			trailing_comment: None,
+			comments: self.line_comments(leading),
 		})
 	}
 
 	fn parse_block(&mut self) -> VResult<Block> {
-		self.consume_trivia();
-		let leading = self.take_leading();
-
-		let mut block = if starts_with_keyword(self.remaining(), "phase") {
-			self.parse_phase()?
-		} else if starts_with_keyword(self.remaining(), "principal") {
-			self.parse_principal()?
+		let rest = self.remaining();
+		if starts_with_keyword(rest, "phase") {
+			self.parse_phase().map(Block::Phase)
+		} else if starts_with_keyword(rest, "principal") {
+			self.parse_principal().map(Block::Principal)
 		} else {
-			self.parse_message_block()?
-		};
-		// A block may already hold comments found inside its own brackets; the
-		// ones that preceded it come first.
-		let prepend = |own: &mut Vec<Comment>| {
-			let mut all = leading;
-			all.append(own);
-			*own = all;
-		};
-		match &mut block {
-			Block::Principal(p) => prepend(&mut p.leading_comments),
-			Block::Message(m) => prepend(&mut m.leading_comments),
-			Block::Phase(p) => prepend(&mut p.leading_comments),
+			self.parse_message().map(Block::Message)
 		}
-		Ok(block)
 	}
 
-	fn parse_principal(&mut self) -> VResult<Block> {
+	fn parse_principal(&mut self) -> VResult<Principal> {
+		let leading = self.take_leading();
 		let start = self.pos;
-		self.expect_keyword("principal")?;
-		self.record_from(start, crate::tokens::TokenKind::Keyword);
+		self.expect_token("principal", TokenKind::Keyword)?;
 		self.skip_whitespace();
-		let name = self.parse_identifier()?;
-		self.record_principal_name()?;
-		let name = title_case(&name);
+		let name = self.parse_principal_name()?;
 		self.skip_whitespace();
-		let open_bracket = self.pos;
+		let bracket = self.pos;
 		self.expect_where("[", &format!("after `principal {}`", name))?;
-		let header_trailing = self.try_take_trailing();
-		self.consume_trivia();
+		let opening = self.try_take_trailing();
 		let mut expressions = Vec::new();
-		while self.peek() != Some(b']') {
+		loop {
 			self.consume_trivia();
 			if self.peek() == Some(b']') {
 				break;
@@ -914,126 +768,78 @@ impl<'a> Parser<'a> {
 				return Err(self.unclosed_hint(
 					VerifpalError::parse(format!("`{}`'s block is never closed", name).into())
 						.at(self.here()),
-					open_bracket,
+					bracket,
 				));
 			}
-			let leading = self.take_leading();
-			let mut expr = self
-				.parse_expression()
-				.map_err(|e| self.unclosed_hint(e, open_bracket))?;
-			expr.leading_comments = leading;
-			expr.leading_comments.extend(self.take_leading());
-			expr.trailing_comment = self.try_take_trailing();
-			expressions.push(expr);
-			self.consume_trivia();
+			expressions.push(
+				self.parse_expression()
+					.map_err(|e| self.unclosed_hint(e, bracket))?,
+			);
 		}
-		let tail_comments = self.take_leading();
+		let tail = self.take_leading();
 		self.expect("]")?;
 		let end = self.pos;
-		let closing_trailing = self.try_take_trailing();
+		let closing = self.try_take_trailing();
 		self.consume_trivia();
 		let id = self.principals.intern(&name)?;
-		Ok(Block::Principal(Principal {
+		Ok(Principal {
 			name,
 			id,
 			span: Span::new(start, end),
 			expressions,
-			leading_comments: Vec::new(),
-			header_trailing,
-			tail_comments,
-			closing_trailing,
-		}))
+			comments: BracketComments {
+				leading,
+				opening,
+				tail,
+				closing,
+			},
+		})
 	}
 
-	fn expect_arrow(&mut self, note: &'static str) -> VResult<()> {
-		let arrow_at = self.pos;
-		if self.try_expect("->") || self.try_expect("\u{2192}") {
-			self.record_from(arrow_at, crate::tokens::TokenKind::Arrow);
-			return Ok(());
-		}
-		Err(
-			VerifpalError::parse("expected `->` after the sender's name".into())
-				.at(self.here())
-				.labelled(self.found_here())
-				.note(note),
-		)
-	}
-
-	fn parse_message_block(&mut self) -> VResult<Block> {
+	fn parse_message(&mut self) -> VResult<Message> {
+		const USAGE: &str = "a message is written `Sender -> Recipient: constant, ...`";
+		let leading = self.take_leading();
 		let start = self.pos;
-		let sender_name = self.parse_identifier()?;
-		self.record_principal_name()?;
-		let sender_name = title_case(&sender_name);
-		self.skip_whitespace();
-		self.expect_arrow("a message is written `Sender -> Recipient: constant, ...`")?;
-		self.skip_whitespace();
-		let recipient_name = self.parse_identifier()?;
-		self.record_principal_name()?;
-		let recipient_name = title_case(&recipient_name);
-		self.skip_whitespace();
+		let (sender, recipient) = self.parse_route(Self::skip_whitespace, USAGE)?;
 		self.expect_where(":", "after the recipient's name")
-			.map_err(|e| e.note("a message is written `Sender -> Recipient: constant, ...`"))?;
+			.map_err(|e| e.note(USAGE))?;
 		self.skip_whitespace();
 		let constants = self.parse_message_constants()?;
-		let end = self.trimmed_pos();
-		let trailing = self.try_take_trailing();
+		let span = Span::new(start, self.trimmed_pos());
+		let comments = self.line_comments(leading);
 		self.consume_trivia();
-		let (sender, sender_name) = self.principal_id(&sender_name)?;
-		let (recipient, recipient_name) = self.principal_id(&recipient_name)?;
-		Ok(Block::Message(Message {
-			span: Span::new(start, end),
-			sender,
-			sender_name,
-			recipient,
-			recipient_name,
-			constants,
-			leading_comments: Vec::new(),
-			trailing_comment: trailing,
-		}))
+		Ok(Message {
+			comments,
+			..self.message(span, &sender, &recipient, constants)?
+		})
 	}
 
 	fn parse_message_constants(&mut self) -> VResult<Vec<Constant>> {
 		let mut constants = Vec::new();
 		loop {
 			self.skip_inline_whitespace();
-			if self.at_end() || self.peek() == Some(b'\n') || self.peek() == Some(b'\r') {
-				break;
-			}
-			let rem = self.remaining();
-			if starts_with_keyword(rem, "principal")
-				|| starts_with_keyword(rem, "phase")
-				|| starts_with_keyword(rem, "queries")
-				|| rem.starts_with("//")
-				|| rem.starts_with("/*")
+			let rest = self.remaining();
+			if rest.is_empty()
+				|| rest.starts_with(['\n', '\r'])
+				|| ["principal", "phase", "queries"]
+					.iter()
+					.any(|keyword| starts_with_keyword(rest, keyword))
+				|| starts_with_comment(rest)
+				|| self.starts_next_message()
 			{
 				break;
 			}
-			let saved = self.snapshot();
-			let starts_next_message = self.parse_identifier().is_ok() && {
-				self.skip_whitespace();
-				let rem = self.remaining();
-				rem.starts_with("->") || rem.starts_with("\u{2192}")
-			};
-			self.restore(saved);
-			if starts_next_message {
-				break;
-			}
-
-			let constant = if self.peek() == Some(b'[') {
+			constants.push(if self.peek() == Some(b'[') {
 				self.parse_guarded_constant()?
 			} else {
 				self.parse_constant()?
-			};
-			constants.push(constant);
+			});
 			self.skip_inline_whitespace();
-			if self.peek() == Some(b',') {
-				self.advance();
-			}
+			self.eat(",");
 		}
 		if constants.is_empty() {
-			return Err(VerifpalError::parse("message carries no constants".into())
-				.at(self.here())
-				.labelled(self.found_here())
+			return Err(self
+				.unexpected("message carries no constants")
 				.note("a message has to carry at least one value")
 				.help("name the values being sent, e.g. `Alice -> Bob: ga, e`"));
 		}
@@ -1043,91 +849,78 @@ impl<'a> Parser<'a> {
 	fn parse_guarded_constant(&mut self) -> VResult<Constant> {
 		self.expect("[")?;
 		self.skip_whitespace();
-		let mut c = self.parse_constant()?;
+		let constant = self.parse_constant()?;
 		self.skip_whitespace();
 		self.expect("]")?;
 		self.skip_inline_whitespace();
-		if self.peek() == Some(b',') {
-			self.advance();
-		}
-		c.guard = true;
-		Ok(c)
+		self.eat(",");
+		Ok(Constant {
+			guard: true,
+			..constant
+		})
 	}
 
 	fn parse_expression(&mut self) -> VResult<Expression> {
-		self.consume_trivia();
-		let rem = self.remaining();
-		if starts_with_keyword(rem, "knows") {
-			self.parse_knows()
-		} else if starts_with_keyword(rem, "generates") {
-			self.parse_simple_expression("generates", Declaration::Generates)
-		} else if starts_with_keyword(rem, "leaks") {
-			self.parse_simple_expression("leaks", Declaration::Leaks)
-		} else {
-			self.parse_assignment()
+		let leading = self.take_leading();
+		let rest = self.remaining();
+		match DECLARATIONS
+			.into_iter()
+			.find(|(keyword, _)| starts_with_keyword(rest, keyword))
+		{
+			Some((keyword, kind)) => self.parse_declaration(keyword, kind, leading),
+			None => self.parse_assignment(leading),
 		}
 	}
 
-	fn parse_knows(&mut self) -> VResult<Expression> {
+	fn parse_declaration(
+		&mut self,
+		keyword: &str,
+		kind: Declaration,
+		leading: Vec<Comment>,
+	) -> VResult<Expression> {
 		let start = self.pos;
-		self.expect_keyword("knows")?;
-		self.record_from(start, crate::tokens::TokenKind::Keyword);
+		self.expect_token(keyword, TokenKind::Keyword)?;
 		self.skip_whitespace();
-		let qualifier_str = self.parse_identifier()?;
-		let qualifier = match qualifier_str.as_str() {
-			"private" => Qualifier::Private,
-			"public" => Qualifier::Public,
-			_ => {
-				return Err(VerifpalError::parse(
-					format!("unknown qualifier `{}`", qualifier_str).into(),
-				)
-				.at(self.last_ident)
-				.narrow(qualifier_str.clone())
-				.note("`knows` takes one of `private` or `public`")
-				.suggest(did_you_mean(&qualifier_str, ["private", "public"])));
-			}
+		let qualifier = match kind {
+			Declaration::Knows => Some(self.parse_qualifier()?),
+			_ => None,
 		};
-		self.record(self.last_ident, crate::tokens::TokenKind::Qualifier);
-		self.skip_whitespace();
-		let constants = self.parse_constants()?;
-		Ok(Expression {
-			span: Span::new(start, self.trimmed_pos()),
-			kind: Declaration::Knows,
-			qualifier: Some(qualifier),
-			constants,
-			assigned: None,
-			leading_comments: Vec::new(),
-			trailing_comment: None,
-		})
-	}
-
-	fn parse_simple_expression(&mut self, keyword: &str, kind: Declaration) -> VResult<Expression> {
-		let start = self.pos;
-		self.expect_keyword(keyword)?;
-		self.record_from(start, crate::tokens::TokenKind::Keyword);
-		self.skip_whitespace();
-		let constants = self.parse_constants()?;
+		let constants = self.parse_constants(false)?;
 		Ok(Expression {
 			span: Span::new(start, self.trimmed_pos()),
 			kind,
-			qualifier: None,
+			qualifier,
 			constants,
 			assigned: None,
-			leading_comments: Vec::new(),
-			trailing_comment: None,
+			comments: self.line_comments(leading),
 		})
 	}
 
-	fn parse_assignment(&mut self) -> VResult<Expression> {
-		let start = self.pos;
-		self.anonymous_ok = true;
-		let constants = self.parse_constants();
-		self.anonymous_ok = false;
-		let constants = constants?;
+	fn parse_qualifier(&mut self) -> VResult<Qualifier> {
+		let word = self.parse_identifier()?;
+		let qualifier = match word.as_str() {
+			"private" => Qualifier::Private,
+			"public" => Qualifier::Public,
+			_ => {
+				return Err(
+					VerifpalError::parse(format!("unknown qualifier `{}`", word).into())
+						.at(self.last_ident)
+						.narrow(word.clone())
+						.note("`knows` takes one of `private` or `public`")
+						.suggest(did_you_mean(&word, ["private", "public"])),
+				);
+			}
+		};
+		self.record(self.last_ident, TokenKind::Qualifier);
 		self.skip_whitespace();
-		let assign_at = self.pos;
-		self.expect("=")?;
-		self.record_from(assign_at, crate::tokens::TokenKind::Assign);
+		Ok(qualifier)
+	}
+
+	fn parse_assignment(&mut self, leading: Vec<Comment>) -> VResult<Expression> {
+		let start = self.pos;
+		let constants = self.parse_constants(true)?;
+		self.skip_whitespace();
+		self.expect_token("=", TokenKind::Assign)?;
 		self.skip_whitespace();
 		let value = self.parse_value()?;
 		if let Value::Constant(c) = &value {
@@ -1144,72 +937,48 @@ impl<'a> Parser<'a> {
 			.help(format!("compute something, e.g. `= HASH({})`", c)));
 		}
 		Ok(Expression {
-			span: Span::new(start, self.value_end),
+			span: Span::new(start, self.primitive_end),
 			kind: Declaration::Assignment,
 			qualifier: None,
 			constants,
 			assigned: Some(value),
-			leading_comments: Vec::new(),
-			trailing_comment: None,
+			comments: self.line_comments(leading),
 		})
 	}
 
-	fn skip_inline_whitespace(&mut self) {
-		while self.pos < self.input.len() {
-			let c = self.input[self.pos];
-			if c == b' ' || c == b'\t' {
-				self.pos += 1;
-			} else {
-				break;
-			}
-		}
-	}
-
-	fn parse_constants(&mut self) -> VResult<Vec<Constant>> {
+	fn parse_constants(&mut self, anonymous_ok: bool) -> VResult<Vec<Constant>> {
 		let mut constants = Vec::new();
 		loop {
 			self.skip_inline_whitespace();
-			if self.at_end() {
-				break;
-			}
-			let c = self.peek();
-			if c == Some(b'=')
-				|| c == Some(b']')
-				|| c == Some(b')')
-				|| c == Some(b'\n')
-				|| c == Some(b'\r')
+			let rest = self.remaining();
+			if rest.is_empty()
+				|| rest.starts_with(['=', ']', ')', '\n', '\r'])
+				|| DECLARATIONS
+					.iter()
+					.any(|(keyword, _)| starts_with_keyword(rest, keyword))
+				|| starts_with_comment(rest)
 			{
 				break;
 			}
-			let rem = self.remaining();
-			if starts_with_keyword(rem, "knows")
-				|| starts_with_keyword(rem, "generates")
-				|| starts_with_keyword(rem, "leaks")
-				|| rem.starts_with("//")
-				|| rem.starts_with("/*")
-			{
-				break;
-			}
-			constants.push(self.parse_constant()?);
+			constants.push(self.parse_constant_or_anonymous(anonymous_ok)?);
 			self.skip_inline_whitespace();
-			if self.peek() == Some(b',') {
-				self.advance();
-			}
+			self.eat(",");
 		}
 		if constants.is_empty() {
-			return Err(
-				VerifpalError::parse("expected at least one constant".into())
-					.at(self.here())
-					.labelled(self.found_here()),
-			);
+			return Err(self.unexpected("expected at least one constant"));
 		}
 		Ok(constants)
 	}
 
 	fn parse_constant(&mut self) -> VResult<Constant> {
+		self.parse_constant_or_anonymous(false)
+	}
+
+	fn parse_constant_or_anonymous(&mut self, anonymous_ok: bool) -> VResult<Constant> {
 		let name = self.parse_identifier()?;
 		check_reserved(&name).map_err(|e| e.at(self.last_ident))?;
-		if name == "_" && !self.anonymous_ok {
+		let anonymous = name == "_";
+		if anonymous && !anonymous_ok {
 			return Err(VerifpalError::parse(
 				"`_` can only name the output of an assignment".into(),
 			)
@@ -1219,22 +988,22 @@ impl<'a> Parser<'a> {
 		}
 		self.record(
 			self.last_ident,
-			if name == "_" {
-				crate::tokens::TokenKind::Anonymous
+			if anonymous {
+				TokenKind::Anonymous
 			} else {
-				crate::tokens::TokenKind::ConstantName
+				TokenKind::ConstantName
 			},
 		);
-		let actual_name: Arc<str> = if name == "_" {
-			let n = self.unnamed_counter;
+		let name: Arc<str> = if anonymous {
+			let index = self.unnamed_counter;
 			self.unnamed_counter += 1;
-			Arc::from(format!("{}_{}", crate::util::ANONYMOUS_PREFIX, n))
+			Arc::from(format!("{}_{}", crate::util::ANONYMOUS_PREFIX, index))
 		} else {
 			Arc::from(name)
 		};
-		let id = self.values.intern(&actual_name)?;
+		let id = self.values.intern(&name)?;
 		Ok(Constant {
-			name: actual_name,
+			name,
 			id,
 			guard: false,
 			fresh: false,
@@ -1244,150 +1013,23 @@ impl<'a> Parser<'a> {
 		})
 	}
 
-	fn parse_constant_value(&mut self) -> VResult<Value> {
-		let constant = self.parse_constant()?;
-		self.value_end = self.pos;
-		Ok(Value::Constant(constant))
-	}
-
 	fn parse_value(&mut self) -> VResult<Value> {
 		self.skip_whitespace();
-		let saved = self.snapshot();
-		if let Ok(name) = self.parse_identifier() {
-			self.skip_whitespace();
-			if self.peek() == Some(b'(')
-				|| (self.peek() == Some(b'[') && primitive_get_enum(&name.to_uppercase()).is_ok())
-			{
-				self.restore(saved);
-				return self.parse_primitive();
-			}
-			self.restore(saved);
-			return self.parse_constant_value();
-		}
-		self.restore(saved);
-		Err(VerifpalError::parse("expected a value".into())
-			.at(self.here())
-			.labelled(self.found_here())
-			.note("a value is a constant, or a primitive such as `HASH(m)`"))
-	}
-
-	fn parse_capability_onset(&mut self) -> VResult<i32> {
-		let saved = self.snapshot();
-		let Ok(word) = self.parse_identifier() else {
-			self.restore(saved);
-			return Ok(0);
+		let start = self.pos;
+		let Ok(name) = self.parse_identifier() else {
+			return Err(self
+				.unexpected("expected a value")
+				.note("a value is a constant, or a primitive such as `HASH(m)`"));
 		};
-		if !word.eq_ignore_ascii_case("from") {
-			self.restore(saved);
-			return Ok(0);
+		self.skip_whitespace();
+		let primitive =
+			self.peek() == Some(b'(') || (self.peek() == Some(b'[') && names_a_primitive(&name));
+		self.pos = start;
+		if primitive {
+			self.parse_primitive()
+		} else {
+			Ok(Value::Constant(self.parse_constant()?))
 		}
-		self.record(self.last_ident, crate::tokens::TokenKind::Capability);
-		self.consume_trivia();
-		let kw = self.parse_identifier()?;
-		if !kw.eq_ignore_ascii_case("phase") {
-			return Err(VerifpalError::parse("expected `phase` after `from`".into())
-				.at(self.last_ident)
-				.labelled(format!("found `{}`", kw))
-				.note("an assumption that starts later is written `from phase N`")
-				.help("write it as `from phase 1`"));
-		}
-		self.record(self.last_ident, crate::tokens::TokenKind::Capability);
-		self.consume_trivia();
-		let start = self.pos;
-		while self.pos < self.input.len() && self.input[self.pos].is_ascii_digit() {
-			self.pos += 1;
-		}
-		self.record_from(start, crate::tokens::TokenKind::PhaseNumber);
-		if start == self.pos {
-			return Err(
-				VerifpalError::parse("expected a phase number after `from phase`".into())
-					.at(self.here())
-					.labelled(self.found_here())
-					.note("`from phase N` means the assumption holds from phase N onward"),
-			);
-		}
-		std::str::from_utf8(&self.input[start..self.pos])
-			.ok()
-			.and_then(|s| s.parse::<i32>().ok())
-			.ok_or_else(|| {
-				VerifpalError::parse("invalid phase number in primitive parameter".into())
-					.at(Span::at(start))
-			})
-	}
-
-	fn parse_bracket(&mut self) -> VResult<(Capabilities, Option<(usize, Span)>)> {
-		let start = self.pos;
-		self.expect("[")?;
-		let mut caps = Capabilities::default();
-		let mut threshold: Option<(usize, Span)> = None;
-		loop {
-			self.consume_trivia();
-			if self.peek().is_some_and(|c| c.is_ascii_digit()) {
-				let digits_start = self.pos;
-				while self.pos < self.input.len() && self.input[self.pos].is_ascii_digit() {
-					self.pos += 1;
-				}
-				let span = Span::new(digits_start, self.pos);
-				let text =
-					String::from_utf8_lossy(&self.input[digits_start..self.pos]).into_owned();
-				let value: usize = text.parse().map_err(|_| {
-					VerifpalError::parse(format!("`{}` is not a threshold", text).into())
-						.at(span)
-						.help("a threshold is a small whole number, e.g. `[2]`")
-				})?;
-				if threshold.is_some() {
-					return Err(VerifpalError::parse(
-						"the threshold is declared twice on this primitive".into(),
-					)
-					.at(span)
-					.labelled("declared again here")
-					.help("keep one threshold in the bracket"));
-				}
-				self.record(span, crate::tokens::TokenKind::Threshold);
-				threshold = Some((value, span));
-				self.consume_trivia();
-				if self.peek() == Some(b',') {
-					self.advance();
-					continue;
-				}
-				break;
-			}
-			let word = self.parse_identifier()?;
-			let word_span = self.last_ident;
-			let cap = Capability::from_name(&word).ok_or_else(|| {
-				VerifpalError::parse(format!("unknown weakening assumption `{}`", word).into())
-					.at(Span::new(start, self.pos))
-					.narrow(word.clone())
-					.note(
-						"an assumption names a property the primitive loses: `weak` \
-						 (confidentiality), `forgeable` (authenticity) or `malleable` \
-						 (a ciphertext can be reshaped)",
-					)
-					.suggest(did_you_mean(&word, ["weak", "forgeable", "malleable"]))
-			})?;
-			if caps.has(cap) {
-				return Err(VerifpalError::parse(
-					format!("`{}` is declared twice on this primitive", cap.name()).into(),
-				)
-				.at(Span::new(start, self.pos))
-				.narrow_occurrence(cap.name(), 1)
-				.labelled("declared again here")
-				.help("remove the duplicate"));
-			}
-			self.record(word_span, crate::tokens::TokenKind::Capability);
-			self.consume_trivia();
-			let onset = self.parse_capability_onset()?;
-			caps.set(cap, onset);
-			self.consume_trivia();
-			if self.peek() == Some(b',') {
-				self.advance();
-				continue;
-			}
-			break;
-		}
-		self.consume_trivia();
-		self.expect("]")?;
-		Ok((caps, threshold))
 	}
 
 	fn parse_primitive(&mut self) -> VResult<Value> {
@@ -1406,14 +1048,9 @@ impl<'a> Parser<'a> {
 	}
 
 	fn parse_primitive_nested(&mut self) -> VResult<Value> {
-		let name_start = self.pos;
-		let name = self.parse_identifier()?;
-		let name_end = self.pos;
-		self.record(
-			Span::new(name_start, name_end),
-			crate::tokens::TokenKind::PrimitiveName,
-		);
-		let prim_name = name.to_uppercase();
+		let prim_name = self.parse_identifier()?.to_uppercase();
+		let name_span = self.last_ident;
+		self.record(name_span, TokenKind::PrimitiveName);
 		self.skip_whitespace();
 		let (capabilities, threshold) = if self.peek() == Some(b'[') {
 			self.parse_bracket()?
@@ -1434,32 +1071,23 @@ impl<'a> Parser<'a> {
 				.label(Span::at(open_paren), "this `(` is never closed")
 				.help("add the missing `)`"));
 			}
-			let arg = self
-				.parse_value()
-				.map_err(|e| self.unclosed_hint(e, open_paren))?;
-			arguments.push(arg);
+			arguments.push(
+				self.parse_value()
+					.map_err(|e| self.unclosed_hint(e, open_paren))?,
+			);
 			self.consume_trivia();
-			if self.peek() == Some(b',') {
-				self.advance();
+			if self.eat(",") {
 				self.consume_trivia();
 			}
 		}
 		self.expect(")")?;
-		let check_at = self.pos;
-		let check = self.try_expect("?");
-		if check {
-			self.record_from(check_at, crate::tokens::TokenKind::Check);
-		}
-		self.value_end = self.pos;
-		// Stay on this line: crossing the newline here would let a comment on
-		// the next line be taken as this expression's trailing comment.
+		let instance_check = self.eat_token("?", TokenKind::Check);
+		self.primitive_end = self.pos;
 		self.skip_inline_whitespace();
-		if self.peek() == Some(b',') {
-			self.advance();
-		}
-		let prim_id = primitive_get_enum(&prim_name).map_err(|_| {
+		self.eat(",");
+		let id = primitive_get_enum(&prim_name).map_err(|_| {
 			let unknown = VerifpalError::parse(format!("unknown primitive `{}`", prim_name).into())
-				.at(Span::new(name_start, name_end));
+				.at(name_span);
 			match primitive_renamed(&prim_name) {
 				Some(new_name) => unknown
 					.labelled(format!("now called `{}`", new_name))
@@ -1475,12 +1103,12 @@ impl<'a> Parser<'a> {
 					.suggest(did_you_mean(&prim_name, primitive_names())),
 			}
 		})?;
-		let threshold = match (primitive_threshold(prim_id), threshold) {
+		let threshold = match (primitive_threshold(id), threshold) {
 			(Some(_), None) => {
 				return Err(VerifpalError::parse(
 					format!("`{}` needs a threshold", prim_name).into(),
 				)
-				.at(Span::new(name_start, name_end))
+				.at(name_span)
 				.note(
 					"the number in the bracket is how many of the bound shares recover the secret",
 				)
@@ -1517,283 +1145,272 @@ impl<'a> Parser<'a> {
 			(None, None) => 0,
 		};
 		Ok(Value::Primitive(Arc::new(Primitive {
-			id: prim_id,
+			id,
 			arguments,
 			output: 0,
 			threshold,
 			instance: 0,
-			instance_check: check,
+			instance_check,
 			capabilities,
 			hash: HashCell::default(),
 		})))
 	}
 
-	fn parse_phase(&mut self) -> VResult<Block> {
-		let block_start = self.pos;
-		self.expect_keyword("phase")?;
-		self.record_from(block_start, crate::tokens::TokenKind::Keyword);
+	fn parse_bracket(&mut self) -> VResult<(Capabilities, Option<(usize, Span)>)> {
+		let start = self.pos;
+		self.expect("[")?;
+		let mut capabilities = Capabilities::default();
+		let mut threshold: Option<(usize, Span)> = None;
+		loop {
+			self.consume_trivia();
+			if self.peek().is_some_and(|c| c.is_ascii_digit()) {
+				let span = self.digits();
+				let text = self.text(span);
+				let value = text.parse().map_err(|_| {
+					VerifpalError::parse(format!("`{}` is not a threshold", text).into())
+						.at(span)
+						.help("a threshold is a small whole number, e.g. `[2]`")
+				})?;
+				if threshold.is_some() {
+					return Err(VerifpalError::parse(
+						"the threshold is declared twice on this primitive".into(),
+					)
+					.at(span)
+					.labelled("declared again here")
+					.help("keep one threshold in the bracket"));
+				}
+				self.record(span, TokenKind::Threshold);
+				threshold = Some((value, span));
+			} else {
+				let word = self.parse_identifier()?;
+				let word_span = self.last_ident;
+				let capability = Capability::from_name(&word).ok_or_else(|| {
+					VerifpalError::parse(format!("unknown weakening assumption `{}`", word).into())
+						.at(Span::new(start, self.pos))
+						.narrow(word.clone())
+						.note(
+							"an assumption names a property the primitive loses: `weak` \
+							 (confidentiality), `forgeable` (authenticity) or `malleable` \
+							 (a ciphertext can be reshaped)",
+						)
+						.suggest(did_you_mean(&word, ["weak", "forgeable", "malleable"]))
+				})?;
+				if capabilities.has(capability) {
+					return Err(VerifpalError::parse(
+						format!(
+							"`{}` is declared twice on this primitive",
+							capability.name()
+						)
+						.into(),
+					)
+					.at(Span::new(start, self.pos))
+					.narrow_occurrence(capability.name(), 1)
+					.labelled("declared again here")
+					.help("remove the duplicate"));
+				}
+				self.record(word_span, TokenKind::Capability);
+				self.consume_trivia();
+				let onset = self.parse_capability_onset()?;
+				capabilities.set(capability, onset);
+			}
+			self.consume_trivia();
+			if !self.eat(",") {
+				break;
+			}
+		}
+		self.expect("]")?;
+		Ok((capabilities, threshold))
+	}
+
+	fn parse_capability_onset(&mut self) -> VResult<i32> {
+		if !starts_with_keyword(self.remaining(), "from") {
+			return Ok(0);
+		}
+		self.expect_token("from", TokenKind::Capability)?;
+		self.consume_trivia();
+		let word = self.parse_identifier()?;
+		if word != "phase" {
+			return Err(VerifpalError::parse("expected `phase` after `from`".into())
+				.at(self.last_ident)
+				.labelled(format!("found `{}`", word))
+				.note("an assumption that starts later is written `from phase N`")
+				.help("write it as `from phase 1`"));
+		}
+		self.record(self.last_ident, TokenKind::Capability);
+		self.consume_trivia();
+		let digits = self.digits();
+		self.record(digits, TokenKind::PhaseNumber);
+		if digits.start == digits.end {
+			return Err(self
+				.unexpected("expected a phase number after `from phase`")
+				.note("`from phase N` means the assumption holds from phase N onward"));
+		}
+		self.text(digits).parse().map_err(|_| {
+			VerifpalError::parse("invalid phase number in primitive parameter".into())
+				.at(Span::at(digits.start))
+		})
+	}
+
+	fn parse_phase(&mut self) -> VResult<Phase> {
+		let leading = self.take_leading();
+		let start = self.pos;
+		self.expect_token("phase", TokenKind::Keyword)?;
 		self.consume_trivia();
 		self.expect("[")?;
 		self.consume_trivia();
-		let start = self.pos;
-		while self.pos < self.input.len() && self.input[self.pos].is_ascii_digit() {
-			self.pos += 1;
-		}
-		self.record_from(start, crate::tokens::TokenKind::PhaseNumber);
-		let num_str = std::str::from_utf8(&self.input[start..self.pos])
-			.map_err(|_| VerifpalError::parse("invalid UTF-8 in phase number".into()))?;
-		let number: i32 = num_str.parse().map_err(|_| {
-			VerifpalError::parse("expected a phase number".into())
-				.at(self.here())
-				.labelled(self.found_here())
+		let digits = self.digits();
+		self.record(digits, TokenKind::PhaseNumber);
+		let number = self.text(digits).parse().map_err(|_| {
+			self.unexpected("expected a phase number")
 				.note("a phase is written `phase[1]`, `phase[2]`, and so on")
 		})?;
 		self.consume_trivia();
 		self.expect("]")?;
-		let block_end = self.pos;
-		let inner_comments = self.take_leading();
-		let trailing = self.try_take_trailing();
-		self.consume_trivia();
-		Ok(Block::Phase(Phase {
-			span: Span::new(block_start, block_end),
+		Ok(Phase {
+			span: Span::new(start, self.pos),
 			number,
-			leading_comments: inner_comments,
-			trailing_comment: trailing,
-		}))
+			comments: self.line_comments(leading),
+		})
 	}
 
 	fn parse_query(&mut self) -> VResult<Query> {
-		self.consume_trivia();
-		let rem = self.remaining();
-		if starts_with_ignoring_case(rem, "confidentiality?") {
-			self.parse_query_single_constant("confidentiality?", QueryKind::Confidentiality)
-		} else if starts_with_ignoring_case(rem, "authentication?") {
-			self.parse_query_authentication()
-		} else if starts_with_ignoring_case(rem, "freshness?") {
-			self.parse_query_single_constant("freshness?", QueryKind::Freshness)
-		} else if starts_with_ignoring_case(rem, "unlinkability?") {
-			self.parse_query_multi_constant("unlinkability?", QueryKind::Unlinkability)
-		} else if starts_with_ignoring_case(rem, "equivalence?") {
-			self.parse_query_multi_constant("equivalence?", QueryKind::Equivalence)
-		} else {
-			{
-				let word: String = rem
-					.chars()
-					.take_while(|c| c.is_alphanumeric() || *c == '_')
-					.collect();
-				Err(VerifpalError::parse(
-					if word.is_empty() {
-						"expected a query".to_string()
-					} else {
-						format!("unknown query type `{}`", word)
-					}
-					.into(),
-				)
-				.at(Span::new(self.pos, self.pos + word.len().max(1)))
-				.note(
-					"a query is one of `confidentiality?`, `authentication?`, \
-					 `freshness?`, `unlinkability?` or `equivalence?`",
-				)
-				.suggest(did_you_mean(
-					&word,
-					[
-						"confidentiality",
-						"authentication",
-						"freshness",
-						"unlinkability",
-						"equivalence",
-					],
-				)))
+		let leading = self.take_leading();
+		let start = self.pos;
+		let Some(kind) = QueryKind::ALL
+			.into_iter()
+			.find(|kind| self.eat(&format!("{}?", kind.name())))
+		else {
+			let word = self.word_here();
+			return Err(VerifpalError::parse(if word.is_empty() {
+				"expected a query".into()
+			} else {
+				format!("unknown query type `{}`", word).into()
+			})
+			.at(self.here())
+			.note(
+				"a query is one of `confidentiality?`, `authentication?`, \
+				 `freshness?`, `unlinkability?` or `equivalence?`",
+			)
+			.suggest(did_you_mean(word, QueryKind::ALL.map(QueryKind::name))));
+		};
+		self.record_from(start, TokenKind::QueryKind);
+		self.skip_whitespace();
+		let (constants, message) = match kind {
+			QueryKind::Authentication => {
+				let (sender, recipient) = self.parse_route(
+					Self::skip_whitespace,
+					"an authentication query is written `authentication? Alice -> Bob: m`",
+				)?;
+				self.expect(":")?;
+				self.skip_whitespace();
+				let constant = self.parse_constant()?;
+				let message = self.message(Span::default(), &sender, &recipient, vec![constant])?;
+				(Vec::new(), message)
 			}
-		}
-	}
-
-	fn parse_query_single_constant(&mut self, keyword: &str, kind: QueryKind) -> VResult<Query> {
-		let start = self.pos;
-		self.expect_keyword(keyword)?;
-		self.record_from(start, crate::tokens::TokenKind::QueryKind);
-		self.skip_whitespace();
-		let constant = self.parse_constant()?;
-		self.skip_inline_whitespace();
-		let options = self.try_parse_query_options()?;
+			QueryKind::Confidentiality | QueryKind::Freshness => {
+				(vec![self.parse_constant()?], Message::default())
+			}
+			QueryKind::Unlinkability | QueryKind::Equivalence => {
+				(self.parse_query_constant_list()?, Message::default())
+			}
+		};
+		let options = self.parse_query_options()?;
+		let span = Span::new(start, self.trimmed_pos());
 		Ok(Query {
-			span: Span::new(start, self.trimmed_pos()),
-			kind,
-			constants: vec![constant],
-			message: Message::default(),
-			options,
-			leading_comments: Vec::new(),
-			trailing_comment: None,
-		})
-	}
-
-	fn parse_query_authentication(&mut self) -> VResult<Query> {
-		let start = self.pos;
-		self.expect_keyword("authentication?")?;
-		self.record_from(start, crate::tokens::TokenKind::QueryKind);
-		self.skip_whitespace();
-		let sender_name = title_case(&self.parse_identifier()?);
-		self.record_principal_name()?;
-		self.skip_whitespace();
-		self.expect_arrow("an authentication query is written `authentication? Alice -> Bob: m`")?;
-		self.skip_whitespace();
-		let recipient_name = title_case(&self.parse_identifier()?);
-		self.record_principal_name()?;
-		self.skip_whitespace();
-		self.expect(":")?;
-		self.skip_whitespace();
-		let constant = self.parse_constant()?;
-		self.skip_inline_whitespace();
-		let (sender, sender_name) = self.principal_id(&sender_name)?;
-		let (recipient, recipient_name) = self.principal_id(&recipient_name)?;
-		let options = self.try_parse_query_options()?;
-		let end = self.trimmed_pos();
-		Ok(Query {
-			span: Span::new(start, end),
-			kind: QueryKind::Authentication,
-			constants: vec![],
-			message: Message {
-				span: Span::new(start, end),
-				sender,
-				sender_name,
-				recipient,
-				recipient_name,
-				constants: vec![constant],
-				leading_comments: Vec::new(),
-				trailing_comment: None,
-			},
-			options,
-			leading_comments: Vec::new(),
-			trailing_comment: None,
-		})
-	}
-
-	fn parse_query_multi_constant(&mut self, keyword: &str, kind: QueryKind) -> VResult<Query> {
-		let start = self.pos;
-		self.expect_keyword(keyword)?;
-		self.record_from(start, crate::tokens::TokenKind::QueryKind);
-		self.skip_whitespace();
-		let constants = self.parse_query_constant_list()?;
-		self.skip_inline_whitespace();
-		let options = self.try_parse_query_options()?;
-		Ok(Query {
-			span: Span::new(start, self.trimmed_pos()),
+			span,
 			kind,
 			constants,
-			message: Message::default(),
+			message: match kind {
+				QueryKind::Authentication => Message { span, ..message },
+				_ => message,
+			},
 			options,
-			leading_comments: Vec::new(),
-			trailing_comment: None,
+			comments: self.line_comments(leading),
 		})
 	}
 
 	fn parse_query_constant_list(&mut self) -> VResult<Vec<Constant>> {
 		let mut constants = Vec::new();
 		loop {
-			// Look past the whitespace without keeping it: the query's span
-			// must end at its last constant, not at whatever follows.
 			let before = self.pos;
 			self.skip_whitespace();
 			if self.peek() == Some(b'[') {
 				break;
 			}
-			let rem = self.remaining();
-			if self.at_end()
-				|| self.peek() == Some(b']')
-				|| starts_with_keyword(rem, "confidentiality")
-				|| starts_with_keyword(rem, "authentication")
-				|| starts_with_keyword(rem, "freshness")
-				|| starts_with_keyword(rem, "unlinkability")
-				|| starts_with_keyword(rem, "equivalence")
-				|| rem.starts_with("//")
-				|| rem.starts_with("/*")
+			let rest = self.remaining();
+			if rest.is_empty()
+				|| rest.starts_with(']')
+				|| QueryKind::ALL
+					.iter()
+					.any(|kind| starts_with_keyword(rest, kind.name()))
+				|| starts_with_comment(rest)
 			{
 				self.pos = before;
 				break;
 			}
 			constants.push(self.parse_constant()?);
 			self.skip_inline_whitespace();
-			if self.peek() == Some(b',') {
-				self.advance();
-			}
+			self.eat(",");
 		}
 		Ok(constants)
 	}
 
-	fn try_parse_query_options(&mut self) -> VResult<Vec<QueryOption>> {
+	fn parse_query_options(&mut self) -> VResult<Vec<QueryOption>> {
 		self.skip_inline_whitespace();
-		if self.peek() != Some(b'[') {
-			return Ok(vec![]);
-		}
-		self.advance();
-		self.consume_trivia();
 		let mut options = Vec::new();
-		while self.peek() != Some(b']') {
-			if self.at_end() {
-				break;
-			}
-			self.consume_trivia();
-			if self.peek() == Some(b']') {
-				break;
-			}
-			let option_start = self.pos;
-			let mut leading = self.take_leading();
-			let option_name = self.parse_identifier()?;
-			self.record(self.last_ident, crate::tokens::TokenKind::Keyword);
-			self.consume_trivia();
-			self.expect("[")?;
-			self.consume_trivia();
-			let sender_name = title_case(&self.parse_identifier()?);
-			self.record_principal_name()?;
-			self.consume_trivia();
-			self.expect_arrow("a precondition is written `precondition[ Bob -> Alice: ack ]`")?;
-			self.consume_trivia();
-			let recipient_name = title_case(&self.parse_identifier()?);
-			self.record_principal_name()?;
-			self.consume_trivia();
-			self.expect(":")?;
-			self.consume_trivia();
-			let constant = self.parse_constant()?;
-			self.consume_trivia();
-			self.expect("]")?;
-			leading.extend(self.take_leading());
-			let trailing = self.try_take_trailing();
-			self.consume_trivia();
-
-			let option_kind = match option_name.as_str() {
-				"precondition" => QueryOptionKind::Precondition,
-				_ => {
-					return Err(VerifpalError::parse(
-						format!("unknown query option `{}`", option_name).into(),
-					)
-					.at(self.last_ident)
-					.narrow(option_name.clone())
-					.note("the only query option is `precondition`")
-					.suggest(did_you_mean(&option_name, ["precondition"])));
-				}
-			};
-			let (sender, sender_name) = self.principal_id(&sender_name)?;
-			let (recipient, recipient_name) = self.principal_id(&recipient_name)?;
-			options.push(QueryOption {
-				kind: option_kind,
-				message: Message {
-					span: Span::new(option_start, self.pos),
-					sender,
-					sender_name,
-					recipient,
-					recipient_name,
-					constants: vec![constant],
-					leading_comments: Vec::new(),
-					trailing_comment: None,
-				},
-				leading_comments: leading,
-				trailing_comment: trailing,
-			});
+		if !self.eat("[") {
+			return Ok(options);
 		}
-		if self.peek() == Some(b']') {
-			self.advance();
+		self.consume_trivia();
+		while self.peek() != Some(b']') && !self.at_end() {
+			options.push(self.parse_query_option()?);
 		}
+		self.eat("]");
 		Ok(options)
+	}
+
+	fn parse_query_option(&mut self) -> VResult<QueryOption> {
+		let leading = self.take_leading();
+		let start = self.pos;
+		let name = self.parse_identifier()?;
+		self.record(self.last_ident, TokenKind::Keyword);
+		self.consume_trivia();
+		self.expect("[")?;
+		self.consume_trivia();
+		let (sender, recipient) = self.parse_route(
+			Self::consume_trivia,
+			"a precondition is written `precondition[ Bob -> Alice: ack ]`",
+		)?;
+		self.expect(":")?;
+		self.consume_trivia();
+		let constant = self.parse_constant()?;
+		self.consume_trivia();
+		self.expect("]")?;
+		let comments = self.line_comments(leading);
+		self.consume_trivia();
+		let kind = match name.as_str() {
+			"precondition" => QueryOptionKind::Precondition,
+			_ => {
+				return Err(VerifpalError::parse(
+					format!("unknown query option `{}`", name).into(),
+				)
+				.at(self.last_ident)
+				.narrow(name.clone())
+				.note("the only query option is `precondition`")
+				.suggest(did_you_mean(&name, ["precondition"])));
+			}
+		};
+		let message = self.message(
+			Span::new(start, self.pos),
+			&sender,
+			&recipient,
+			vec![constant],
+		)?;
+		Ok(QueryOption {
+			kind,
+			message,
+			comments,
+		})
 	}
 }
 
@@ -1826,57 +1443,40 @@ fn validate_file_name(file_path: &str, file_name: &str) -> VResult<()> {
 }
 
 pub(crate) fn parse_file(file_path: &str) -> VResult<Model> {
-	let path = std::path::Path::new(file_path);
-	let file_name = path
+	let file_name = std::path::Path::new(file_path)
 		.file_name()
 		.and_then(|n| n.to_str())
-		.unwrap_or("")
-		.to_string();
-	validate_file_name(file_path, &file_name)?;
-
+		.unwrap_or("");
+	validate_file_name(file_path, file_name)?;
 	let content = std::fs::read_to_string(file_path)
 		.map_err(|e| VerifpalError::parse(format!("cannot read `{}`: {}", file_path, e).into()))?;
-
-	parse_string(&file_name, &content)
+	parse_string(file_name, &content)
 }
 
-#[cfg_attr(not(any(test, feature = "language")), allow(dead_code))]
-pub(crate) fn parse_string_indexed(
-	file_name: &str,
-	input: &str,
-) -> (VResult<Model>, crate::tokens::TokenIndex) {
-	let mut parser = Parser::new(input);
-	parser.tokens = Some(crate::tokens::TokenIndex::default());
-	let parsed = parser
-		.parse_model()
-		.map_err(|e| e.or_span(Span::at(parser.pos)).located(file_name, input));
-	let index = parser.tokens.take().unwrap_or_default();
-	let model = parsed.map(|mut model| {
-		model.file_name = file_name.to_string();
-		model.source = Source::from(input);
-		model
-	});
-	(model, index)
+fn parse(file_name: &str, input: &str, queries_optional: bool) -> (VResult<Model>, TokenIndex) {
+	let mut parser = Parser::new(input, queries_optional);
+	let model = match parser.parse_model() {
+		Ok(model) => Ok(Model {
+			file_name: file_name.to_string(),
+			source: Source::from(input),
+			..model
+		}),
+		Err(e) => Err(e.or_span(Span::at(parser.pos)).located(file_name, input)),
+	};
+	(model, parser.tokens)
+}
+
+pub(crate) fn parse_string_indexed(file_name: &str, input: &str) -> (VResult<Model>, TokenIndex) {
+	parse(file_name, input, false)
 }
 
 pub(crate) fn parse_string(file_name: &str, input: &str) -> VResult<Model> {
-	parse_string_with(file_name, input, false)
+	parse(file_name, input, false).0
 }
 
 #[cfg_attr(not(any(test, feature = "wasm")), allow(dead_code))]
 pub(crate) fn parse_string_queries_optional(file_name: &str, input: &str) -> VResult<Model> {
-	parse_string_with(file_name, input, true)
-}
-
-fn parse_string_with(file_name: &str, input: &str, queries_optional: bool) -> VResult<Model> {
-	let mut parser = Parser::new(input);
-	parser.queries_optional = queries_optional;
-	let mut model = parser
-		.parse_model()
-		.map_err(|e| e.or_span(Span::at(parser.pos)).located(file_name, input))?;
-	model.file_name = file_name.to_string();
-	model.source = Source::from(input);
-	Ok(model)
+	parse(file_name, input, true).0
 }
 
 #[cfg(test)]
@@ -2148,6 +1748,15 @@ mod tests {
 			"attacker[active]\nprincipal Alice[\n\tknows private nc_m\n]\nqueries[\n\tconfidentiality? NC_UNKNOWN\n]\n",
 		);
 		assert!(text.contains("diag.vp:6:19"), "{text}");
+	}
+
+	#[test]
+	fn a_query_line_opening_with_a_multibyte_character_is_a_parse_error() {
+		let src = "attacker[active]\nprincipal Alice[\n\tknows private mb_m\n]\nqueries[\n\t€x? mb_m\n]\n";
+		let error = parse_string("mb.vp", src).expect_err("not a query");
+		let text = error.render("mb.vp", src);
+		assert!(text.contains("expected a query"), "{text}");
+		assert!(text.contains("mb.vp:6:2"), "{text}");
 	}
 
 	#[test]
@@ -2475,13 +2084,13 @@ mod tests {
 		let src = "// hello\nattacker[active]\n\nprincipal Alice[\n\tknows private a\n]\n\nqueries[\n\tconfidentiality? a\n]\n";
 		let m = parse_string("t.vp", src).expect("parse");
 		assert_eq!(
-			m.pre_attacker_comments.len(),
+			m.attacker_comments.leading.len(),
 			1,
 			"expected 1 pre-attacker comment"
 		);
-		assert_eq!(m.pre_attacker_comments[0].text, " hello");
+		assert_eq!(m.attacker_comments.leading[0].text, " hello");
 		assert!(matches!(
-			m.pre_attacker_comments[0].style,
+			m.attacker_comments.leading[0].style,
 			CommentStyle::Line
 		));
 	}
@@ -2493,8 +2102,8 @@ mod tests {
 		assert_eq!(m.blocks.len(), 1);
 		match &m.blocks[0] {
 			Block::Principal(p) => {
-				assert_eq!(p.leading_comments.len(), 1);
-				assert_eq!(p.leading_comments[0].text, " before alice");
+				assert_eq!(p.comments.leading.len(), 1);
+				assert_eq!(p.comments.leading[0].text, " before alice");
 			}
 			_ => panic!("expected Principal block"),
 		}
@@ -2507,8 +2116,8 @@ mod tests {
 		match &m.blocks[0] {
 			Block::Principal(p) => {
 				assert_eq!(p.expressions.len(), 1);
-				assert_eq!(p.expressions[0].leading_comments.len(), 1);
-				assert_eq!(p.expressions[0].leading_comments[0].text, " long-term key");
+				assert_eq!(p.expressions[0].comments.leading.len(), 1);
+				assert_eq!(p.expressions[0].comments.leading[0].text, " long-term key");
 			}
 			_ => panic!("expected Principal block"),
 		}
@@ -2519,36 +2128,36 @@ mod tests {
 		let src = "attacker[active]\n\nprincipal Alice[\n\tknows private a\n]\n\nqueries[\n\t// primary goal\n\tconfidentiality? a\n]\n";
 		let m = parse_string("t.vp", src).expect("parse");
 		assert_eq!(m.queries.len(), 1);
-		assert_eq!(m.queries[0].leading_comments.len(), 1);
-		assert_eq!(m.queries[0].leading_comments[0].text, " primary goal");
+		assert_eq!(m.queries[0].comments.leading.len(), 1);
+		assert_eq!(m.queries[0].comments.leading[0].text, " primary goal");
 	}
 
 	#[test]
 	fn comment_capture_leading_on_queries_keyword() {
 		let src = "attacker[active]\n\nprincipal Alice[\n\tknows private a\n]\n\n// verify these\nqueries[\n\tconfidentiality? a\n]\n";
 		let m = parse_string("t.vp", src).expect("parse");
-		assert_eq!(m.queries_leading_comments.len(), 1);
-		assert_eq!(m.queries_leading_comments[0].text, " verify these");
+		assert_eq!(m.queries_comments.leading.len(), 1);
+		assert_eq!(m.queries_comments.leading[0].text, " verify these");
 	}
 
 	#[test]
 	fn comment_capture_multiple_lines() {
 		let src = "// line 1\n// line 2\n// line 3\nattacker[active]\n\nprincipal Alice[\n\tknows private a\n]\n\nqueries[\n\tconfidentiality? a\n]\n";
 		let m = parse_string("t.vp", src).expect("parse");
-		assert_eq!(m.pre_attacker_comments.len(), 3);
-		assert_eq!(m.pre_attacker_comments[0].text, " line 1");
-		assert_eq!(m.pre_attacker_comments[1].text, " line 2");
-		assert_eq!(m.pre_attacker_comments[2].text, " line 3");
+		assert_eq!(m.attacker_comments.leading.len(), 3);
+		assert_eq!(m.attacker_comments.leading[0].text, " line 1");
+		assert_eq!(m.attacker_comments.leading[1].text, " line 2");
+		assert_eq!(m.attacker_comments.leading[2].text, " line 3");
 	}
 
 	#[test]
 	fn comment_capture_block_pre_attacker() {
 		let src = "/* hello */\nattacker[active]\n\nprincipal Alice[\n\tknows private a\n]\n\nqueries[\n\tconfidentiality? a\n]\n";
 		let m = parse_string("t.vp", src).expect("parse");
-		assert_eq!(m.pre_attacker_comments.len(), 1);
-		assert_eq!(m.pre_attacker_comments[0].text, " hello ");
+		assert_eq!(m.attacker_comments.leading.len(), 1);
+		assert_eq!(m.attacker_comments.leading[0].text, " hello ");
 		assert!(matches!(
-			m.pre_attacker_comments[0].style,
+			m.attacker_comments.leading[0].style,
 			CommentStyle::Block
 		));
 	}
@@ -2557,9 +2166,9 @@ mod tests {
 	fn comment_capture_block_multiline() {
 		let src = "/* line1\n   line2\n   line3 */\nattacker[active]\n\nprincipal Alice[\n\tknows private a\n]\n\nqueries[\n\tconfidentiality? a\n]\n";
 		let m = parse_string("t.vp", src).expect("parse");
-		assert_eq!(m.pre_attacker_comments.len(), 1);
+		assert_eq!(m.attacker_comments.leading.len(), 1);
 		assert_eq!(
-			m.pre_attacker_comments[0].text,
+			m.attacker_comments.leading[0].text,
 			" line1\n   line2\n   line3 "
 		);
 	}
@@ -2576,9 +2185,9 @@ mod tests {
 		let m = parse_string("t.vp", src).expect("parse");
 		match &m.blocks[0] {
 			Block::Principal(p) => {
-				assert!(p.expressions[0].trailing_comment.is_some());
+				assert!(p.expressions[0].comments.trailing.is_some());
 				assert_eq!(
-					p.expressions[0].trailing_comment.as_ref().unwrap().text,
+					p.expressions[0].comments.trailing.as_ref().unwrap().text,
 					" long-term key"
 				);
 			}
@@ -2590,8 +2199,11 @@ mod tests {
 	fn comment_capture_trailing_on_attacker() {
 		let src = "attacker[active] // active model\n\nprincipal Alice[\n\tknows private a\n]\n\nqueries[\n\tconfidentiality? a\n]\n";
 		let m = parse_string("t.vp", src).expect("parse");
-		assert!(m.attacker_trailing.is_some());
-		assert_eq!(m.attacker_trailing.as_ref().unwrap().text, " active model");
+		assert!(m.attacker_comments.trailing.is_some());
+		assert_eq!(
+			m.attacker_comments.trailing.as_ref().unwrap().text,
+			" active model"
+		);
 	}
 
 	#[test]
@@ -2606,9 +2218,9 @@ mod tests {
 				_ => None,
 			})
 			.expect("message");
-		assert!(msg.trailing_comment.is_some());
+		assert!(msg.comments.trailing.is_some());
 		assert_eq!(
-			msg.trailing_comment.as_ref().unwrap().text,
+			msg.comments.trailing.as_ref().unwrap().text,
 			" initial flight"
 		);
 	}
@@ -2617,9 +2229,9 @@ mod tests {
 	fn comment_capture_trailing_on_query() {
 		let src = "attacker[active]\n\nprincipal Alice[\n\tknows private a\n]\n\nqueries[\n\tconfidentiality? a // primary\n]\n";
 		let m = parse_string("t.vp", src).expect("parse");
-		assert!(m.queries[0].trailing_comment.is_some());
+		assert!(m.queries[0].comments.trailing.is_some());
 		assert_eq!(
-			m.queries[0].trailing_comment.as_ref().unwrap().text,
+			m.queries[0].comments.trailing.as_ref().unwrap().text,
 			" primary"
 		);
 	}
@@ -2631,7 +2243,8 @@ mod tests {
 		match &m.blocks[0] {
 			Block::Principal(p) => {
 				let t = p.expressions[0]
-					.trailing_comment
+					.comments
+					.trailing
 					.as_ref()
 					.expect("trailing");
 				assert_eq!(t.text, " lt ");
@@ -2647,9 +2260,9 @@ mod tests {
 		let m = parse_string("t.vp", src).expect("parse");
 		match &m.blocks[0] {
 			Block::Principal(p) => {
-				assert!(p.expressions[0].trailing_comment.is_none());
-				assert_eq!(p.expressions[1].leading_comments.len(), 1);
-				assert_eq!(p.expressions[1].leading_comments[0].text, " multi\n\tline ");
+				assert!(p.expressions[0].comments.trailing.is_none());
+				assert_eq!(p.expressions[1].comments.leading.len(), 1);
+				assert_eq!(p.expressions[1].comments.leading[0].text, " multi\n\tline ");
 			}
 			_ => panic!(),
 		}
@@ -2661,8 +2274,8 @@ mod tests {
 		let m = parse_string("t.vp", src).expect("parse");
 		match &m.blocks[0] {
 			Block::Principal(p) => {
-				assert_eq!(p.tail_comments.len(), 1);
-				assert_eq!(p.tail_comments[0].text, " TODO add more");
+				assert_eq!(p.comments.tail.len(), 1);
+				assert_eq!(p.comments.tail[0].text, " TODO add more");
 			}
 			_ => panic!(),
 		}
@@ -2674,8 +2287,8 @@ mod tests {
 		let m = parse_string("t.vp", src).expect("parse");
 		match &m.blocks[0] {
 			Block::Principal(p) => {
-				assert!(p.closing_trailing.is_some());
-				assert_eq!(p.closing_trailing.as_ref().unwrap().text, " end of Alice");
+				assert!(p.comments.closing.is_some());
+				assert_eq!(p.comments.closing.as_ref().unwrap().text, " end of Alice");
 			}
 			_ => panic!(),
 		}
@@ -2687,8 +2300,8 @@ mod tests {
 		let m = parse_string("t.vp", src).expect("parse");
 		match &m.blocks[0] {
 			Block::Principal(p) => {
-				assert!(p.header_trailing.is_some());
-				assert_eq!(p.header_trailing.as_ref().unwrap().text, " initiator");
+				assert!(p.comments.opening.is_some());
+				assert_eq!(p.comments.opening.as_ref().unwrap().text, " initiator");
 			}
 			_ => panic!(),
 		}
@@ -2698,16 +2311,16 @@ mod tests {
 	fn comment_capture_tail_in_queries() {
 		let src = "attacker[active]\n\nprincipal Alice[\n\tknows private a\n]\n\nqueries[\n\tconfidentiality? a\n\t// done\n]\n";
 		let m = parse_string("t.vp", src).expect("parse");
-		assert_eq!(m.queries_tail_comments.len(), 1);
-		assert_eq!(m.queries_tail_comments[0].text, " done");
+		assert_eq!(m.queries_comments.tail.len(), 1);
+		assert_eq!(m.queries_comments.tail[0].text, " done");
 	}
 
 	#[test]
 	fn comment_capture_queries_closing_trailing() {
 		let src = "attacker[active]\n\nprincipal Alice[\n\tknows private a\n]\n\nqueries[\n\tconfidentiality? a\n] // end\n";
 		let m = parse_string("t.vp", src).expect("parse");
-		assert!(m.queries_closing_trailing.is_some());
-		assert_eq!(m.queries_closing_trailing.as_ref().unwrap().text, " end");
+		assert!(m.queries_comments.closing.is_some());
+		assert_eq!(m.queries_comments.closing.as_ref().unwrap().text, " end");
 	}
 
 	#[test]
@@ -2722,8 +2335,8 @@ mod tests {
 	fn comment_capture_queries_header_trailing() {
 		let src = "attacker[active]\n\nprincipal Alice[\n\tknows private a\n]\n\nqueries[ // start\n\tconfidentiality? a\n]\n";
 		let m = parse_string("t.vp", src).expect("parse");
-		assert!(m.queries_header_trailing.is_some());
-		assert_eq!(m.queries_header_trailing.as_ref().unwrap().text, " start");
+		assert!(m.queries_comments.opening.is_some());
+		assert_eq!(m.queries_comments.opening.as_ref().unwrap().text, " start");
 	}
 
 	#[test]
@@ -2738,7 +2351,7 @@ mod tests {
 				_ => None,
 			})
 			.expect("message");
-		assert!(msg.trailing_comment.is_none());
+		assert!(msg.comments.trailing.is_none());
 		let bob = m
 			.blocks
 			.iter()
@@ -2747,8 +2360,8 @@ mod tests {
 				_ => None,
 			})
 			.expect("bob");
-		assert_eq!(bob.leading_comments.len(), 1);
-		assert_eq!(bob.leading_comments[0].text, " next block");
+		assert_eq!(bob.comments.leading.len(), 1);
+		assert_eq!(bob.comments.leading[0].text, " next block");
 	}
 
 	#[test]
@@ -2758,7 +2371,7 @@ mod tests {
 		let Block::Principal(alice) = &m.blocks[0] else {
 			panic!("Alice's block");
 		};
-		let comments = &alice.expressions[1].leading_comments;
+		let comments = &alice.expressions[1].comments.leading;
 		assert_eq!(comments.len(), 1, "{comments:?}");
 		assert_eq!(comments[0].text.trim(), "secret");
 	}

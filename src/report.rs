@@ -1,10 +1,15 @@
 /* SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
  * SPDX-License-Identifier: GPL-3.0-only */
 
+use std::collections::HashMap;
+
 use serde::Serialize;
 
 use crate::tokens::Token;
-use crate::types::{Block, Constant, Declaration, Span, TraceValue, VerifyResult};
+use crate::types::{
+	Block, Capability, Declaration, Expression, Span, TraceStep, Value, VerifyResult,
+};
+use crate::util::{append_unique, article, copy_base_name, is_anonymous_name, plural};
 use crate::verify::VerifyReport;
 
 pub(crate) const DISCLAIMER: &str = "Verifpal is sound but incomplete. Every attack shown here is a genuine attack on the model \
@@ -61,7 +66,7 @@ pub enum DiagramRow {
 	},
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Computation {
 	pub names: Vec<String>,
@@ -125,6 +130,19 @@ pub struct Assumption {
 	pub from_phase: i32,
 }
 
+impl Assumption {
+	pub(crate) fn list(declared: &[(Value, Capability, i32)]) -> Vec<Assumption> {
+		declared
+			.iter()
+			.map(|(term, capability, onset)| Assumption {
+				term: term.to_string(),
+				capability: capability.name().to_string(),
+				from_phase: *onset,
+			})
+			.collect()
+	}
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EnvelopeReport {
@@ -146,7 +164,7 @@ pub struct QueryReport {
 	pub conclusion: String,
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub subtype: Option<String>,
-	pub steps: Vec<ReportStep>,
+	pub steps: Vec<TraceStep>,
 	pub preconditions: Vec<String>,
 	#[serde(skip_serializing_if = "Vec::is_empty")]
 	pub notes: Vec<String>,
@@ -155,70 +173,26 @@ pub struct QueryReport {
 	pub variants: usize,
 }
 
-pub(crate) fn short_name(model: &ModelReport) -> &str {
-	match &model.analysis {
-		Some(a) => &a.model,
-		None => model.file.rsplit('/').next().unwrap_or(&model.file),
-	}
-}
-
-pub(crate) fn has_trace(q: &QueryReport) -> bool {
-	q.resolved && !q.steps.is_empty()
-}
-
-pub(crate) fn attacked_values(a: &Analysis) -> std::collections::HashMap<String, Vec<usize>> {
-	let mut out: std::collections::HashMap<String, Vec<usize>> = std::collections::HashMap::new();
-	for (qi, q) in a.queries.iter().enumerate() {
-		for s in &q.steps {
-			if s.kind != "replay" && s.kind != "mutations" {
-				continue;
-			}
-			for v in &s.values {
-				let queries = out
-					.entry(crate::util::copy_base_name(&v.name).to_string())
-					.or_default();
-				if !queries.contains(&qi) {
-					queries.push(qi);
-				}
-			}
-		}
-	}
-	out
-}
-
-#[derive(Debug, Serialize)]
-pub struct ReportStep {
-	pub kind: String,
-	pub text: String,
-	#[serde(skip_serializing_if = "Option::is_none")]
-	pub sender: Option<String>,
-	#[serde(skip_serializing_if = "Option::is_none")]
-	pub recipient: Option<String>,
-	#[serde(skip_serializing_if = "Option::is_none")]
-	pub principal: Option<String>,
-	#[serde(skip_serializing_if = "Vec::is_empty")]
-	pub values: Vec<TraceValue>,
-}
-
-impl ReportStep {
-	pub fn new(kind: String, text: String) -> ReportStep {
-		ReportStep {
-			kind,
-			text,
-			sender: None,
-			recipient: None,
-			principal: None,
-			values: vec![],
-		}
-	}
-}
-
 #[derive(Clone, Copy, Debug, Serialize)]
 pub struct SourceRange {
 	pub start: usize,
 	pub end: usize,
 	pub line: usize,
 	pub column: usize,
+}
+
+pub(crate) struct Tally {
+	pub models: usize,
+	pub analysed: usize,
+	pub attacked: usize,
+	pub attacks: usize,
+	pub queries: usize,
+}
+
+impl Tally {
+	pub(crate) fn failed(&self) -> usize {
+		self.models - self.analysed
+	}
 }
 
 impl Run {
@@ -250,10 +224,43 @@ impl Run {
 			models,
 		}
 	}
+
+	pub(crate) fn tally(&self) -> Tally {
+		let analyses: Vec<&Analysis> = self
+			.models
+			.iter()
+			.filter_map(|m| m.analysis.as_ref())
+			.collect();
+		Tally {
+			models: self.models.len(),
+			analysed: analyses.len(),
+			attacked: analyses.iter().filter(|a| a.attacks > 0).count(),
+			attacks: analyses.iter().map(|a| a.attacks).sum(),
+			queries: analyses.iter().map(|a| a.queries.len()).sum(),
+		}
+	}
+}
+
+impl ModelReport {
+	pub(crate) fn short_name(&self) -> &str {
+		match &self.analysis {
+			Some(a) => &a.model,
+			None => self.file.rsplit('/').next().unwrap_or(&self.file),
+		}
+	}
+
+	pub(crate) fn attacks(&self) -> usize {
+		self.analysis.as_ref().map_or(0, |a| a.attacks)
+	}
 }
 
 impl Analysis {
 	pub(crate) fn of(report: &VerifyReport, source: &str) -> Analysis {
+		let queries: Vec<QueryReport> = report
+			.results
+			.iter()
+			.map(|r| QueryReport::of(r, source))
+			.collect();
 		Analysis {
 			model: report.file_name.clone(),
 			attacker: report.attacker.to_string(),
@@ -261,15 +268,7 @@ impl Analysis {
 			code: report.code.clone(),
 			attacks: report.results.iter().filter(|r| r.resolved).count(),
 			elapsed_ms: report.elapsed.map(|d| d.as_millis()).unwrap_or_default(),
-			assumptions: report
-				.assumptions
-				.iter()
-				.map(|(term, capability, onset)| Assumption {
-					term: term.to_string(),
-					capability: capability.name().to_string(),
-					from_phase: *onset,
-				})
-				.collect(),
+			assumptions: Assumption::list(&report.assumptions),
 			scenarios: report
 				.scenarios
 				.iter()
@@ -287,15 +286,67 @@ impl Analysis {
 					corrupt_from: s.corrupt_from,
 				})
 				.collect(),
-			notes: analysis_notes(report),
+			notes: analysis_notes(report, &queries),
 			provenance: analysis_provenance(report),
-			queries: report
-				.results
-				.iter()
-				.map(|r| QueryReport::of(r, source))
-				.collect(),
+			queries,
 		}
 	}
+
+	pub(crate) fn attacked_values(&self) -> HashMap<String, Vec<usize>> {
+		let mut out: HashMap<String, Vec<usize>> = HashMap::new();
+		for (qi, q) in self.queries.iter().enumerate() {
+			for s in &q.steps {
+				if s.kind != "replay" && s.kind != "mutations" {
+					continue;
+				}
+				for v in &s.values {
+					append_unique(
+						out.entry(copy_base_name(&v.name).to_string()).or_default(),
+						qi,
+					);
+				}
+			}
+		}
+		out
+	}
+
+	pub(crate) fn code_pairs(&self) -> impl Iterator<Item = &str> {
+		self.code
+			.as_bytes()
+			.chunks(2)
+			.filter_map(|pair| std::str::from_utf8(pair).ok())
+	}
+
+	pub(crate) fn scope(&self) -> String {
+		let mut text = format!(
+			"Every verdict above was reached against {} {} attacker, with each principal running {} \
+			 concurrent session{}, over exactly the model as written. An attack is a witness and \
+			 stands on its own. A query reported as holding says only that this search found no \
+			 attack at those parameters: the search space this engine defines was explored, which is \
+			 never the space of all attacks.",
+			article(&self.attacker),
+			self.attacker,
+			self.sessions,
+			plural(self.sessions as usize)
+		);
+		let reasons = truncation_reasons(&self.queries);
+		if !reasons.is_empty() {
+			text.push_str(&format!(
+				" Some searches in this run stopped short even of that ({}), so their holds cover \
+				 less still.",
+				reasons.join(", ")
+			));
+		}
+		text
+	}
+}
+
+fn truncation_reasons(queries: &[QueryReport]) -> Vec<&str> {
+	let mut reasons: Vec<&str> = Vec::new();
+	for t in queries.iter().flat_map(|q| &q.envelope.truncations) {
+		append_unique(&mut reasons, t.as_str());
+	}
+	reasons
 }
 
 impl QueryReport {
@@ -319,23 +370,16 @@ impl QueryReport {
 			summary: r.summary.clone(),
 			conclusion: r.conclusion.clone(),
 			subtype: r.subtype.map(|s| s.name().to_string()),
-			steps: r
-				.steps
-				.iter()
-				.map(|s| ReportStep {
-					kind: s.kind.to_string(),
-					text: s.text.clone(),
-					sender: s.sender.clone(),
-					recipient: s.recipient.clone(),
-					principal: s.principal.clone(),
-					values: s.values.clone(),
-				})
-				.collect(),
+			steps: r.steps.clone(),
 			preconditions: r.options.iter().map(|o| o.summary.clone()).collect(),
 			notes: r.notes.clone(),
 			generated: r.query.span == Span::default(),
 			variants: r.variants.len(),
 		}
+	}
+
+	pub(crate) fn has_trace(&self) -> bool {
+		self.resolved && !self.steps.is_empty()
 	}
 }
 
@@ -344,29 +388,22 @@ fn describe(source: &str) -> (Vec<DiagramRow>, Vec<Token>) {
 		return (Vec::new(), Vec::new());
 	}
 	let (parsed, index) = crate::parser::parse_string_indexed("report.vp", source);
-	let mut tokens = index.tokens().to_vec();
-	tokens.sort_by_key(|t| t.span.start);
+	let tokens = index.tokens().to_vec();
 	let Ok(model) = parsed else {
 		return (Vec::new(), tokens);
 	};
 	let mut rows: Vec<DiagramRow> = Vec::new();
 	let mut hop = 0usize;
 	let mut phase = 0i32;
-	let mut senders: Vec<&str> = Vec::new();
+	let mut participants: Vec<&str> = Vec::new();
 	for block in &model.blocks {
 		match block {
 			Block::Message(msg) => {
-				for name in [&msg.sender_name, &msg.recipient_name] {
-					if !senders.contains(&&**name) {
-						senders.push(name);
-					}
-				}
+				append_unique(&mut participants, &msg.sender_name);
+				append_unique(&mut participants, &msg.recipient_name);
 			}
-			Block::Principal(p)
-				if p.expressions.iter().any(|e| e.kind == Declaration::Leaks)
-					&& !senders.contains(&p.name.as_str()) =>
-			{
-				senders.push(&p.name);
+			Block::Principal(p) if p.expressions.iter().any(|e| e.kind == Declaration::Leaks) => {
+				append_unique(&mut participants, &p.name);
 			}
 			_ => {}
 		}
@@ -380,86 +417,71 @@ fn describe(source: &str) -> (Vec<DiagramRow>, Vec<Token>) {
 					phase,
 					sender: msg.sender_name.to_string(),
 					recipient: msg.recipient_name.to_string(),
-					values: msg.constants.iter().map(diagram_value).collect(),
+					values: msg
+						.constants
+						.iter()
+						.map(|c| DiagramValue {
+							name: c.name.to_string(),
+							guarded: c.guard,
+						})
+						.collect(),
 				});
 			}
 			Block::Phase(p) => {
 				phase = p.number;
 				rows.push(DiagramRow::Phase { number: p.number });
 			}
-			Block::Principal(p) => {
-				if !senders.contains(&p.name.as_str()) {
-					continue;
-				}
-				let mut generates: Vec<String> = Vec::new();
-				let mut computes: Vec<Computation> = Vec::new();
-				for expr in &p.expressions {
-					match expr.kind {
-						Declaration::Knows => {}
-						Declaration::Generates => {
-							generates.extend(expr.constants.iter().map(|c| c.name.to_string()))
-						}
-						Declaration::Assignment => {
-							if let Some(step) = computation(expr) {
-								computes.push(step);
-							}
-						}
-						Declaration::Leaks => {
-							flush_activity(
-								&mut rows,
-								&p.name,
-								phase,
-								&mut generates,
-								&mut computes,
-							);
-							rows.push(DiagramRow::Leak {
-								principal: p.name.clone(),
-								values: expr
-									.constants
-									.iter()
-									.map(|c| DiagramValue {
-										name: c.name.to_string(),
-										guarded: false,
-									})
-									.collect(),
-							});
-						}
+			Block::Principal(p) if participants.contains(&p.name.as_str()) => {
+				let leaks = |e: &Expression| e.kind == Declaration::Leaks;
+				for run in p.expressions.split_inclusive(leaks) {
+					let generates: Vec<String> = run
+						.iter()
+						.filter(|e| e.kind == Declaration::Generates)
+						.flat_map(|e| e.constants.iter().map(|c| c.name.to_string()))
+						.collect();
+					let computes: Vec<Computation> = run
+						.iter()
+						.filter(|e| e.kind == Declaration::Assignment)
+						.filter_map(computation)
+						.collect();
+					if !generates.is_empty() || !computes.is_empty() {
+						rows.push(DiagramRow::Activity {
+							principal: p.name.clone(),
+							phase,
+							generates,
+							computes,
+						});
+					}
+					if let Some(leak) = run.last().filter(|e| leaks(e)) {
+						rows.push(DiagramRow::Leak {
+							principal: p.name.clone(),
+							values: leak
+								.constants
+								.iter()
+								.map(|c| DiagramValue {
+									name: c.name.to_string(),
+									guarded: false,
+								})
+								.collect(),
+						});
 					}
 				}
-				flush_activity(&mut rows, &p.name, phase, &mut generates, &mut computes);
 			}
+			Block::Principal(_) => {}
 		}
 	}
 	(rows, tokens)
 }
 
-fn flush_activity(
-	rows: &mut Vec<DiagramRow>,
-	principal: &str,
-	phase: i32,
-	generates: &mut Vec<String>,
-	computes: &mut Vec<Computation>,
-) {
-	if generates.is_empty() && computes.is_empty() {
-		return;
-	}
-	rows.push(DiagramRow::Activity {
-		principal: principal.to_string(),
-		phase,
-		generates: std::mem::take(generates),
-		computes: std::mem::take(computes),
-	});
-}
-
-fn computation(expr: &crate::types::Expression) -> Option<Computation> {
+fn computation(expr: &Expression) -> Option<Computation> {
 	let names: Vec<String> = expr
 		.constants
 		.iter()
-		.filter(|c| !crate::util::is_anonymous_name(&c.name))
+		.filter(|c| !is_anonymous_name(&c.name))
 		.map(|c| c.name.to_string())
 		.collect();
 	let (primitive, checked) = match &expr.assigned {
-		Some(crate::types::Value::Primitive(p)) => (
+		Some(Value::Primitive(p)) => (
 			Some(crate::primitive::primitive_name(p.id).to_string()),
 			p.instance_check,
 		),
@@ -476,16 +498,9 @@ fn computation(expr: &crate::types::Expression) -> Option<Computation> {
 	})
 }
 
-fn diagram_value(c: &Constant) -> DiagramValue {
-	DiagramValue {
-		name: c.name.to_string(),
-		guarded: c.guard,
-	}
-}
-
 fn analysis_provenance(report: &VerifyReport) -> Vec<String> {
 	let mut out: Vec<String> = Vec::new();
-	if report.provenance.auto_queries {
+	if report.auto_queries {
 		out.push(
 			"The model's own queries block was replaced by the set --auto-queries derives \
 			 from the protocol; these are generated claims, not the author's."
@@ -508,7 +523,7 @@ fn trace_text_contains(report: &VerifyReport, marker: char) -> bool {
 	})
 }
 
-fn analysis_notes(report: &VerifyReport) -> Vec<String> {
+fn analysis_notes(report: &VerifyReport, queries: &[QueryReport]) -> Vec<String> {
 	let mut notes: Vec<String> = Vec::new();
 	if report.sessions > 1 && trace_text_contains(report, '#') {
 		let span = if report.sessions == 2 {
@@ -523,14 +538,7 @@ fn analysis_notes(report: &VerifyReport) -> Vec<String> {
 	if !report.scenarios.is_empty() && trace_text_contains(report, '@') {
 		notes.push("Per-scenario values and principals carry the suffix @2 onward.".to_string());
 	}
-	let mut reasons: Vec<&'static str> = Vec::new();
-	for r in &report.results {
-		for t in &r.envelope.truncations {
-			if !reasons.contains(&t.name()) {
-				reasons.push(t.name());
-			}
-		}
-	}
+	let reasons = truncation_reasons(queries);
 	if !reasons.is_empty() {
 		notes.push(format!(
 			"Some searches stopped short of exhausting the space ({}); a query reported as \
@@ -556,6 +564,7 @@ impl SourceRange {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::types::TraceValue;
 
 	#[test]
 	fn a_report_serializes_to_the_documented_shape() {
@@ -604,12 +613,12 @@ mod tests {
 						conclusion: "m1 is obtained by Attacker.".to_string(),
 						subtype: None,
 						steps: vec![
-							ReportStep::new(
-								"derive".to_string(),
+							TraceStep::new(
+								"derive",
 								"Attacker constructs PUBKEY(nil) from nil.".to_string(),
 							),
-							ReportStep {
-								kind: "mutations".to_string(),
+							TraceStep {
+								kind: "mutations",
 								text: "Attacker replaces ga with PUBKEY(nil).".to_string(),
 								sender: Some("Alice".to_string()),
 								recipient: Some("Bob".to_string()),

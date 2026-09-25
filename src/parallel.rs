@@ -5,7 +5,8 @@
 mod pool {
 	use std::sync::LazyLock;
 
-	static POOL: LazyLock<rayon::ThreadPool> = LazyLock::new(|| build(configured_threads()));
+	pub(super) static POOL: LazyLock<rayon::ThreadPool> =
+		LazyLock::new(|| build(configured_threads()));
 
 	fn configured_threads() -> usize {
 		std::env::var("VERIFPAL_THREADS")
@@ -27,10 +28,6 @@ mod pool {
 			.build()
 			.expect("a thread pool builds")
 	}
-
-	pub(super) fn current() -> &'static rayon::ThreadPool {
-		&POOL
-	}
 }
 
 #[cfg(feature = "cli")]
@@ -38,7 +35,7 @@ fn threads() -> usize {
 	if rayon::current_thread_index().is_some() {
 		rayon::current_num_threads()
 	} else {
-		pool::current().current_num_threads()
+		pool::POOL.current_num_threads()
 	}
 }
 
@@ -62,7 +59,7 @@ pub(crate) fn map_ordered<T: Send, R: Send>(
 	if crate::context::live_generations() > 1 {
 		return items.into_iter().map(f).collect();
 	}
-	pool::current().install(|| items.into_par_iter().map(run).collect())
+	pool::POOL.install(|| items.into_par_iter().map(run).collect())
 }
 
 #[cfg(all(feature = "cli", test))]
@@ -160,7 +157,6 @@ mod tests {
 		fn assert_sync<T: Sync>() {}
 		assert_sync::<crate::context::VerifyContext>();
 		assert_sync::<crate::types::ProtocolTrace>();
-		assert_sync::<crate::types::PrincipalState>();
 		assert_sync::<crate::types::AttackerState>();
 		assert_sync::<crate::solve::symbolic::SymbolicState>();
 		assert_sync::<crate::types::Value>();

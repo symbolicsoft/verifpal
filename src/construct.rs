@@ -2,7 +2,9 @@
  * SPDX-License-Identifier: GPL-3.0-only */
 
 use crate::principal::*;
-use crate::sanity::{sanity_assignment_constants, sanity_primitive, unknown_constant};
+use crate::sanity::{
+	sanity_assignment_constants, sanity_message_principals, sanity_primitive, unknown_constant,
+};
 use crate::types::*;
 use crate::util::*;
 use crate::value::*;
@@ -56,20 +58,9 @@ pub(crate) fn construct_protocol_trace(
 	let mut trace = ProtocolTrace {
 		principals: principals.to_vec(),
 		principal_ids: principal_ids.to_vec(),
-		slots: vec![],
-		index: IdMap::default(),
-		max_phase: 0,
-		used_by: IdMap::default(),
-		leaks: Arc::new(Vec::new()),
-		session_siblings: IdMap::default(),
-		copy_siblings: IdMap::default(),
-		interchangeable: IdMap::default(),
-		actors: IdMap::default(),
-		scenario_bound: IdSet::default(),
-		equivalence_queried: IdSet::default(),
+		..ProtocolTrace::default()
 	};
 	let declared = model_declarations(m);
-	let mut leaks: Vec<LeakEvent> = Vec::new();
 	let mut declared_at = 0i32;
 	let mut current_phase = 0i32;
 
@@ -86,6 +77,8 @@ pub(crate) fn construct_protocol_trace(
 				sent_by: vec![],
 				declared_at,
 				phases: vec![current_phase],
+				mutatable_to: vec![],
+				delivery_phase: None,
 			},
 		);
 	}
@@ -96,7 +89,6 @@ pub(crate) fn construct_protocol_trace(
 				declared_at = construct_trace_render_principal(
 					&mut trace,
 					&declared,
-					&mut leaks,
 					principal,
 					declared_at,
 					current_phase,
@@ -120,8 +112,34 @@ pub(crate) fn construct_protocol_trace(
 	}
 	trace.max_phase = current_phase;
 	trace.used_by = construct_trace_used_by(&trace);
-	trace.leaks = Arc::new(leaks);
+	for slot in &mut trace.slots {
+		for event in &slot.sent_by {
+			if !event.guarded || slot.mutatable_to.contains(&event.sender) {
+				append_unique(&mut slot.mutatable_to, event.recipient);
+			}
+		}
+		slot.delivery_phase = slot
+			.mutatable_to
+			.iter()
+			.filter_map(|&who| slot.substitution_phase(who))
+			.min();
+	}
+	trace.capabilities = construct_capability_index(&trace);
 	Ok(trace)
+}
+
+fn construct_capability_index(trace: &ProtocolTrace) -> CapabilityIndex {
+	let mut index = CapabilityIndex::default();
+	for slot in &trace.slots {
+		for term in crate::value::subterms(&slot.initial_value) {
+			if !matches!(term, Value::Primitive(p) if !p.capabilities.is_empty()) {
+				continue;
+			}
+			index.insert(term);
+			index.insert(&crate::resolution::resolve_trace_term(term, trace));
+		}
+	}
+	index
 }
 
 type MentionMemo = IdMap<ValueId, Arc<IdSet<ValueId>>>;
@@ -185,7 +203,6 @@ fn mentions_of_constant(
 fn construct_trace_render_principal(
 	trace: &mut ProtocolTrace,
 	declared: &Declarations,
-	leaks: &mut Vec<LeakEvent>,
 	principal: &Principal,
 	mut declared_at: i32,
 	current_phase: i32,
@@ -210,7 +227,6 @@ fn construct_trace_render_principal(
 				construct_trace_render_leaks(
 					trace,
 					declared,
-					leaks,
 					principal,
 					expr,
 					current_phase,
@@ -240,11 +256,7 @@ fn construct_trace_render_knows(
 					return Err(e);
 				}
 				let was = declared_as(existing);
-				let now = declared_as(&Constant {
-					declaration: Some(Declaration::Knows),
-					qualifier: expr.qualifier,
-					..c.clone()
-				});
+				let now = declared_as(&declared_constant(c, Declaration::Knows, expr.qualifier));
 				return Err(VerifpalError::sanity(
 					format!("`{}` is introduced in two different ways", c).into(),
 				)
@@ -287,27 +299,14 @@ fn construct_trace_render_knows(
 			trace.slots[idx].known_by.push((principal.id, principal.id));
 			continue;
 		}
-		let new_c = Constant {
-			name: c.name.clone(),
-			id: c.id,
-			guard: c.guard,
-			fresh: false,
-			leaked: false,
-			declaration: Some(Declaration::Knows),
-			qualifier: expr.qualifier,
-		};
-		let slot_idx = trace_declare(
+		let constant = declared_constant(c, Declaration::Knows, expr.qualifier);
+		let slot_idx = declare_by(
 			trace,
-			TraceSlot {
-				declared_span: expr.span,
-				initial_value: Value::Constant(new_c.clone()),
-				constant: new_c,
-				creator: principal.id,
-				known_by: vec![],
-				sent_by: vec![],
-				declared_at,
-				phases: vec![],
-			},
+			principal,
+			expr,
+			declared_at,
+			Value::Constant(constant.clone()),
+			constant,
 		);
 		if expr.qualifier != Some(Qualifier::Public) {
 			continue;
@@ -322,11 +321,48 @@ fn construct_trace_render_knows(
 }
 
 fn trace_declare(trace: &mut ProtocolTrace, slot: TraceSlot) -> usize {
-	let const_id = slot.constant.id;
+	trace.index.insert(slot.constant.id, trace.slots.len());
 	trace.slots.push(slot);
-	let slot_idx = trace.slots.len() - 1;
-	trace.index.insert(const_id, slot_idx);
-	slot_idx
+	trace.slots.len() - 1
+}
+
+fn declare_by(
+	trace: &mut ProtocolTrace,
+	principal: &Principal,
+	expr: &Expression,
+	declared_at: i32,
+	initial_value: Value,
+	constant: Constant,
+) -> usize {
+	trace_declare(
+		trace,
+		TraceSlot {
+			declared_span: expr.span,
+			constant,
+			initial_value,
+			creator: principal.id,
+			known_by: vec![],
+			sent_by: vec![],
+			declared_at,
+			phases: vec![],
+			mutatable_to: vec![],
+			delivery_phase: None,
+		},
+	)
+}
+
+fn declared_constant(
+	c: &Constant,
+	declaration: Declaration,
+	qualifier: Option<Qualifier>,
+) -> Constant {
+	Constant {
+		fresh: declaration == Declaration::Generates,
+		leaked: false,
+		declaration: Some(declaration),
+		qualifier,
+		..c.clone()
+	}
 }
 
 type Declarations = IdMap<ValueId, (String, Span)>;
@@ -371,11 +407,7 @@ fn trace_slot_of(trace: &ProtocolTrace, declared: &Declarations, c: &Constant) -
 			c.name
 		)));
 	}
-	Err(unknown_constant(
-		&c.name,
-		trace,
-		"not declared by any principal".to_string(),
-	))
+	Err(unknown_constant(c, trace))
 }
 
 fn construct_trace_render_generates(
@@ -403,27 +435,14 @@ fn construct_trace_render_generates(
 					.help("pick a name no principal has used yet"),
 			);
 		}
-		let new_c = Constant {
-			name: c.name.clone(),
-			id: c.id,
-			guard: c.guard,
-			fresh: true,
-			leaked: false,
-			declaration: Some(Declaration::Generates),
-			qualifier: Some(Qualifier::Private),
-		};
-		trace_declare(
+		let constant = declared_constant(c, Declaration::Generates, Some(Qualifier::Private));
+		declare_by(
 			trace,
-			TraceSlot {
-				declared_span: expr.span,
-				initial_value: Value::Constant(new_c.clone()),
-				constant: new_c,
-				creator: principal.id,
-				known_by: vec![],
-				sent_by: vec![],
-				declared_at,
-				phases: vec![],
-			},
+			principal,
+			expr,
+			declared_at,
+			Value::Constant(constant.clone()),
+			constant,
 		);
 	}
 	Ok(())
@@ -490,15 +509,6 @@ fn construct_trace_render_assignment(
 					.help("give this one a different name"),
 			);
 		}
-		let new_c = Constant {
-			name: c.name.clone(),
-			id: c.id,
-			guard: c.guard,
-			fresh: false,
-			leaked: false,
-			declaration: Some(Declaration::Assignment),
-			qualifier: Some(Qualifier::Private),
-		};
 		let mut initial_value = assigned.clone();
 		if let Value::Primitive(ref mut p) = initial_value {
 			let mutable = Arc::make_mut(p);
@@ -511,18 +521,13 @@ fn construct_trace_render_assignment(
 			}
 			mutable.hash.clear();
 		}
-		trace_declare(
+		declare_by(
 			trace,
-			TraceSlot {
-				declared_span: expr.span,
-				constant: new_c,
-				initial_value,
-				creator: principal.id,
-				known_by: vec![],
-				sent_by: vec![],
-				declared_at,
-				phases: vec![],
-			},
+			principal,
+			expr,
+			declared_at,
+			initial_value,
+			declared_constant(c, Declaration::Assignment, Some(Qualifier::Private)),
 		);
 	}
 	Ok(())
@@ -531,7 +536,6 @@ fn construct_trace_render_assignment(
 fn construct_trace_render_leaks(
 	trace: &mut ProtocolTrace,
 	declared: &Declarations,
-	leaks: &mut Vec<LeakEvent>,
 	principal: &Principal,
 	expr: &Expression,
 	current_phase: i32,
@@ -561,11 +565,10 @@ fn construct_trace_render_leaks(
 		}
 		trace.slots[idx].constant.leaked = true;
 		append_unique(&mut trace.slots[idx].phases, current_phase);
-		leaks.push(LeakEvent {
+		trace.leaks.push(LeakEvent {
 			constant_id: c.id,
 			principal_id: principal.id,
 			declared_at,
-			phase: current_phase,
 		});
 	}
 	Ok(())
@@ -578,21 +581,7 @@ fn construct_trace_render_message(
 	current_phase: i32,
 	declared_at: i32,
 ) -> VResult<()> {
-	if message.sender == message.recipient {
-		return Err(VerifpalError::sanity(
-			format!(
-				"{} both sends and receives this message",
-				message.sender_name
-			)
-			.into(),
-		)
-		.note("a message travels between two different principals")
-		.help(format!(
-			"name the other principal as the recipient, e.g. `{} -> Bob: {}`",
-			message.sender_name,
-			crate::pretty::pretty_constants(&message.constants)
-		)));
-	}
+	sanity_message_principals(message)?;
 	for c in &message.constants {
 		let idx = trace_slot_of(trace, declared, c)?;
 		let sender_knows = trace.slots[idx].known_by_principal(message.sender);
@@ -649,187 +638,6 @@ fn construct_trace_render_message(
 	Ok(())
 }
 
-pub(crate) fn construct_principal_states(m: &Model, trace: &ProtocolTrace) -> Vec<PrincipalState> {
-	let mut capability_index = CapabilityIndex::default();
-	for slot in &trace.slots {
-		for term in crate::value::subterms(&slot.initial_value) {
-			if !matches!(term, Value::Primitive(p) if !p.capabilities.is_empty()) {
-				continue;
-			}
-			capability_index.insert(term);
-			capability_index.insert(&crate::resolution::resolve_trace_term(term, trace));
-		}
-	}
-	let capabilities = Arc::new(capability_index);
-	let mut states = Vec::new();
-	for (principal_name, &principal_id) in trace.principals.iter().zip(trace.principal_ids.iter()) {
-		let n = trace.slots.len();
-		let mut meta_vec = Vec::with_capacity(n);
-		let mut values_vec = Vec::with_capacity(n);
-		let mut index_map = IdMap::with_capacity_and_hasher(n, Default::default());
-
-		let wire_index = construct_wire_index(m, trace, principal_id);
-
-		for slot in &trace.slots {
-			let c = &slot.constant;
-			let mut knows = slot.creator == principal_id;
-			let mut sender = slot.creator;
-			for &(recipient, from) in &slot.known_by {
-				if recipient == principal_id {
-					sender = from;
-					knows = true;
-					break;
-				}
-			}
-			let travel = wire_index.get(&c.id);
-			let at = meta_vec.len();
-			index_map.insert(c.id, at);
-			meta_vec.push(SlotMeta {
-				constant: c.clone(),
-				creator: slot.creator,
-				guard: travel.is_some_and(|t| t.guard),
-				known: knows,
-				wire: travel.map(|t| t.wire.clone()).unwrap_or_default(),
-				known_by: slot.known_by.clone(),
-				sent_at: slot
-					.sent_by
-					.iter()
-					.filter(|event| event.sender == principal_id)
-					.map(|event| event.declared_at)
-					.min(),
-				declared_at: slot.declared_at,
-				mutatable_to: travel.map(|t| t.mutatable_to.clone()).unwrap_or_default(),
-				delivery_phases: travel
-					.map(|t| {
-						t.mutatable_to
-							.iter()
-							.filter_map(|&who| {
-								trace.substitution_phase(at, who).map(|phase| (who, phase))
-							})
-							.collect()
-					})
-					.unwrap_or_default(),
-				phase: slot.phases.clone(),
-			});
-			values_vec.push(SlotValues {
-				value: slot.initial_value.clone(),
-				pre_rewrite: slot.initial_value.clone(),
-				original: slot.initial_value.clone(),
-				installed_at: None,
-				addressed: false,
-				provenance: Provenance {
-					creator: slot.creator,
-					sender,
-					attacker_tainted: false,
-				},
-			});
-		}
-		states.push(PrincipalState {
-			name: principal_name.clone(),
-			id: principal_id,
-			meta: Arc::new(meta_vec),
-			values: values_vec,
-			index: Arc::new(index_map),
-			leaks: trace.leaks.clone(),
-			halted_at: None,
-			foreign_halts: Vec::new(),
-			starved: Vec::new(),
-			capabilities: capabilities.clone(),
-			forwarded: false,
-		});
-	}
-	states
-}
-
-#[derive(Default)]
-struct WireTravel {
-	wire: Vec<PrincipalId>,
-	guard: bool,
-	mutatable_to: Vec<PrincipalId>,
-}
-
-fn construct_wire_index(
-	m: &Model,
-	trace: &ProtocolTrace,
-	principal_id: PrincipalId,
-) -> IdMap<ValueId, WireTravel> {
-	let mut index: IdMap<ValueId, WireTravel> = IdMap::default();
-	for block in &m.blocks {
-		let Block::Message(message) = block else {
-			continue;
-		};
-		for msg_const in &message.constants {
-			let Some(slot_idx) = trace.index_of(msg_const) else {
-				continue;
-			};
-			let is_recipient = message.recipient == principal_id;
-			let is_creator = trace.slots[slot_idx].creator == principal_id;
-			let travel = index.entry(msg_const.id).or_default();
-			append_unique(&mut travel.wire, message.recipient);
-			if !travel.guard {
-				travel.guard = msg_const.guard && (is_recipient || is_creator);
-			}
-			if !msg_const.guard || travel.mutatable_to.contains(&message.sender) {
-				append_unique(&mut travel.mutatable_to, message.recipient);
-			}
-		}
-	}
-	index
-}
-
-impl PrincipalState {
-	pub fn clone_for_depth(&self, purify: bool) -> PrincipalState {
-		let values = self
-			.values
-			.iter()
-			.map(|sv| {
-				let (value, pre_rewrite) = if purify {
-					(&sv.original, &sv.original)
-				} else {
-					(&sv.value, &sv.pre_rewrite)
-				};
-				SlotValues {
-					value: value.clone(),
-					pre_rewrite: pre_rewrite.clone(),
-					original: sv.original.clone(),
-					installed_at: if purify { None } else { sv.installed_at },
-					addressed: if purify { false } else { sv.addressed },
-					provenance: Provenance {
-						creator: sv.provenance.creator,
-						sender: sv.provenance.sender,
-						attacker_tainted: if purify {
-							false
-						} else {
-							sv.provenance.attacker_tainted
-						},
-					},
-				}
-			})
-			.collect();
-		PrincipalState {
-			name: self.name.clone(),
-			id: self.id,
-			meta: self.meta.clone(),
-			values,
-			index: self.index.clone(),
-			leaks: self.leaks.clone(),
-			halted_at: if purify { None } else { self.halted_at },
-			foreign_halts: if purify {
-				Vec::new()
-			} else {
-				self.foreign_halts.clone()
-			},
-			starved: if purify {
-				Vec::new()
-			} else {
-				self.starved.clone()
-			},
-			capabilities: self.capabilities.clone(),
-			forwarded: if purify { false } else { self.forwarded },
-		}
-	}
-}
-
 #[cfg(test)]
 mod tests {
 	use crate::types::*;
@@ -851,7 +659,7 @@ mod tests {
 		confidentiality? cst_a\n\
 		]\n";
 
-	fn fixture() -> (ProtocolTrace, Vec<PrincipalState>) {
+	fn fixture() -> ProtocolTrace {
 		let m = crate::parser::parse_string("cst.vp", SRC).expect("parses");
 		crate::sanity::sanity(&m).expect("passes sanity")
 	}
@@ -866,8 +674,8 @@ mod tests {
 		}
 		source.push_str("]\nqueries[confidentiality? secret]\n");
 		let model = crate::parser::parse_string("capability-transcript.vp", &source).unwrap();
-		let (_, states) = crate::sanity::sanity(&model).unwrap();
-		assert!(states.iter().all(|state| state.capabilities.is_empty()));
+		let trace = crate::sanity::sanity(&model).unwrap();
+		assert!(trace.capabilities.is_empty());
 	}
 
 	fn slot(km: &ProtocolTrace, name: &str) -> usize {
@@ -879,7 +687,7 @@ mod tests {
 
 	#[test]
 	fn every_trace_opens_with_the_built_in_nil_every_principal_holds() {
-		let (km, _) = fixture();
+		let km = fixture();
 		let nil = &km.slots[0];
 		assert!(nil.constant.is_nil());
 		assert_eq!(nil.constant.qualifier, Some(Qualifier::Public));
@@ -894,7 +702,7 @@ mod tests {
 
 	#[test]
 	fn a_public_constant_is_known_to_every_principal_from_its_declaration() {
-		let (km, _) = fixture();
+		let km = fixture();
 		let ctx = &km.slots[slot(&km, "cst_ctx")];
 		for &pid in &km.principal_ids {
 			assert!(ctx.known_by_principal(pid));
@@ -910,69 +718,19 @@ mod tests {
 
 	#[test]
 	fn only_an_unguarded_delivery_makes_a_slot_mutatable_to_its_recipient() {
-		let (_, states) = fixture();
-		let bob = states.iter().find(|s| s.name == "Bob").expect("Bob");
-		let at = |name: &str| {
-			bob.meta
-				.iter()
-				.position(|m| &*m.constant.name == name)
-				.unwrap_or_else(|| panic!("no slot named {name}"))
-		};
-		let ga = &bob.meta[at("cst_ga")];
-		assert!(ga.wire.contains(&bob.id));
+		let km = fixture();
+		let bob = km.principal_ids[km.principals.iter().position(|p| p == "Bob").expect("Bob")];
+		let ga = &km.slots[slot(&km, "cst_ga")];
+		assert!(ga.sent_by.iter().any(|event| event.recipient == bob));
 		assert!(
-			ga.mutatable_to.contains(&bob.id),
+			ga.mutation_reaches(bob),
 			"cst_ga travels unguarded, so the attacker can replace it on the way"
 		);
-		let n = &bob.meta[at("cst_n")];
-		assert!(n.guard, "cst_n is written in guard brackets");
+		let n = &km.slots[slot(&km, "cst_n")];
+		assert!(n.guarded_for(bob), "cst_n is written in guard brackets");
 		assert!(
-			!n.mutatable_to.contains(&bob.id),
+			!n.mutation_reaches(bob),
 			"a guarded delivery is not a substitution the attacker may make"
 		);
-	}
-
-	#[test]
-	fn purification_restores_the_honest_value_even_where_a_guard_was_defeated() {
-		let (_, states) = fixture();
-		let mut ps = states
-			.iter()
-			.find(|s| s.name == "Bob")
-			.expect("Bob")
-			.clone();
-		let at = |ps: &PrincipalState, name: &str| {
-			ps.meta
-				.iter()
-				.position(|m| &*m.constant.name == name)
-				.unwrap_or_else(|| panic!("no slot named {name}"))
-		};
-		let (ga, k) = (at(&ps, "cst_ga"), at(&ps, "cst_k"));
-		let honest = ps.values[ga].value.clone();
-		let honest_k = ps.values[k].value.clone();
-		let forged = crate::value::value_nil();
-
-		ps.values[ga].provenance.attacker_tainted = true;
-		ps.values[ga].provenance.creator = crate::principal::ATTACKER_ID;
-		ps.values[ga].set_value(forged.clone());
-		ps.halted_at = Some(3);
-		ps.foreign_halts = vec![(1, Some(2), 3)];
-
-		let kept = ps.clone_for_depth(false);
-		assert!(kept.values[ga].value.equivalent(&forged, true));
-		assert_eq!(kept.halted_at, Some(3));
-		assert_eq!(kept.foreign_halts.len(), 1);
-
-		let pure = ps.clone_for_depth(true);
-		assert!(
-			pure.values[ga].value.equivalent(&honest, true),
-			"a tainted slot purifies back to what the protocol computed"
-		);
-		assert!(
-			pure.values[k].value.equivalent(&honest_k, true),
-			"purification preserves an unchanged computation"
-		);
-		assert!(!pure.values[ga].provenance.attacker_tainted);
-		assert_eq!(pure.halted_at, None);
-		assert!(pure.foreign_halts.is_empty());
 	}
 }

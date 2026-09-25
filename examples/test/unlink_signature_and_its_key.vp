@@ -1,0 +1,28 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: u1 at one session and at two.
+//
+// The attacker holds ga, m1 and s1, and SIGNVERIF(ga, m1, s1) succeeds, so it
+// can tell that s1 was made with the key behind ga. A signature was linked to
+// another signature under the same key but never to the key itself, its own
+// message, or a value built from its key.
+// unlink_signature_and_its_key_unverifiable.vp is the counterweight.
+attacker[passive]
+
+principal Alice[
+	knows public m1
+	generates sk
+	ga = PUBKEY(sk)
+	s1 = SIGN(sk, m1)
+]
+
+Alice -> Bob: ga, s1
+
+principal Bob[
+	knows public m1
+	_ = SIGNVERIF(ga, m1, s1)?
+]
+
+queries[
+	unlinkability? s1, ga
+]

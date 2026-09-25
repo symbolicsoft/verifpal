@@ -1,12 +1,13 @@
 /* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
  * SPDX-License-Identifier: GPL-3.0-only */
 
+use crate::msc::ATTACKER;
 use crate::primitive::primitive_names;
-use crate::report::{Analysis, DiagramRow, ModelReport};
+use crate::report::{DiagramRow, ModelReport};
 use crate::template::escaped_tex;
 use crate::tokens::TokenKind;
 
-pub(crate) enum Term {
+enum Term {
 	Const {
 		name: String,
 		session: Option<String>,
@@ -70,13 +71,13 @@ fn is_name_byte(c: u8) -> bool {
 	c.is_ascii_alphanumeric() || c == b'_'
 }
 
-pub(crate) fn is_primitive(name: &str) -> bool {
+fn is_primitive(name: &str) -> bool {
 	primitive_names()
 		.iter()
 		.any(|known| known.eq_ignore_ascii_case(name))
 }
 
-pub(crate) fn parse(text: &str) -> Option<Term> {
+fn parse(text: &str) -> Option<Term> {
 	let mut scan = Scan::new(text.trim());
 	let term = parse_term(&mut scan)?;
 	scan.done().then_some(term)
@@ -165,7 +166,6 @@ fn parse_capabilities(scan: &mut Scan) -> Option<Vec<String>> {
 }
 
 fn constant(name: String, scan: &mut Scan) -> Term {
-	let base = name;
 	let mut session = None;
 	let mut scenario = None;
 	loop {
@@ -182,7 +182,7 @@ fn constant(name: String, scan: &mut Scan) -> Term {
 		}
 	}
 	Term::Const {
-		name: base,
+		name,
 		session,
 		scenario,
 		guarded: false,
@@ -196,7 +196,7 @@ fn split_name(name: &str) -> String {
 		.join("\\vpus ")
 }
 
-pub(crate) fn render(term: &Term) -> String {
+fn render(term: &Term) -> String {
 	match term {
 		Term::Const {
 			name,
@@ -260,11 +260,12 @@ fn head(name: &str) -> String {
 	}
 }
 
+pub(crate) fn framed(text: &str) -> Option<String> {
+	parse(text).map(|parsed| format!("\\vpterm{{{}}}", render(&parsed)))
+}
+
 pub(crate) fn term(text: &str) -> String {
-	match parse(text) {
-		Some(parsed) => format!("\\vpterm{{{}}}", render(&parsed)),
-		None => format!("\\vpliteral{{{}}}", escaped_tex(text)),
-	}
+	framed(text).unwrap_or_else(|| format!("\\vpliteral{{{}}}", escaped_tex(text)))
 }
 
 pub(crate) fn label(name: &str, guarded: bool, forged: bool) -> String {
@@ -285,7 +286,7 @@ pub(crate) struct Names {
 }
 
 impl Names {
-	pub(crate) fn of(model: &ModelReport, analysis: Option<&Analysis>) -> Names {
+	pub(crate) fn of(model: &ModelReport) -> Names {
 		let mut names = Names::default();
 		for token in &model.tokens {
 			match token.kind {
@@ -333,8 +334,8 @@ impl Names {
 				DiagramRow::Phase { .. } => {}
 			}
 		}
-		names.principal("Attacker");
-		let Some(analysis) = analysis else {
+		names.principal(ATTACKER);
+		let Some(analysis) = &model.analysis else {
 			return names;
 		};
 		for query in &analysis.queries {
@@ -354,16 +355,14 @@ impl Names {
 	}
 
 	fn principal(&mut self, name: &str) {
-		let name = name.to_string();
-		if !self.principals.contains(&name) {
-			self.principals.push(name);
+		if !self.holds_principal(name) {
+			self.principals.push(name.to_string());
 		}
 	}
 
 	fn constant(&mut self, name: &str) {
-		let name = name.to_string();
-		if !self.constants.contains(&name) {
-			self.constants.push(name);
+		if !self.constants.iter().any(|known| known == name) {
+			self.constants.push(name.to_string());
 		}
 	}
 
@@ -385,9 +384,9 @@ pub(crate) fn prose(text: &str, names: &Names) -> String {
 	let mut at = 0usize;
 	while at < bytes.len() {
 		if !is_name_byte(bytes[at]) {
-			let end = at + utf8_width(bytes[at]);
-			out.push_str(&escaped_tex(&text[at..end.min(text.len())]));
-			at = end;
+			let width = text[at..].chars().next().map_or(1, char::len_utf8);
+			out.push_str(&escaped_tex(&text[at..at + width]));
+			at += width;
 			continue;
 		}
 		let start = at;
@@ -405,9 +404,9 @@ pub(crate) fn prose(text: &str, names: &Names) -> String {
 		if bytes.get(word_end) == Some(&b'(')
 			&& is_primitive(&text[start..at])
 			&& let Some(end) = balanced(bytes, word_end)
-			&& let Some(parsed) = parse(&text[start..end])
+			&& let Some(term) = framed(&text[start..end])
 		{
-			out.push_str(&format!("\\vpterm{{{}}}", render(&parsed)));
+			out.push_str(&term);
 			at = end;
 			continue;
 		}
@@ -417,9 +416,9 @@ pub(crate) fn prose(text: &str, names: &Names) -> String {
 			continue;
 		}
 		if names.holds_constant(word)
-			&& let Some(parsed) = parse(word)
+			&& let Some(term) = framed(word)
 		{
-			out.push_str(&format!("\\vpterm{{{}}}", render(&parsed)));
+			out.push_str(&term);
 			continue;
 		}
 		if word.bytes().all(|b| b.is_ascii_uppercase() || b == b'_') && is_primitive(word) {
@@ -429,15 +428,6 @@ pub(crate) fn prose(text: &str, names: &Names) -> String {
 		out.push_str(&escaped_tex(word));
 	}
 	out
-}
-
-fn utf8_width(lead: u8) -> usize {
-	match lead {
-		0x00..=0x7f => 1,
-		0xc0..=0xdf => 2,
-		0xe0..=0xef => 3,
-		_ => 4,
-	}
 }
 
 fn balanced(bytes: &[u8], open: usize) -> Option<usize> {

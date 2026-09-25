@@ -3,9 +3,11 @@
 
 mod math;
 
-use crate::msc::{self, ATTACKER, Lanes, Row};
-use crate::report::{Analysis, DISCLAIMER, ModelReport, QueryReport, ReportStep, Run};
+use crate::msc::{ATTACKER, Chart, Lanes, ROW_KINDS, Route, Row, mark_label};
+use crate::report::{Analysis, DISCLAIMER, ModelReport, QueryReport, Run};
 use crate::template::{Ctx, Dialect, escape_tex, escaped_tex, render, templates};
+use crate::types::TraceStep;
+use crate::util::{article, plural};
 use math::Names;
 
 static TEX: Dialect = Dialect {
@@ -37,11 +39,12 @@ const PREAMBLE: &str = include_str!("preamble.tex");
 
 pub fn tex_report(run: &Run) -> String {
 	let multi = run.models.len() > 1;
+	let heading = heading(run);
 	let ctx = Ctx::new()
 		.text("version", run.version.as_str())
 		.raw("preamble", PREAMBLE.trim_end())
-		.text("title", title(run))
-		.text("heading", heading(run))
+		.text("title", format!("Verifpal analysis of {heading}"))
+		.text("heading", heading)
 		.list("stats", stats(run))
 		.raw("abstract", abstract_of(run))
 		.flag("multi", multi)
@@ -70,7 +73,7 @@ pub fn tex_report(run: &Run) -> String {
 
 fn slug(model: &ModelReport, index: usize) -> String {
 	let mut out = String::new();
-	for c in crate::report::short_name(model).chars() {
+	for c in model.short_name().chars() {
 		if c.is_ascii_alphanumeric() {
 			out.push(c.to_ascii_lowercase());
 		} else if !out.ends_with('-') {
@@ -80,16 +83,9 @@ fn slug(model: &ModelReport, index: usize) -> String {
 	format!("{}-{index}", out.trim_matches('-'))
 }
 
-fn title(run: &Run) -> String {
-	match run.models.as_slice() {
-		[only] => format!("Verifpal analysis of {}", crate::report::short_name(only)),
-		models => format!("Verifpal analysis of {} models", models.len()),
-	}
-}
-
 fn heading(run: &Run) -> String {
 	match run.models.as_slice() {
-		[only] => crate::report::short_name(only).to_string(),
+		[only] => only.short_name().to_string(),
 		models => format!("{} models", models.len()),
 	}
 }
@@ -102,13 +98,6 @@ fn stat(value: impl std::fmt::Display, label: &str, alert: bool) -> Ctx {
 }
 
 fn stats(run: &Run) -> Vec<Ctx> {
-	let attacks: usize = run.models.iter().map(attacks_of).sum();
-	let queries: usize = run
-		.models
-		.iter()
-		.filter_map(|m| m.analysis.as_ref())
-		.map(|a| a.queries.len())
-		.sum();
 	match run.models.as_slice() {
 		[only] => match &only.analysis {
 			Some(a) => vec![
@@ -122,75 +111,62 @@ fn stats(run: &Run) -> Vec<Ctx> {
 			],
 			None => vec![stat("--", "not analysed", true)],
 		},
-		models => {
-			let hit = models.iter().filter(|m| attacks_of(m) > 0).count();
-			let broken = models.iter().filter(|m| m.analysis.is_none()).count();
+		_ => {
+			let tally = run.tally();
 			let mut out = vec![
-				stat(models.len(), "models", false),
-				stat(queries, "queries", false),
-				stat(attacks, "attacks found", attacks > 0),
-				stat(hit, "models attacked", hit > 0),
+				stat(tally.models, "models", false),
+				stat(tally.queries, "queries", false),
+				stat(tally.attacks, "attacks found", tally.attacks > 0),
+				stat(tally.attacked, "models attacked", tally.attacked > 0),
 			];
-			if broken > 0 {
-				out.push(stat(broken, "not analysed", true));
+			if tally.failed() > 0 {
+				out.push(stat(tally.failed(), "not analysed", true));
 			}
 			out
 		}
 	}
 }
 
-fn attacks_of(model: &ModelReport) -> usize {
-	model.analysis.as_ref().map(|a| a.attacks).unwrap_or(0)
-}
-
 fn abstract_of(run: &Run) -> String {
-	let analysed: Vec<&Analysis> = run
-		.models
-		.iter()
-		.filter_map(|m| m.analysis.as_ref())
-		.collect();
-	let broken = run.models.len() - analysed.len();
-	let hit: usize = run.models.iter().filter(|m| attacks_of(m) > 0).count();
-	let attacks: usize = run.models.iter().map(attacks_of).sum();
-	let queries: usize = analysed.iter().map(|a| a.queries.len()).sum();
 	let mut out = String::new();
 	match run.models.as_slice() {
 		[only] => {
 			out.push_str(&format!(
 				"This report describes the analysis of the Verifpal model {} ",
-				math_name(crate::report::short_name(only))
+				math_name(only.short_name())
 			));
 			match &only.analysis {
 				Some(a) => out.push_str(&format!(
 					"against {} {} attacker, with each principal running {} concurrent \
 					 session{}. Of its {} quer{}, {} {} broken.",
-					crate::util::article(&a.attacker),
+					article(&a.attacker),
 					escaped_tex(&a.attacker),
 					a.sessions,
-					crate::util::plural(a.sessions as usize),
+					plural(a.sessions as usize),
 					a.queries.len(),
 					if a.queries.len() == 1 { "y" } else { "ies" },
-					attacks,
-					if attacks == 1 { "was" } else { "were" }
+					a.attacks,
+					if a.attacks == 1 { "was" } else { "were" }
 				)),
 				None => out.push_str("which could not be analysed."),
 			}
 		}
-		models => {
+		_ => {
+			let tally = run.tally();
 			out.push_str(&format!(
 				"This report describes the analysis of {} Verifpal models carrying {} quer{} \
 				 between them. Attacks were found against {} of the models, {} in all.",
-				models.len(),
-				queries,
-				if queries == 1 { "y" } else { "ies" },
-				hit,
-				attacks
+				tally.models,
+				tally.queries,
+				if tally.queries == 1 { "y" } else { "ies" },
+				tally.attacked,
+				tally.attacks
 			));
-			if broken > 0 {
+			if tally.failed() > 0 {
 				out.push_str(&format!(
 					" {} model{} could not be analysed at all.",
-					broken,
-					crate::util::plural(broken)
+					tally.failed(),
+					plural(tally.failed())
 				));
 			}
 		}
@@ -207,13 +183,8 @@ fn math_name(name: &str) -> String {
 	format!("\\texttt{{{}}}", escaped_tex(name))
 }
 
-fn result_code(code: &str) -> String {
-	let pairs: Vec<String> = code
-		.chars()
-		.collect::<Vec<char>>()
-		.chunks(2)
-		.map(|pair| escaped_tex(&pair.iter().collect::<String>()))
-		.collect();
+fn result_code(a: &Analysis) -> String {
+	let pairs: Vec<String> = a.code_pairs().map(escaped_tex).collect();
 	format!("\\vpcode{{{}}}", pairs.join("\\allowbreak{}"))
 }
 
@@ -234,28 +205,24 @@ fn index(run: &Run) -> Vec<Ctx> {
 		.enumerate()
 		.map(|(i, model)| {
 			let (attacker, sessions, code) = match &model.analysis {
-				Some(a) => (
-					a.attacker.clone(),
-					a.sessions.to_string(),
-					result_code(&a.code),
-				),
+				Some(a) => (a.attacker.clone(), a.sessions.to_string(), result_code(a)),
 				None => ("--".to_string(), "--".to_string(), "--".to_string()),
 			};
 			Ctx::new()
-				.raw("file", math_name(crate::report::short_name(model)))
+				.raw("file", math_name(model.short_name()))
 				.text("slug", slug(model, i))
 				.text("attacker", attacker)
 				.text("sessions", sessions)
 				.raw("code", code)
-				.flag("hit", attacks_of(model) > 0)
-				.num("attacks", attacks_of(model))
+				.flag("hit", model.attacks() > 0)
+				.num("attacks", model.attacks())
 		})
 		.collect()
 }
 
 fn model_ctx(model: &ModelReport, index: usize) -> Ctx {
 	let slug = slug(model, index);
-	let names = Names::of(model, model.analysis.as_ref());
+	let names = Names::of(model);
 	let failed = match &model.error {
 		Some(error) => vec![
 			Ctx::new().raw(
@@ -270,8 +237,8 @@ fn model_ctx(model: &ModelReport, index: usize) -> Ctx {
 		None => Vec::new(),
 	};
 	let ctx = Ctx::new()
-		.raw("name", math_name(crate::report::short_name(model)))
-		.text("nameplain", crate::report::short_name(model))
+		.raw("name", math_name(model.short_name()))
+		.text("nameplain", model.short_name())
 		.text("slug", slug.clone())
 		.list("failed", failed);
 	let Some(a) = &model.analysis else {
@@ -283,14 +250,9 @@ fn model_ctx(model: &ModelReport, index: usize) -> Ctx {
 			.list("traces", Vec::new())
 			.list("scope", Vec::new());
 	};
-	let hits = crate::report::attacked_values(a);
-	let rows = msc::protocol_rows(model, &hits);
-	let protocol = diagram_ctx(
-		&rows,
-		Lanes::of(&rows),
-		format!("{slug}-protocol"),
-		protocol_caption(&hits),
-	);
+	let hits = a.attacked_values();
+	let protocol = Chart::protocol(model, &hits)
+		.map(|chart| diagram_ctx(&chart, format!("{slug}-protocol"), protocol_caption(&hits)));
 	ctx.list("facts", vec![facts_ctx(a)])
 		.list("protocol", protocol.into_iter().collect())
 		.list("verdicts", vec![verdicts_ctx(a, &slug, &names)])
@@ -312,18 +274,13 @@ fn protocol_caption(hits: &std::collections::HashMap<String, Vec<usize>>) -> Str
 fn facts_ctx(a: &Analysis) -> Ctx {
 	let queries = match a.attacks {
 		0 => format!("{}, with no attack found", a.queries.len()),
-		n => format!(
-			"{}, with {} attack{} found",
-			a.queries.len(),
-			n,
-			crate::util::plural(n)
-		),
+		n => format!("{}, with {} attack{} found", a.queries.len(), n, plural(n)),
 	};
 	Ctx::new()
 		.text("attacker", a.attacker.as_str())
 		.text("sessions", format!("{} per principal", a.sessions))
 		.text("queries", queries)
-		.raw("code", result_code(&a.code))
+		.raw("code", result_code(a))
 		.text("elapsed", elapsed(a.elapsed_ms))
 		.list(
 			"provenance",
@@ -334,11 +291,9 @@ fn facts_ctx(a: &Analysis) -> Ctx {
 		)
 }
 
-fn diagram_ctx(rows: &[Row], lanes: Lanes, figid: String, caption: String) -> Option<Ctx> {
-	if lanes.is_empty() || rows.is_empty() {
-		return None;
-	}
-	let actors = lanes
+fn diagram_ctx(chart: &Chart, figid: String, caption: String) -> Ctx {
+	let actors = chart
+		.lanes
 		.names()
 		.iter()
 		.enumerate()
@@ -349,22 +304,21 @@ fn diagram_ctx(rows: &[Row], lanes: Lanes, figid: String, caption: String) -> Op
 				.flag("adversary", name == ATTACKER)
 		})
 		.collect();
-	let drawn = rows.iter().map(|row| row_ctx(&lanes, row)).collect();
-	Some(
-		Ctx::new()
-			.text("figid", figid)
-			.num("lanes", lanes.len())
-			.raw("caption", caption)
-			.list("actors", actors)
-			.list("rows", drawn),
-	)
+	let drawn = chart
+		.rows
+		.iter()
+		.map(|row| row_ctx(&chart.lanes, row))
+		.collect();
+	Ctx::new()
+		.text("figid", figid)
+		.num("lanes", chart.lanes.len())
+		.raw("caption", caption)
+		.list("actors", actors)
+		.list("rows", drawn)
 }
 
 fn activity_line(kind: &str, names: String, primitive: &str) -> Ctx {
-	let mut ctx = Ctx::new();
-	for name in ["fresh", "derived", "checked", "alias", "checkonly"] {
-		ctx = ctx.flag(name, name == kind);
-	}
+	let ctx = Ctx::new().one_of(&["fresh", "derived", "checked", "alias", "checkonly"], kind);
 	let rendered = if primitive.is_empty() {
 		String::new()
 	} else {
@@ -381,72 +335,49 @@ fn math_list(names: &[String]) -> String {
 		.join(", ")
 }
 
-fn math_list_str(names: &str) -> String {
-	names
-		.split(", ")
-		.map(math::term)
-		.collect::<Vec<String>>()
-		.join(", ")
-}
-
-fn base(kind: &'static str) -> Ctx {
-	let mut ctx = Ctx::new();
-	for name in ["wire", "phase", "leak", "activity", "mark", "run"] {
-		ctx = ctx.flag(name, name == kind);
-	}
-	ctx
-}
-
 fn row_ctx(lanes: &Lanes, row: &Row) -> Ctx {
+	let ctx = Ctx::new().one_of(&ROW_KINDS, row.kind());
 	match row {
 		Row::Wire {
-			num,
+			hop,
 			step,
 			from,
 			to,
-			via,
-			forged,
-			replay,
+			route,
 			values,
-			..
 		} => {
-			let breach = *forged || *replay;
-			let style = if *replay {
-				"vpreplay"
-			} else if *forged {
-				"vpforged"
-			} else {
-				"vpplain"
+			let breach = route.breached();
+			let style = match route {
+				Route::Replayed => "vpreplay",
+				Route::Forged => "vpforged",
+				Route::Direct => "vpplain",
 			};
 			let label = values
 				.iter()
-				.map(|v| math::label(&v.name, v.guarded, v.hit || (breach && v.changed)))
+				.map(|v| math::label(&v.name, v.guarded, v.hit() || breach))
 				.collect::<Vec<String>>()
 				.join(", ");
-			base("wire")
-				.flag("breach", breach)
+			ctx.flag("breach", breach)
 				.text("numstyle", if breach { "vpnumadv" } else { "vpnum" })
 				.num("from", lanes.index(from))
 				.num(
 					"via",
-					via.as_ref()
-						.map(|name| lanes.index(name) as i64)
-						.unwrap_or(-1),
+					if breach {
+						lanes.index(ATTACKER) as i64
+					} else {
+						-1
+					},
 				)
 				.num("to", lanes.index(to))
 				.text("style", style)
 				.text(
 					"step",
-					step.clone()
-						.or(num.map(|n| n.to_string()))
-						.unwrap_or_default(),
+					step.or(*hop).map(|n| n.to_string()).unwrap_or_default(),
 				)
 				.raw("label", label)
 		}
-		Row::Phase { number } => base("phase").num("number", *number),
-		Row::Leak {
-			principal, values, ..
-		} => base("leak")
+		Row::Phase { number } => ctx.num("number", *number),
+		Row::Leak { principal, values } => ctx
 			.num("lane", lanes.index(principal))
 			.raw("values", math_list(values)),
 		Row::Activity {
@@ -459,51 +390,35 @@ fn row_ctx(lanes: &Lanes, row: &Row) -> Ctx {
 				lines.push(activity_line("fresh", math_list(generates), ""));
 			}
 			for step in computes {
-				let named = math_list_str(&step.names);
-				let bare = step.names.is_empty();
+				let named = math_list(&step.names);
 				let shown = step.expression.as_deref().or(step.primitive.as_deref());
-				lines.push(match (shown, step.checked, bare) {
+				lines.push(match (shown, step.checked, step.names.is_empty()) {
 					(Some(shown), _, true) => activity_line("checkonly", named, shown),
 					(Some(shown), false, _) => activity_line("derived", named, shown),
 					(Some(shown), true, _) => activity_line("checked", named, shown),
 					(None, _, _) => activity_line("alias", named, ""),
 				});
 			}
-			base("activity")
-				.num("lane", lanes.index(principal))
-				.list("lines", lines)
+			ctx.num("lane", lanes.index(principal)).list("lines", lines)
 		}
 		Row::Mark {
 			step,
 			principal,
 			bypass,
-			..
-		} => base("mark")
+		} => ctx
 			.num("lane", lanes.index(principal))
 			.text("markstyle", if *bypass { "vpnoteadv" } else { "vpnote" })
 			.text("numstyle", "vpnumadv")
-			.text("step", step.clone().unwrap_or_default())
-			.text(
-				"text",
-				if *bypass {
-					"check defeated"
-				} else {
-					"check passes"
-				},
-			),
-		Row::Run { step, .. } => {
-			let step = step.replace('-', "\u{2013}");
-			let ranged = step.contains('\u{2013}');
-			base("run")
-				.num(
-					"lane",
-					if lanes.contains(ATTACKER) {
-						lanes.index(ATTACKER)
-					} else {
-						0
-					},
-				)
-				.text("numstyle", if ranged { "vpnumwide" } else { "vpnum" })
+			.num("step", step)
+			.text("text", mark_label(*bypass)),
+		Row::Run { first, last } => {
+			let (numstyle, step) = if first == last {
+				("vpnum", first.to_string())
+			} else {
+				("vpnumwide", format!("{first}\u{2013}{last}"))
+			};
+			ctx.num("lane", lanes.index(ATTACKER))
+				.text("numstyle", numstyle)
 				.text("step", step)
 				.text("text", "computes")
 		}
@@ -563,10 +478,7 @@ fn operands(rest: &str, names: &Names) -> String {
 		return format!("{}: {}", sentence(route, names), operands(value, names));
 	}
 	rest.split(", ")
-		.map(|operand| match math::parse(operand) {
-			Some(parsed) => format!("\\vpterm{{{}}}", math::render(&parsed)),
-			None => sentence(operand, names),
-		})
+		.map(|operand| math::framed(operand).unwrap_or_else(|| sentence(operand, names)))
 		.collect::<Vec<String>>()
 		.join(", ")
 }
@@ -625,17 +537,17 @@ fn traces(a: &Analysis, model: &ModelReport, slug: &str, names: &Names) -> Vec<C
 		.filter(|(_, q)| q.resolved)
 		.map(|(qi, q)| {
 			let query = query_of(&q.query, names);
-			let (rows, lanes) = msc::attack_rows(q, model);
-			let diagram = diagram_ctx(
-				&rows,
-				lanes,
-				format!("{slug}-attack-{qi}"),
-				format!(
-					"How the attacker breaks \\textnormal{{{}}}. Substituted values carry a \
-					 dagger.",
-					query.head
-				),
-			);
+			let diagram = Chart::attack(q, model).map(|chart| {
+				diagram_ctx(
+					&chart,
+					format!("{slug}-attack-{qi}"),
+					format!(
+						"How the attacker breaks \\textnormal{{{}}}. Substituted values carry a \
+						 dagger.",
+						query.head
+					),
+				)
+			});
 			Ctx::new()
 				.raw("query", query.head)
 				.text("queryplain", query.plain)
@@ -643,31 +555,25 @@ fn traces(a: &Analysis, model: &ModelReport, slug: &str, names: &Names) -> Vec<C
 				.raw("options", query.options)
 				.raw("lead", sentence(&q.conclusion, names))
 				.list("diagram", diagram.into_iter().collect())
-				.flag("stepped", crate::report::has_trace(q))
-				.list("steps", steps(q, names))
+				.flag("stepped", q.has_trace())
 				.list(
-					"preconditions",
-					q.preconditions
-						.iter()
-						.map(|text| Ctx::new().raw("text", sentence(text, names)))
-						.collect(),
+					"steps",
+					q.steps.iter().map(|step| step_ctx(step, names)).collect(),
 				)
-				.list(
-					"notes",
-					q.notes
-						.iter()
-						.map(|text| Ctx::new().raw("text", sentence(text, names)))
-						.collect(),
-				)
+				.list("preconditions", prose_lines(&q.preconditions, names))
+				.list("notes", prose_lines(&q.notes, names))
 		})
 		.collect()
 }
 
-fn steps(q: &QueryReport, names: &Names) -> Vec<Ctx> {
-	q.steps.iter().map(|step| step_ctx(step, names)).collect()
+fn prose_lines(texts: &[String], names: &Names) -> Vec<Ctx> {
+	texts
+		.iter()
+		.map(|text| Ctx::new().raw("text", sentence(text, names)))
+		.collect()
 }
 
-fn step_ctx(s: &ReportStep, names: &Names) -> Ctx {
+fn step_ctx(s: &TraceStep, names: &Names) -> Ctx {
 	let wire = s.sender.is_some() && s.recipient.is_some();
 	Ctx::new()
 		.raw("text", sentence(&s.text, names))
@@ -677,35 +583,9 @@ fn step_ctx(s: &ReportStep, names: &Names) -> Ctx {
 }
 
 fn scope_ctx(a: &Analysis, names: &Names) -> Ctx {
-	let mut reasons: Vec<&str> = Vec::new();
-	for q in &a.queries {
-		for t in &q.envelope.truncations {
-			if !reasons.contains(&t.as_str()) {
-				reasons.push(t);
-			}
-		}
-	}
-	let mut text = format!(
-		"Every verdict above was reached against {} {} attacker, with each principal running \
-		 {} concurrent session{}, over exactly the model as written. An attack is a witness \
-		 and stands on its own. A query reported as holding says only that this search found \
-		 no attack at those parameters: the search space this engine defines was explored, \
-		 which is never the space of all attacks.",
-		crate::util::article(&a.attacker),
-		escaped_tex(&a.attacker),
-		a.sessions,
-		crate::util::plural(a.sessions as usize)
-	);
-	if !reasons.is_empty() {
-		text.push_str(&format!(
-			" Some searches in this run stopped short even of that ({}), so their holds cover \
-			 less still.",
-			escaped_tex(&reasons.join(", "))
-		));
-	}
 	let callouts = callouts(a, names);
 	Ctx::new()
-		.raw("text", text)
+		.text("text", a.scope())
 		.flag("hascallouts", !callouts.is_empty())
 		.list("callouts", callouts)
 }
@@ -754,8 +634,8 @@ fn callouts(a: &Analysis, names: &Names) -> Vec<Ctx> {
 
 fn source_ctx(model: &ModelReport, index: usize) -> Ctx {
 	Ctx::new()
-		.raw("name", math_name(crate::report::short_name(model)))
-		.text("nameplain", crate::report::short_name(model))
+		.raw("name", math_name(model.short_name()))
+		.text("nameplain", model.short_name())
 		.text("slug", slug(model, index))
 		.flag("empty", model.source.trim().is_empty())
 		.raw("source", listing_safe(model.source.trim_end()))

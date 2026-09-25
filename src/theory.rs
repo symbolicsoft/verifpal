@@ -24,6 +24,20 @@ struct RewriteEntry {
 	value: Option<Value>,
 }
 
+impl RewriteEntry {
+	fn new(p: &Arc<Primitive>, result: bool, value: Value) -> RewriteEntry {
+		let value = match value {
+			Value::Primitive(output) if Arc::ptr_eq(p, &output) => None,
+			value => Some(value),
+		};
+		RewriteEntry {
+			input: Arc::downgrade(p),
+			result,
+			value,
+		}
+	}
+}
+
 const TERM_MEMO_SWEEP: usize = 65536;
 const TERM_MEMO_RECENT: usize = 1024;
 const TERM_MEMO_POINTERS: usize = 8192;
@@ -67,29 +81,16 @@ impl RewriteCache {
 		}
 		let bucket = self.entries.entry(key).or_default();
 		bucket.retain(|entry| entry.input.strong_count() > 0);
-		let value = match &value {
-			Value::Primitive(output) if Arc::ptr_eq(p, output) => None,
-			_ => Some(value),
-		};
-		bucket.push(RewriteEntry {
-			input: Arc::downgrade(p),
-			result,
-			value,
-		});
+		bucket.push(RewriteEntry::new(p, result, value));
 	}
 
 	fn remember_pointer(&mut self, p: &Arc<Primitive>, result: bool, value: Value) {
 		let key = Arc::as_ptr(p) as usize;
-		let value = match &value {
-			Value::Primitive(output) if Arc::ptr_eq(p, output) => None,
-			_ => Some(value),
-		};
-		let entry = RewriteEntry {
-			input: Arc::downgrade(p),
-			result,
-			value,
-		};
-		if self.pointers.insert(key, entry).is_none() {
+		if self
+			.pointers
+			.insert(key, RewriteEntry::new(p, result, value))
+			.is_none()
+		{
 			self.order.push_back(key);
 			if self.pointers.len() > TERM_MEMO_POINTERS
 				&& let Some(oldest) = self.order.pop_front()
@@ -111,15 +112,28 @@ impl RewriteCache {
 }
 
 struct ObtainableMemo {
-	owner: (*const PrincipalState, *const AttackerState),
+	owner: (*const CapabilityIndex, *const AttackerState),
 	entries: IdMap<u64, Vec<(Value, bool)>>,
 	inputs: IdMap<usize, (Arc<Primitive>, Option<Vec<KnownIdx>>)>,
 }
 
 impl ObtainableMemo {
-	fn is_for(&self, ps: &PrincipalState, attacker: &AttackerState) -> bool {
-		std::ptr::eq(self.owner.0, ps) && std::ptr::eq(self.owner.1, attacker)
+	fn is_for(&self, capabilities: &CapabilityIndex, attacker: &AttackerState) -> bool {
+		std::ptr::eq(self.owner.0, capabilities) && std::ptr::eq(self.owner.1, attacker)
 	}
+}
+
+fn with_memo<R>(
+	capabilities: &CapabilityIndex,
+	attacker: &AttackerState,
+	f: impl FnOnce(&mut ObtainableMemo) -> R,
+) -> Option<R> {
+	MEMO.with(|m| {
+		m.borrow_mut()
+			.as_mut()
+			.filter(|memo| memo.is_for(capabilities, attacker))
+			.map(f)
+	})
 }
 
 pub(crate) fn structurally_identical_primitive(x: &Primitive, y: &Primitive) -> bool {
@@ -164,28 +178,29 @@ fn rewrite_cache_put(key: u64, p: &Arc<Primitive>, result: &(bool, Value)) {
 
 pub(crate) struct DeductionMemo<'a> {
 	previous: Option<Option<ObtainableMemo>>,
-	borrowed: std::marker::PhantomData<(&'a PrincipalState, &'a AttackerState)>,
+	borrowed: std::marker::PhantomData<(&'a CapabilityIndex, &'a AttackerState)>,
 }
 
 impl<'a> DeductionMemo<'a> {
-	pub(crate) fn ensure(ps: &'a PrincipalState, attacker: &'a AttackerState) -> DeductionMemo<'a> {
-		let present = MEMO.with(|memo| {
-			memo.borrow()
-				.as_ref()
-				.is_some_and(|memo| memo.is_for(ps, attacker))
-		});
-		if present {
+	pub(crate) fn ensure(
+		capabilities: &'a CapabilityIndex,
+		attacker: &'a AttackerState,
+	) -> DeductionMemo<'a> {
+		if with_memo(capabilities, attacker, |_| ()).is_some() {
 			return DeductionMemo {
 				previous: None,
 				borrowed: std::marker::PhantomData,
 			};
 		}
-		Self::scoped(ps, attacker)
+		Self::scoped(capabilities, attacker)
 	}
 
-	pub(crate) fn scoped(ps: &'a PrincipalState, attacker: &'a AttackerState) -> DeductionMemo<'a> {
+	pub(crate) fn scoped(
+		capabilities: &'a CapabilityIndex,
+		attacker: &'a AttackerState,
+	) -> DeductionMemo<'a> {
 		let installed = ObtainableMemo {
-			owner: (ps as *const _, attacker as *const _),
+			owner: (capabilities as *const _, attacker as *const _),
 			entries: IdMap::default(),
 			inputs: IdMap::default(),
 		};
@@ -203,45 +218,6 @@ impl Drop for DeductionMemo<'_> {
 			MEMO.with(|m| *m.borrow_mut() = previous);
 		}
 	}
-}
-
-fn memo_obtainable_get(
-	key: u64,
-	v: &Value,
-	ps: &PrincipalState,
-	attacker: &AttackerState,
-) -> Option<bool> {
-	MEMO.with(|m| {
-		let borrowed = m.borrow();
-		let memo = borrowed.as_ref()?;
-		if !memo.is_for(ps, attacker) {
-			return None;
-		}
-		memo.entries
-			.get(&key)?
-			.iter()
-			.find(|(candidate, _)| structurally_identical(candidate, v))
-			.map(|(_, hit)| *hit)
-	})
-}
-
-fn memo_obtainable_put(
-	key: u64,
-	v: &Value,
-	ps: &PrincipalState,
-	attacker: &AttackerState,
-	result: bool,
-) {
-	MEMO.with(|m| {
-		if let Some(memo) = m.borrow_mut().as_mut()
-			&& memo.is_for(ps, attacker)
-		{
-			memo.entries
-				.entry(key)
-				.or_default()
-				.push((v.clone(), result));
-		}
-	});
 }
 
 pub(crate) fn same_fixed(a: &Value, b: &Value) -> bool {
@@ -289,7 +265,7 @@ pub(crate) fn forgeable_by_reuse(p: &Primitive, attacker: &AttackerState) -> &'s
 
 pub(crate) fn can_decompose(
 	p: &Primitive,
-	ps: &PrincipalState,
+	capabilities: &CapabilityIndex,
 	attacker: &AttackerState,
 ) -> Option<DecomposeResult> {
 	if primitive_is_core(p.id) {
@@ -299,77 +275,48 @@ pub(crate) fn can_decompose(
 	if rule.output.is_some_and(|output| p.output != output) {
 		return None;
 	}
-	let mut has = Vec::new();
-	for &idx in rule.given.iter() {
-		if idx >= p.arguments.len() {
-			continue;
-		}
-		let a = &p.arguments[idx];
-		let (filtered, valid) = (rule.filter)(p, a, idx);
-		if !valid {
-			continue;
-		}
-		if obtainable(&filtered, ps, attacker) {
-			has.push(filtered);
-		}
-	}
-	if has.len() >= rule.given.len() {
-		let mut revealed = Vec::new();
-		for reveal in &rule.reveals {
-			match *reveal {
-				Reveal::Output(output) => {
-					revealed.push(Value::Primitive(Arc::new(p.with_output(output))));
-				}
-				Reveal::Argument(index) => {
-					if let Some(argument) = p.arguments.get(index) {
-						revealed.push(reduce_once(argument));
-					}
-				}
-			}
-		}
-		if revealed.is_empty() {
-			return None;
-		}
-		Some(DecomposeResult {
-			revealed,
-			used: has,
+	let used = rule
+		.given
+		.iter()
+		.map(|&idx| {
+			let (filtered, valid) = (rule.filter)(p, p.arguments.get(idx)?, idx);
+			(valid && obtainable(&filtered, capabilities, attacker)).then_some(filtered)
 		})
-	} else {
-		None
-	}
+		.collect::<Option<Vec<Value>>>()?;
+	let revealed = revealed(p, &rule.reveals);
+	(!revealed.is_empty()).then_some(DecomposeResult { revealed, used })
 }
 
 pub(crate) fn can_break_weak(
 	p: &Primitive,
-	ps: &PrincipalState,
+	capabilities: &CapabilityIndex,
 	attacker: &AttackerState,
 ) -> Option<Vec<Value>> {
 	if primitive_is_core(p.id) {
 		return None;
 	}
-	if !ps
-		.capabilities
-		.in_force(p, Capability::Weak, attacker.current_phase)
-	{
+	if !capabilities.in_force(p, Capability::Weak, attacker.current_phase) {
 		return None;
 	}
-	let spec = primitive_get(p.id).ok()?;
-	let mut revealed = Vec::new();
-	for &idx in &spec.weak_reveals {
-		if let Some(a) = p.arguments.get(idx) {
-			revealed.push(reduce_once(a));
-		}
-	}
-	if let Some(output) = spec.weak_reveals_output {
-		revealed.push(Value::Primitive(Arc::new(p.with_output(output))));
-	}
-	if revealed.is_empty() {
-		return None;
-	}
-	Some(revealed)
+	let revealed = revealed(p, &primitive_get(p.id).ok()?.weak_reveals);
+	(!revealed.is_empty()).then_some(revealed)
 }
 
-pub(crate) fn obtainable(v: &Value, ps: &PrincipalState, attacker: &AttackerState) -> bool {
+pub(crate) fn revealed(p: &Primitive, reveals: &[Reveal]) -> Vec<Value> {
+	reveals
+		.iter()
+		.filter_map(|reveal| match *reveal {
+			Reveal::Argument(index) => p.arguments.get(index).map(reduce_once),
+			Reveal::Output(output) => Some(Value::Primitive(Arc::new(p.with_output(output)))),
+		})
+		.collect()
+}
+
+pub(crate) fn obtainable(
+	v: &Value,
+	capabilities: &CapabilityIndex,
+	attacker: &AttackerState,
+) -> bool {
 	let hash = v.hash_value();
 	if attacker.knows_hashed(v, hash).is_some() {
 		return true;
@@ -377,33 +324,37 @@ pub(crate) fn obtainable(v: &Value, ps: &PrincipalState, attacker: &AttackerStat
 	if matches!(v, Value::Constant(_)) {
 		return false;
 	}
-	let _memo = DeductionMemo::ensure(ps, attacker);
-	if let Some(hit) = memo_obtainable_get(hash, v, ps, attacker) {
+	let _memo = DeductionMemo::ensure(capabilities, attacker);
+	let remembered = with_memo(capabilities, attacker, |memo| {
+		memo.entries
+			.get(&hash)?
+			.iter()
+			.find(|(candidate, _)| structurally_identical(candidate, v))
+			.map(|(_, hit)| *hit)
+	});
+	if let Some(hit) = remembered.flatten() {
 		return hit;
 	}
 	let result = match v {
-		Value::Primitive(p) => construction_inputs(p, ps, attacker).is_some(),
+		Value::Primitive(p) => construction_inputs(p, capabilities, attacker).is_some(),
 		Value::Constant(_) => false,
 	};
-	memo_obtainable_put(hash, v, ps, attacker, result);
+	with_memo(capabilities, attacker, |memo| {
+		memo.entries
+			.entry(hash)
+			.or_default()
+			.push((v.clone(), result))
+	});
 	result
 }
 
 fn construction_inputs(
 	p: &Arc<Primitive>,
-	ps: &PrincipalState,
+	capabilities: &CapabilityIndex,
 	attacker: &AttackerState,
 ) -> Option<Vec<Value>> {
-	if let Some(mut built) = can_reconstruct_primitive(p, ps, attacker) {
-		match built.forged {
-			Some(Forged::Reuse(pair)) => built.from.extend(pair),
-			Some(Forged::Assumption {
-				capability: Capability::Malleable,
-				of,
-			}) => built.from.push(of),
-			_ => {}
-		}
-		return Some(built.from);
+	if let Some(built) = can_reconstruct_primitive(p, capabilities, attacker) {
+		return Some(built.ingredients().cloned().collect());
 	}
 	let Ok(spec) = primitive_get(p.id) else {
 		return None;
@@ -423,26 +374,40 @@ fn construction_inputs(
 			let sibling = Arc::new(p.with_output(j));
 			let projected = Value::Primitive(Arc::clone(&sibling));
 			attacker.knows(&projected)?;
-			let mut inputs = can_decompose(&sibling, ps, attacker)?.used;
+			let mut inputs = can_decompose(&sibling, capabilities, attacker)?.used;
 			inputs.insert(0, projected);
 			Some(inputs)
 		})
 }
 
+impl ReconstructResult {
+	pub(crate) fn ingredients(&self) -> impl Iterator<Item = &Value> {
+		let source: &[Value] = match &self.forged {
+			Some(Forged::Reuse(pair)) => pair,
+			Some(Forged::Assumption {
+				capability: Capability::Malleable,
+				of,
+			}) => std::slice::from_ref(of),
+			_ => &[],
+		};
+		self.from.iter().chain(source)
+	}
+}
+
 pub(crate) struct KnowledgeInputs<'a> {
-	ps: &'a PrincipalState,
+	capabilities: &'a CapabilityIndex,
 	attacker: &'a AttackerState,
 	built: IdMap<usize, (Arc<Primitive>, Option<Vec<KnownIdx>>)>,
 	_memo: DeductionMemo<'a>,
 }
 
 impl<'a> KnowledgeInputs<'a> {
-	pub(crate) fn new(ps: &'a PrincipalState, attacker: &'a AttackerState) -> Self {
+	pub(crate) fn new(capabilities: &'a CapabilityIndex, attacker: &'a AttackerState) -> Self {
 		Self {
-			ps,
+			capabilities,
 			attacker,
 			built: IdMap::default(),
-			_memo: DeductionMemo::ensure(ps, attacker),
+			_memo: DeductionMemo::ensure(capabilities, attacker),
 		}
 	}
 
@@ -460,18 +425,23 @@ impl<'a> KnowledgeInputs<'a> {
 		if let Some((_, found)) = self.built.get(&key) {
 			return found.clone();
 		}
-		if let Some(found) = memo_inputs_get(key, self.ps, self.attacker) {
+		let remembered = with_memo(self.capabilities, self.attacker, |memo| {
+			memo.inputs.get(&key).map(|(_, found)| found.clone())
+		});
+		if let Some(found) = remembered.flatten() {
 			return found;
 		}
 		self.built.insert(key, (Arc::clone(p), None));
 		let found = self.build(p);
 		self.built.insert(key, (Arc::clone(p), found.clone()));
-		memo_inputs_put(key, p, self.ps, self.attacker, found.clone());
+		with_memo(self.capabilities, self.attacker, |memo| {
+			memo.inputs.insert(key, (Arc::clone(p), found.clone()))
+		});
 		found
 	}
 
 	fn build(&mut self, p: &Arc<Primitive>) -> Option<Vec<KnownIdx>> {
-		let inputs = construction_inputs(p, self.ps, self.attacker)?;
+		let inputs = construction_inputs(p, self.capabilities, self.attacker)?;
 		let mut known = Vec::new();
 		let mut seen = IdSet::default();
 		for input in inputs {
@@ -485,42 +455,8 @@ impl<'a> KnowledgeInputs<'a> {
 	}
 }
 
-fn memo_inputs_get(
-	key: usize,
-	ps: &PrincipalState,
-	attacker: &AttackerState,
-) -> Option<Option<Vec<KnownIdx>>> {
-	MEMO.with(|m| {
-		let borrowed = m.borrow();
-		let memo = borrowed.as_ref()?;
-		if !memo.is_for(ps, attacker) {
-			return None;
-		}
-		memo.inputs.get(&key).map(|(_, found)| found.clone())
-	})
-}
-
-fn memo_inputs_put(
-	key: usize,
-	p: &Arc<Primitive>,
-	ps: &PrincipalState,
-	attacker: &AttackerState,
-	found: Option<Vec<KnownIdx>>,
-) {
-	MEMO.with(|m| {
-		if let Some(memo) = m.borrow_mut().as_mut()
-			&& memo.is_for(ps, attacker)
-		{
-			memo.inputs.insert(key, (Arc::clone(p), found));
-		}
-	});
-}
-
 pub(crate) fn can_recompose(p: &Primitive, attacker: &AttackerState) -> Option<RecomposeResult> {
-	if primitive_is_core(p.id) {
-		return None;
-	}
-	let rule = primitive_get(p.id).ok()?.recompose.as_ref()?;
+	let rule = recompose_rule(p.id)?;
 	if p.threshold == 0 {
 		return None;
 	}
@@ -556,18 +492,18 @@ pub(crate) fn can_recompose(p: &Primitive, attacker: &AttackerState) -> Option<R
 
 pub(crate) fn can_reconstruct_primitive(
 	p: &Arc<Primitive>,
-	ps: &PrincipalState,
+	capabilities: &CapabilityIndex,
 	attacker: &AttackerState,
 ) -> Option<ReconstructResult> {
-	can_reconstruct_primitive_directly(p, ps, attacker).or_else(|| {
+	can_reconstruct_primitive_directly(p, capabilities, attacker).or_else(|| {
 		let swapped = Arc::new(commutativity_swap(p)?);
-		can_reconstruct_primitive_directly(&swapped, ps, attacker)
+		can_reconstruct_primitive_directly(&swapped, capabilities, attacker)
 	})
 }
 
 fn can_reconstruct_primitive_directly(
 	p: &Arc<Primitive>,
-	ps: &PrincipalState,
+	capabilities: &CapabilityIndex,
 	attacker: &AttackerState,
 ) -> Option<ReconstructResult> {
 	let (rewritten, rewrite_value) = can_rewrite(p);
@@ -583,9 +519,8 @@ fn can_reconstruct_primitive_directly(
 	let Value::Primitive(rewritten_prim) = &rewrite_value else {
 		return None;
 	};
-	let forgeable_secret = ps
-		.capabilities
-		.forgeable_secret_position(rewritten_prim, attacker.current_phase);
+	let forgeable_secret =
+		capabilities.forgeable_secret_position(rewritten_prim, attacker.current_phase);
 	let reused = reused(rewritten_prim, attacker);
 	let by_reuse = forgeable_by_reuse(rewritten_prim, attacker);
 	let exempt = |i: usize| Some(i) == forgeable_secret || by_reuse.contains(&i);
@@ -596,15 +531,15 @@ fn can_reconstruct_primitive_directly(
 			skipped += 1;
 			continue;
 		}
-		if obtainable(a, ps, attacker) {
+		if obtainable(a, capabilities, attacker) {
 			has.push(a.clone());
 		}
 	}
 	if has.len() + skipped < rewritten_prim.arguments.len() {
-		if let Some(reshaped) = can_reshape(rewritten_prim, ps, attacker) {
+		if let Some(reshaped) = can_reshape(rewritten_prim, capabilities, attacker) {
 			return Some(reshaped);
 		}
-		let from = combinable(rewritten_prim, ps, attacker)?;
+		let from = combinable(rewritten_prim, capabilities, attacker)?;
 		return Some(ReconstructResult {
 			from,
 			forged: None,
@@ -628,15 +563,15 @@ fn can_reconstruct_primitive_directly(
 
 fn can_reshape(
 	p: &Primitive,
-	ps: &PrincipalState,
+	capabilities: &CapabilityIndex,
 	attacker: &AttackerState,
 ) -> Option<ReconstructResult> {
-	let (of, vary) = malleable_source(p, ps, attacker)?;
+	let (of, vary) = malleable_source(p, capabilities, attacker)?;
 	let from: Vec<Value> = vary
 		.iter()
 		.filter_map(|&i| p.arguments.get(i).cloned())
 		.collect();
-	if !from.iter().all(|v| obtainable(v, ps, attacker)) {
+	if !from.iter().all(|v| obtainable(v, capabilities, attacker)) {
 		return None;
 	}
 	Some(ReconstructResult {
@@ -651,10 +586,10 @@ fn can_reshape(
 
 pub(crate) fn malleable_source(
 	p: &Primitive,
-	ps: &PrincipalState,
+	capabilities: &CapabilityIndex,
 	attacker: &AttackerState,
 ) -> Option<(Value, &'static [usize])> {
-	if ps.capabilities.is_empty() {
+	if capabilities.is_empty() {
 		return None;
 	}
 	let vary = &primitive_get(p.id).ok()?.malleable_vary;
@@ -662,7 +597,7 @@ pub(crate) fn malleable_source(
 		return None;
 	}
 	let mut source: Option<KnownIdx> = None;
-	for (annotated, caps) in ps.capabilities.annotated_terms() {
+	for (annotated, caps) in capabilities.annotated_terms() {
 		if !caps.in_force(Capability::Malleable, attacker.current_phase) {
 			continue;
 		}
@@ -762,11 +697,7 @@ fn partial_groups(
 	rule: &CombineRule,
 	attacker: &AttackerState,
 ) -> Vec<PartialGroup> {
-	let Some(reveal) = primitive_get(rule.split)
-		.ok()
-		.and_then(|s| s.recompose.as_ref())
-		.map(|r| r.reveal)
-	else {
+	let Some(reveal) = recompose_rule(rule.split).map(|r| r.reveal) else {
 		return Vec::new();
 	};
 	let secret = &target.arguments[0];
@@ -834,7 +765,7 @@ fn partial_groups(
 
 fn combinable(
 	target: &Primitive,
-	ps: &PrincipalState,
+	capabilities: &CapabilityIndex,
 	attacker: &AttackerState,
 ) -> Option<Vec<Value>> {
 	for (_, rule) in combines_into(target.id) {
@@ -869,7 +800,7 @@ fn combinable(
 				let candidate = Primitive::new(rule.partial, arguments, 0);
 				let Some(candidate) = bound_partials(&candidate, rule)
 					.into_iter()
-					.find(|candidate| obtainable(candidate, ps, attacker))
+					.find(|candidate| obtainable(candidate, capabilities, attacker))
 				else {
 					continue;
 				};
@@ -881,16 +812,6 @@ fn combinable(
 		}
 	}
 	None
-}
-
-#[cfg(test)]
-pub(crate) fn combination_holds(target: &Primitive, from: &[Value]) -> bool {
-	combines_into(target.id).any(|(join, rule)| {
-		let joined = Primitive::new(join, from.to_vec(), 0);
-		combine_with(&joined, rule).is_some_and(|built| {
-			built.equivalent(&Value::Primitive(Arc::new(target.clone())), true)
-		})
-	})
 }
 
 pub(crate) fn reduce_once(v: &Value) -> Value {
@@ -922,10 +843,10 @@ fn can_rewrite_uncached(p: &Arc<Primitive>) -> (bool, Value) {
 		.map(Arc::new);
 	let pc: &Arc<Primitive> = reduced.as_ref().unwrap_or(p);
 	if let Some(rebuilt) = can_rebuild(pc) {
-		return (true, reduced_once(&rebuilt));
+		return (true, rewritten_or_original(&rebuilt));
 	}
 	if let Some(combined) = can_combine(pc) {
-		return (true, reduced_once(&combined));
+		return (true, rewritten_or_original(&combined));
 	}
 	let wrap = || Value::Primitive(Arc::clone(pc));
 	if primitive_is_core(pc.id) {
@@ -945,26 +866,19 @@ fn can_rewrite_uncached(p: &Arc<Primitive>) -> (bool, Value) {
 	let Some(rule) = &prim.rewrite else {
 		return (true, wrap());
 	};
-	let from = &pc.arguments[rule.from];
-	if let Value::Primitive(from_p) = from {
-		if from_p.id != rule.id {
-			return (!prim.definition_check, wrap());
-		}
-		if rule
+	if let Value::Primitive(from_p) = &pc.arguments[rule.from]
+		&& from_p.id == rule.id
+		&& rule
 			.from_output
-			.is_some_and(|output| from_p.output != output)
-		{
-			return (!prim.definition_check, wrap());
-		}
-		if !can_rewrite_primitive(pc) {
-			return (!prim.definition_check, wrap());
-		}
+			.is_none_or(|output| from_p.output == output)
+		&& matching_is_injective(pc, from_p, rule, 0, &mut Vec::new())
+	{
 		return (true, rule.to.apply(from_p));
 	}
 	(!prim.definition_check, wrap())
 }
 
-fn reduced_once(v: &Value) -> Value {
+fn rewritten_or_original(v: &Value) -> Value {
 	match v {
 		Value::Primitive(inner_p) => {
 			let (rewritten, replacement) = can_rewrite(inner_p);
@@ -972,16 +886,6 @@ fn reduced_once(v: &Value) -> Value {
 		}
 		_ => v.clone(),
 	}
-}
-
-fn can_rewrite_primitive(p: &Primitive) -> bool {
-	let Some(rule) = primitive_get(p.id).ok().and_then(|s| s.rewrite.as_ref()) else {
-		return false;
-	};
-	let Value::Primitive(from_p) = &p.arguments[rule.from] else {
-		return false;
-	};
-	matching_is_injective(p, from_p, rule, 0, &mut Vec::new())
 }
 
 fn matching_is_injective(
@@ -1003,7 +907,8 @@ fn matching_is_injective(
 		}
 		let (filtered, fvalid) = (rule.filter)(p, &p.arguments[*a_idx], mm);
 		if !fvalid
-			|| !reduced_once(&filtered).equivalent(&reduced_once(&from_p.arguments[mm]), true)
+			|| !rewritten_or_original(&filtered)
+				.equivalent(&rewritten_or_original(&from_p.arguments[mm]), true)
 		{
 			continue;
 		}
@@ -1017,16 +922,13 @@ fn matching_is_injective(
 }
 
 pub(crate) fn can_combine(p: &Primitive) -> Option<Value> {
-	if primitive_is_core(p.id) {
-		return None;
-	}
 	combine_rules(p.id)
 		.iter()
 		.find_map(|rule| combine_with(p, rule))
 }
 
 fn combine_with(p: &Primitive, rule: &CombineRule) -> Option<Value> {
-	let reveal = primitive_get(rule.split).ok()?.recompose.as_ref()?.reveal;
+	let reveal = recompose_rule(rule.split)?.reveal;
 	let mut partials: Vec<&Primitive> = Vec::with_capacity(p.arguments.len());
 	for a in &p.arguments {
 		let Value::Primitive(q) = a else {
@@ -1117,8 +1019,8 @@ mod tests {
 		source.capabilities.set(Capability::Malleable, 2);
 		let source = Value::Primitive(Arc::new(source));
 		let target = Value::primitive(PRIM_ENC, vec![key.clone(), value_nil()], 0);
-		let mut ps = make_principal_state("Maul", 1, vec![], vec![]);
-		Arc::make_mut(&mut ps.capabilities).insert(&source);
+		let mut capabilities = CapabilityIndex::default();
+		capabilities.insert(&source);
 		for held in [false, true] {
 			for phase in [1, 2] {
 				let mut attacker = make_attacker_state(vec![value_nil()]);
@@ -1148,18 +1050,18 @@ mod tests {
 						false,
 					),
 				] {
-					assert_eq!(obtainable(&term, &ps, &attacker), expected);
-					assert_eq!(obtainable(&term, &ps, &attacker), expected);
+					assert_eq!(obtainable(&term, &capabilities, &attacker), expected);
+					assert_eq!(obtainable(&term, &capabilities, &attacker), expected);
 				}
 				if held && phase == 2 {
-					let inputs = KnowledgeInputs::new(&ps, &attacker)
+					let inputs = KnowledgeInputs::new(&capabilities, &attacker)
 						.of_value(&target)
 						.unwrap();
 					assert!(inputs.contains(&attacker.knows(&source).unwrap()));
 					assert!(
 						can_reconstruct_primitive(
 							&Arc::new(source.as_primitive().unwrap().clone()),
-							&ps,
+							&capabilities,
 							&attacker
 						)
 						.is_none()
@@ -1172,7 +1074,7 @@ mod tests {
 	#[test]
 	fn an_unscoped_deduction_walks_a_shared_term_once() {
 		let leaf = make_constant("unscoped_deduction_leaf");
-		let ps = make_principal_state("Alice", 1, vec![], vec![]);
+		let capabilities = CapabilityIndex::default();
 		let known = make_attacker_state(vec![leaf.clone()]);
 		let unknown = make_attacker_state(vec![]);
 		let mut term = leaf;
@@ -1180,14 +1082,19 @@ mod tests {
 			term = make_primitive(PRIM_HASH, vec![term.clone(), term.clone(), term], 0);
 		}
 		assert!(MEMO.with(|memo| memo.borrow().is_none()));
-		assert!(obtainable(&term, &ps, &known));
-		assert!(!obtainable(&term, &ps, &unknown));
+		assert!(obtainable(&term, &capabilities, &known));
+		assert!(!obtainable(&term, &capabilities, &unknown));
 		assert!(MEMO.with(|memo| memo.borrow().is_none()));
-		let _scope = DeductionMemo::scoped(&ps, &unknown);
-		assert!(!obtainable(&term, &ps, &unknown));
-		assert!(obtainable(&term, &ps, &known));
-		assert!(!obtainable(&term, &ps, &unknown));
-		assert!(MEMO.with(|memo| memo.borrow().as_ref().unwrap().is_for(&ps, &unknown)));
+		let _scope = DeductionMemo::scoped(&capabilities, &unknown);
+		assert!(!obtainable(&term, &capabilities, &unknown));
+		assert!(obtainable(&term, &capabilities, &known));
+		assert!(!obtainable(&term, &capabilities, &unknown));
+		assert!(MEMO.with(|memo| {
+			memo.borrow()
+				.as_ref()
+				.unwrap()
+				.is_for(&capabilities, &unknown)
+		}));
 	}
 
 	#[test]
@@ -1291,7 +1198,7 @@ mod tests {
 		assert!(rewrite_cache_get(key, p).is_none());
 	}
 
-	fn weak_index(v: &Value, onset: i32) -> Arc<CapabilityIndex> {
+	fn weak_index(v: &Value, onset: i32) -> CapabilityIndex {
 		let Value::Primitive(p) = v else {
 			panic!("expected a primitive");
 		};
@@ -1299,7 +1206,7 @@ mod tests {
 		annotated.capabilities.set(Capability::Weak, onset);
 		let mut index = CapabilityIndex::default();
 		index.insert(&Value::Primitive(Arc::new(annotated)));
-		Arc::new(index)
+		index
 	}
 
 	#[test]
@@ -1364,16 +1271,16 @@ mod tests {
 		else {
 			panic!("expected a primitive");
 		};
-		let ps = make_principal_state("Theory", 0, vec![], vec![]);
+		let capabilities = CapabilityIndex::default();
 		let mut with_pair =
 			make_attacker_state(vec![e1.clone(), e2.clone(), m3.clone(), ad.clone()]);
 		with_pair.reused = Arc::new(vec![[e1.clone(), e2]]);
-		let result =
-			can_reconstruct_primitive(&target, &ps, &with_pair).expect("forgeable under reuse");
+		let result = can_reconstruct_primitive(&target, &capabilities, &with_pair)
+			.expect("forgeable under reuse");
 		assert!(matches!(result.forged, Some(Forged::Reuse(_))));
 		assert_eq!(result.from.len(), 2);
 		let without_pair = make_attacker_state(vec![e1, m3, ad]);
-		assert!(can_reconstruct_primitive(&target, &ps, &without_pair).is_none());
+		assert!(can_reconstruct_primitive(&target, &capabilities, &without_pair).is_none());
 	}
 
 	#[test]
@@ -1384,11 +1291,10 @@ mod tests {
 		let Value::Primitive(hp) = &h else {
 			panic!("expected a primitive");
 		};
-		let mut ps = make_principal_state("Alice", 1, vec![], vec![]);
-		ps.capabilities = weak_index(&h, 0);
+		let capabilities = weak_index(&h, 0);
 		let attacker = make_attacker_state(vec![h.clone()]);
 
-		let revealed = can_break_weak(hp, &ps, &attacker).expect("weak is in force");
+		let revealed = can_break_weak(hp, &capabilities, &attacker).expect("weak is in force");
 		assert_eq!(revealed.len(), 2);
 		assert!(revealed.iter().any(|v| v.equivalent(&m, true)));
 		assert!(revealed.iter().any(|v| v.equivalent(&n, true)));
@@ -1401,18 +1307,17 @@ mod tests {
 		let Value::Primitive(hp) = &h else {
 			panic!("expected a primitive");
 		};
-		let mut ps = make_principal_state("Alice", 1, vec![], vec![]);
-		ps.capabilities = weak_index(&h, 2);
+		let capabilities = weak_index(&h, 2);
 		let mut attacker = make_attacker_state(vec![h.clone()]);
 
 		attacker.current_phase = 0;
-		assert!(can_break_weak(hp, &ps, &attacker).is_none());
+		assert!(can_break_weak(hp, &capabilities, &attacker).is_none());
 		attacker.current_phase = 1;
-		assert!(can_break_weak(hp, &ps, &attacker).is_none());
+		assert!(can_break_weak(hp, &capabilities, &attacker).is_none());
 		attacker.current_phase = 2;
-		assert!(can_break_weak(hp, &ps, &attacker).is_some());
+		assert!(can_break_weak(hp, &capabilities, &attacker).is_some());
 		attacker.current_phase = 3;
-		assert!(can_break_weak(hp, &ps, &attacker).is_some());
+		assert!(can_break_weak(hp, &capabilities, &attacker).is_some());
 	}
 
 	#[test]
@@ -1422,9 +1327,9 @@ mod tests {
 		let Value::Primitive(hp) = &h else {
 			panic!("expected a primitive");
 		};
-		let ps = make_principal_state("Alice", 1, vec![], vec![]);
+		let capabilities = CapabilityIndex::default();
 		let attacker = make_attacker_state(vec![h.clone()]);
-		assert!(can_break_weak(hp, &ps, &attacker).is_none());
+		assert!(can_break_weak(hp, &capabilities, &attacker).is_none());
 	}
 
 	#[test]
@@ -1496,19 +1401,9 @@ mod tests {
 			threshold: 0,
 			hash: HashCell::default(),
 		};
-		let c_dummy = Constant {
-			name: Arc::from("crproj_dummy"),
-			id: test_value_id("crproj_dummy"),
-			..Constant::default()
-		};
-		let ps = make_principal_state(
-			"Test",
-			0,
-			vec![make_slot_meta(&c_dummy, true)],
-			vec![make_slot_values(&value_nil(), 0)],
-		);
+		let capabilities = CapabilityIndex::default();
 		let attacker = make_attacker_state(vec![b]);
-		assert!(can_reconstruct_primitive(&Arc::new(proj), &ps, &attacker).is_some());
+		assert!(can_reconstruct_primitive(&Arc::new(proj), &capabilities, &attacker).is_some());
 	}
 
 	fn ring(members: [&Value; 3], message: &Value, signature: &Value) -> Arc<Primitive> {
@@ -1660,28 +1555,6 @@ mod tests {
 		)
 	}
 
-	fn tsh_reduce(v: &Value) -> (bool, Value) {
-		crate::context::enter_generation(crate::context::next_generation());
-		let Value::Primitive(p) = v else {
-			panic!("a primitive");
-		};
-		can_rewrite(p)
-	}
-
-	fn tsh_state(name: &str) -> PrincipalState {
-		let dummy = Constant {
-			name: Arc::from(name),
-			id: test_value_id(name),
-			..Constant::default()
-		};
-		make_principal_state(
-			"Test",
-			0,
-			vec![make_slot_meta(&dummy, true)],
-			vec![make_slot_values(&value_nil(), 0)],
-		)
-	}
-
 	#[test]
 	fn a_join_of_partials_over_distinct_shares_is_the_plain_signature() {
 		let k = make_constant("cmb_k");
@@ -1695,7 +1568,7 @@ mod tests {
 			],
 			0,
 		);
-		let (ok, reduced) = tsh_reduce(&join);
+		let (ok, reduced) = rewrite(&join);
 		assert!(ok);
 		assert!(reduced.equivalent(&make_primitive(PRIM_SIGN, vec![k, m], 0), true));
 	}
@@ -1715,7 +1588,7 @@ mod tests {
 			],
 			0,
 		);
-		assert!(!tsh_reduce(&mixed).1.equivalent(&sig, true));
+		assert!(!rewrite(&mixed).1.equivalent(&sig, true));
 		let repeated = make_primitive(
 			PRIM_THRESHOLD_JOIN,
 			vec![
@@ -1724,7 +1597,7 @@ mod tests {
 			],
 			0,
 		);
-		assert!(!tsh_reduce(&repeated).1.equivalent(&sig, true));
+		assert!(!rewrite(&repeated).1.equivalent(&sig, true));
 		let short = make_primitive(
 			PRIM_THRESHOLD_JOIN,
 			vec![
@@ -1733,7 +1606,7 @@ mod tests {
 			],
 			0,
 		);
-		assert!(!tsh_reduce(&short).1.equivalent(&sig, true));
+		assert!(!rewrite(&short).1.equivalent(&sig, true));
 		let enough = make_primitive(
 			PRIM_THRESHOLD_JOIN,
 			vec![
@@ -1743,7 +1616,7 @@ mod tests {
 			],
 			0,
 		);
-		assert!(tsh_reduce(&enough).1.equivalent(&sig, true));
+		assert!(rewrite(&enough).1.equivalent(&sig, true));
 	}
 
 	#[test]
@@ -1757,7 +1630,7 @@ mod tests {
 			],
 			0,
 		);
-		let (ok, reduced) = tsh_reduce(&join);
+		let (ok, reduced) = rewrite(&join);
 		assert!(ok);
 		assert!(reduced.equivalent(&make_primitive(PRIM_PUBKEY, vec![k], 0), true));
 	}
@@ -1767,7 +1640,7 @@ mod tests {
 		let k = make_constant("cmr_k");
 		let m = make_constant("cmr_m");
 		let c = tsh_commitments(&["cmr_n1", "nil"]);
-		let ps = tsh_state("cmr_dummy");
+		let capabilities = CapabilityIndex::default();
 		let sig = make_primitive(PRIM_SIGN, vec![k.clone(), m.clone()], 0);
 		let Value::Primitive(sig_p) = &sig else {
 			panic!("a primitive");
@@ -1780,7 +1653,8 @@ mod tests {
 			c.clone(),
 			m.clone(),
 		]);
-		let built = can_reconstruct_primitive(sig_p, &ps, &with_share).expect("t pieces suffice");
+		let built =
+			can_reconstruct_primitive(sig_p, &capabilities, &with_share).expect("t pieces suffice");
 		assert_eq!(built.from.len(), 2);
 		assert!(built.from.iter().any(|f| f.equivalent(&partial, true)));
 		assert!(built.forged.is_none());
@@ -1791,16 +1665,16 @@ mod tests {
 			c.clone(),
 			m.clone(),
 		]);
-		assert!(can_reconstruct_primitive(sig_p, &ps, &same_share).is_none());
+		assert!(can_reconstruct_primitive(sig_p, &capabilities, &same_share).is_none());
 		let partial_only = make_attacker_state(vec![partial, value_nil(), c, m]);
-		assert!(can_reconstruct_primitive(sig_p, &ps, &partial_only).is_none());
+		assert!(can_reconstruct_primitive(sig_p, &capabilities, &partial_only).is_none());
 	}
 
 	#[test]
 	fn partials_under_different_commitments_do_not_reconstruct_a_signature() {
 		let k = make_constant("cmz_k");
 		let m = make_constant("cmz_m");
-		let ps = tsh_state("cmz_dummy");
+		let capabilities = CapabilityIndex::default();
 		let sig = make_primitive(PRIM_SIGN, vec![k.clone(), m.clone()], 0);
 		let Value::Primitive(sig_p) = &sig else {
 			panic!("a primitive");
@@ -1820,7 +1694,7 @@ mod tests {
 			),
 			value_nil(),
 		]);
-		assert!(can_reconstruct_primitive(sig_p, &ps, &attacker).is_none());
+		assert!(can_reconstruct_primitive(sig_p, &capabilities, &attacker).is_none());
 		let agreeing = make_attacker_state(vec![
 			tsh_partial(
 				tsh_share(&k, 2, 0),
@@ -1836,7 +1710,7 @@ mod tests {
 			),
 			value_nil(),
 		]);
-		assert!(can_reconstruct_primitive(sig_p, &ps, &agreeing).is_some());
+		assert!(can_reconstruct_primitive(sig_p, &capabilities, &agreeing).is_some());
 	}
 
 	#[test]
@@ -1854,8 +1728,17 @@ mod tests {
 		let attacker = make_attacker_state(invalid.arguments.clone());
 		let signature = Arc::new(Primitive::new(PRIM_SIGN, vec![k, m], 0));
 		assert!(
-			can_reconstruct_primitive(&signature, &tsh_state("binding_dummy"), &attacker).is_none()
+			can_reconstruct_primitive(&signature, &CapabilityIndex::default(), &attacker).is_none()
 		);
+	}
+
+	fn combination_holds(target: &Primitive, from: &[Value]) -> bool {
+		combines_into(target.id).any(|(join, rule)| {
+			let joined = Primitive::new(join, from.to_vec(), 0);
+			combine_with(&joined, rule).is_some_and(|built| {
+				built.equivalent(&Value::Primitive(Arc::new(target.clone())), true)
+			})
+		})
 	}
 
 	#[test]
@@ -1878,12 +1761,8 @@ mod tests {
 			m.clone(),
 		]);
 		let signature = Arc::new(Primitive::new(PRIM_SIGN, vec![k, m], 0));
-		let built = can_reconstruct_primitive(
-			&signature,
-			&tsh_state("binding_reconstruct_dummy"),
-			&attacker,
-		)
-		.unwrap();
+		let built =
+			can_reconstruct_primitive(&signature, &CapabilityIndex::default(), &attacker).unwrap();
 		assert!(combination_holds(&signature, &built.from));
 	}
 
@@ -1898,15 +1777,19 @@ mod tests {
 		let Value::Primitive(p) = &partial else {
 			panic!("a partial signature");
 		};
-		let ps = tsh_state("tsnd_dummy");
+		let capabilities = CapabilityIndex::default();
 		let context = [nonce, commitments, message];
 		let mut known = vec![partial.clone()];
 		known.extend(context.iter().cloned());
 		let attacker = make_attacker_state(known);
-		let result = can_decompose(p, &ps, &attacker).expect("the nonce exposes the share");
+		let result =
+			can_decompose(p, &capabilities, &attacker).expect("the nonce exposes the share");
 		assert_eq!(result.revealed.len(), 1);
 		assert!(result.revealed[0].equivalent(&share, true));
-		assert!(!obtainable(&k, &ps, &attacker), "one share is not the key");
+		assert!(
+			!obtainable(&k, &capabilities, &attacker),
+			"one share is not the key"
+		);
 
 		for missing in 0..context.len() {
 			let mut known = vec![partial.clone()];
@@ -1921,7 +1804,7 @@ mod tests {
 				known.push(make_primitive(PRIM_PUBKEY, vec![context[0].clone()], 0));
 			}
 			assert!(
-				can_decompose(p, &ps, &make_attacker_state(known)).is_none(),
+				can_decompose(p, &capabilities, &make_attacker_state(known)).is_none(),
 				"missing input {missing} must prevent share recovery; a commitment is not the nonce"
 			);
 		}
@@ -1941,19 +1824,9 @@ mod tests {
 			threshold: 0,
 			hash: HashCell::default(),
 		};
-		let c_dummy = Constant {
-			name: Arc::from("cd_dummy"),
-			id: test_value_id("cd_dummy"),
-			..Constant::default()
-		};
-		let ps = make_principal_state(
-			"Test",
-			0,
-			vec![make_slot_meta(&c_dummy, true)],
-			vec![make_slot_values(&value_nil(), 0)],
-		);
+		let capabilities = CapabilityIndex::default();
 		let attacker = make_attacker_state(vec![key]);
-		let result = can_decompose(&p, &ps, &attacker);
+		let result = can_decompose(&p, &capabilities, &attacker);
 		assert!(result.is_some());
 		assert!(
 			result
@@ -1979,19 +1852,9 @@ mod tests {
 			threshold: 0,
 			hash: HashCell::default(),
 		};
-		let c_dummy = Constant {
-			name: Arc::from("kd_dummy"),
-			id: test_value_id("kd_dummy"),
-			..Constant::default()
-		};
-		let ps = make_principal_state(
-			"Test",
-			0,
-			vec![make_slot_meta(&c_dummy, true)],
-			vec![make_slot_values(&value_nil(), 0)],
-		);
+		let capabilities = CapabilityIndex::default();
 		let attacker = make_attacker_state(vec![dk]);
-		let revealed = can_decompose(&ct, &ps, &attacker)
+		let revealed = can_decompose(&ct, &capabilities, &attacker)
 			.expect("holder of the private key can decapsulate")
 			.revealed;
 		let expected = make_primitive(PRIM_KEM_ENCAP, vec![ek, r.clone()], 0);
@@ -2016,19 +1879,9 @@ mod tests {
 			threshold: 0,
 			hash: HashCell::default(),
 		};
-		let c_dummy = Constant {
-			name: Arc::from("kn_dummy"),
-			id: test_value_id("kn_dummy"),
-			..Constant::default()
-		};
-		let ps = make_principal_state(
-			"Test",
-			0,
-			vec![make_slot_meta(&c_dummy, true)],
-			vec![make_slot_values(&value_nil(), 0)],
-		);
+		let capabilities = CapabilityIndex::default();
 		let attacker = make_attacker_state(vec![ek]);
-		assert!(can_decompose(&ct, &ps, &attacker).is_none());
+		assert!(can_decompose(&ct, &capabilities, &attacker).is_none());
 	}
 
 	#[test]
@@ -2088,18 +1941,212 @@ mod tests {
 			threshold: 0,
 			hash: HashCell::default(),
 		};
-		let c_dummy = Constant {
-			name: Arc::from("cd_nk_dummy"),
-			id: test_value_id("cd_nk_dummy"),
-			..Constant::default()
-		};
-		let ps = make_principal_state(
-			"Test",
-			0,
-			vec![make_slot_meta(&c_dummy, true)],
-			vec![make_slot_values(&value_nil(), 0)],
-		);
+		let capabilities = CapabilityIndex::default();
 		let attacker = make_attacker_state(vec![]);
-		assert!(can_decompose(&p, &ps, &attacker).is_none());
+		assert!(can_decompose(&p, &capabilities, &attacker).is_none());
+	}
+
+	fn rewrite(value: &Value) -> (bool, Value) {
+		crate::context::enter_generation(crate::context::next_generation());
+		let Value::Primitive(p) = value else {
+			panic!("expected a primitive");
+		};
+		can_rewrite(p)
+	}
+
+	#[test]
+	fn failed_checks_report_the_term_with_its_arguments_reduced() {
+		let left = make_constant("rw_failure_left");
+		let right = make_constant("rw_failure_right");
+		let check = |a, b| make_primitive(PRIM_ASSERT, vec![a, b], 0);
+		let failed = check(left.clone(), right.clone());
+		let unchanged = make_primitive(PRIM_HASH, vec![left.clone()], 0);
+		let reduced = make_primitive(
+			PRIM_DEC,
+			vec![
+				left.clone(),
+				make_primitive(PRIM_ENC, vec![left.clone(), right.clone()], 0),
+			],
+			0,
+		);
+		for (term, expected) in [
+			(failed.clone(), failed.clone()),
+			(
+				check(failed.clone(), right.clone()),
+				check(failed, right.clone()),
+			),
+			(
+				check(unchanged.clone(), right.clone()),
+				check(unchanged, right.clone()),
+			),
+			(check(reduced, left.clone()), check(right, left)),
+		] {
+			for _ in 0..2 {
+				let (ok, value) = rewrite(&term);
+				assert!(!ok);
+				assert!(crate::theory::structurally_identical(&value, &expected));
+			}
+		}
+	}
+
+	#[test]
+	fn unchanged_shared_terms_keep_their_nodes_during_rewriting() {
+		let mut term = make_constant("rw_shared_unchanged");
+		for _ in 0..40 {
+			term = make_primitive(PRIM_HASH, vec![term.clone(), term.clone(), term], 0);
+		}
+		let (ok, value) = rewrite(&term);
+		assert!(ok);
+		assert!(value.same_term(&term));
+	}
+
+	#[test]
+	fn a_decryption_that_undoes_its_encryption_rewrites_to_the_plaintext() {
+		let k = make_constant("rw_k");
+		let m = make_constant("rw_m");
+		let enc = make_primitive(PRIM_ENC, vec![k.clone(), m.clone()], 0);
+		let (ok, value) = rewrite(&make_primitive(PRIM_DEC, vec![k, enc], 0));
+		assert!(ok);
+		assert!(value.equivalent(&m, true));
+	}
+
+	#[test]
+	fn a_checked_decryption_under_the_wrong_key_is_reported_as_a_failure() {
+		let k = make_constant("rwf_k");
+		let other = make_constant("rwf_other");
+		let m = make_constant("rwf_m");
+		let ad = make_constant("rwf_ad");
+		let n = make_constant("rwf_n");
+		let sealed = make_primitive(PRIM_AEAD_ENC, vec![k, n.clone(), m, ad.clone()], 0);
+		let dec = Value::Primitive(Arc::new(Primitive {
+			id: PRIM_AEAD_DEC,
+			arguments: vec![other, n, sealed, ad],
+			output: 0,
+			instance: 0,
+			instance_check: true,
+			capabilities: Capabilities::default(),
+			threshold: 0,
+			hash: HashCell::default(),
+		}));
+		let (ok, value) = rewrite(&dec);
+		assert!(!ok);
+		let failed = value
+			.as_primitive()
+			.expect("the check fails as a primitive");
+		assert_eq!(failed.id, PRIM_AEAD_DEC);
+		assert!(failed.instance_check);
+		assert!(
+			value.equivalent(&dec, true),
+			"a failed check leaves the term that did not reduce"
+		);
+	}
+
+	#[test]
+	fn an_inner_rewrite_is_applied_before_the_outer_one_is_tried() {
+		let k = make_constant("rwi_k");
+		let m = make_constant("rwi_m");
+		let inner = make_primitive(
+			PRIM_DEC,
+			vec![k.clone(), make_primitive(PRIM_ENC, vec![k, m.clone()], 0)],
+			0,
+		);
+		let (ok, value) = rewrite(&make_primitive(PRIM_HASH, vec![inner], 0));
+		assert!(ok);
+		assert!(value.equivalent(&make_primitive(PRIM_HASH, vec![m], 0), true));
+	}
+
+	#[test]
+	fn threshold_join_rebuilds_the_secret_from_two_distinct_shares() {
+		let secret = make_constant("rws_secret");
+		let share = |output: usize| {
+			let mut p = Primitive::new(PRIM_THRESHOLD_SPLIT, vec![secret.clone()], output);
+			p.threshold = 2;
+			Value::Primitive(Arc::new(p))
+		};
+		let (ok, value) = rewrite(&make_primitive(
+			PRIM_THRESHOLD_JOIN,
+			vec![share(0), share(1)],
+			0,
+		));
+		assert!(ok);
+		assert!(value.equivalent(&secret, true));
+	}
+
+	#[test]
+	fn a_three_of_five_join_needs_three_distinct_shares() {
+		let secret = make_constant("rw35_secret");
+		let share = |output: usize| {
+			let mut p = Primitive::new(PRIM_THRESHOLD_SPLIT, vec![secret.clone()], output);
+			p.threshold = 3;
+			Value::Primitive(Arc::new(p))
+		};
+		let join = |shares: Vec<Value>| make_primitive(PRIM_THRESHOLD_JOIN, shares, 0);
+		let (_, value) = rewrite(&join(vec![share(0), share(2), share(4)]));
+		assert!(value.equivalent(&secret, true));
+		let two = join(vec![share(0), share(4)]);
+		let (_, value) = rewrite(&two);
+		assert!(value.equivalent(&two, true));
+		let repeated = join(vec![share(0), share(0), share(2)]);
+		let (_, value) = rewrite(&repeated);
+		assert!(value.equivalent(&repeated, true));
+	}
+
+	#[test]
+	fn a_two_of_n_join_accepts_any_two_shares() {
+		let secret = make_constant("rw2n_secret");
+		let share = |output: usize| {
+			let mut p = Primitive::new(PRIM_THRESHOLD_SPLIT, vec![secret.clone()], output);
+			p.threshold = 2;
+			Value::Primitive(Arc::new(p))
+		};
+		let (_, value) = rewrite(&make_primitive(
+			PRIM_THRESHOLD_JOIN,
+			vec![share(4), share(3)],
+			0,
+		));
+		assert!(value.equivalent(&secret, true));
+		let (_, value) = rewrite(&make_primitive(
+			PRIM_THRESHOLD_JOIN,
+			vec![share(1), share(3), share(0)],
+			0,
+		));
+		assert!(value.equivalent(&secret, true));
+	}
+
+	#[test]
+	fn two_shares_of_the_same_output_do_not_rebuild_anything() {
+		let secret = make_constant("rwd_secret");
+		let mut split = Primitive::new(PRIM_THRESHOLD_SPLIT, vec![secret.clone()], 0);
+		split.threshold = 2;
+		let share = Value::Primitive(Arc::new(split));
+		let join = make_primitive(PRIM_THRESHOLD_JOIN, vec![share.clone(), share], 0);
+		let (_, value) = rewrite(&join);
+		assert!(
+			value.equivalent(&join, true),
+			"a threshold scheme needs distinct shares, so the join stays unreduced"
+		);
+	}
+
+	#[test]
+	fn rewriting_accepts_a_structurally_identical_cached_term() {
+		let k = make_constant("rwc_k");
+		let m = make_constant("rwc_m");
+		let build = || {
+			make_primitive(
+				PRIM_DEC,
+				vec![
+					k.clone(),
+					make_primitive(PRIM_ENC, vec![k.clone(), m.clone()], 0),
+				],
+				0,
+			)
+		};
+		crate::context::enter_generation(crate::context::next_generation());
+		let (Value::Primitive(p), Value::Primitive(q)) = (build(), build()) else {
+			unreachable!()
+		};
+		assert!(!Arc::ptr_eq(&p, &q), "two separately built terms");
+		can_rewrite(&p);
+		assert!(can_rewrite(&q).1.equivalent(&m, true));
 	}
 }

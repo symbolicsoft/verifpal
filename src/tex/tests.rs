@@ -27,8 +27,8 @@ fn envelope(summary: &str, truncations: Vec<String>) -> EnvelopeReport {
 	}
 }
 
-fn step(kind: &str, text: &str) -> ReportStep {
-	ReportStep::new(kind.to_string(), text.to_string())
+fn step(kind: &'static str, text: &str) -> TraceStep {
+	TraceStep::new(kind, text.to_string())
 }
 
 fn golden_run() -> Run {
@@ -56,8 +56,8 @@ fn golden_run() -> Run {
 		step("derive", "Attacker constructs PUBKEY(nil) from nil."),
 		step("derive", "Attacker is handed b by a leaks declaration."),
 		step("derive", "Attacker obtains ga on the wire."),
-		ReportStep {
-			kind: "mutations".to_string(),
+		TraceStep {
+			kind: "mutations",
 			text: "Attacker replaces ga with PUBKEY(nil).".to_string(),
 			sender: Some("Alice".to_string()),
 			recipient: Some("Bob".to_string()),
@@ -77,8 +77,8 @@ fn golden_run() -> Run {
 				},
 			],
 		},
-		ReportStep {
-			kind: "gate".to_string(),
+		TraceStep {
+			kind: "gate",
 			text: "Bob's AEAD_DEC(k, n, e, ad)? check passes on an attacker-controlled key."
 				.to_string(),
 			sender: None,
@@ -86,8 +86,8 @@ fn golden_run() -> Run {
 			principal: Some("Bob".to_string()),
 			values: vec![],
 		},
-		ReportStep {
-			kind: "bypass".to_string(),
+		TraceStep {
+			kind: "bypass",
 			text: "Alice's SIGNVERIF check is defeated, accepting PUBKEY(nil).".to_string(),
 			sender: None,
 			recipient: None,
@@ -176,7 +176,7 @@ fn golden_run() -> Run {
 				DiagramRow::Phase { number: 1 },
 				DiagramRow::Leak {
 					principal: "Bob".to_string(),
-					values: vec![crate::report::DiagramValue {
+					values: vec![DiagramValue {
 						name: "b".to_string(),
 						guarded: false,
 					}],
@@ -535,7 +535,7 @@ fn every_term_in_the_corpus_round_trips_through_the_math_parser() {
 					{
 						seen += 1;
 						assert!(
-							math::parse(text).is_some(),
+							math::framed(text).is_some(),
 							"{path}: the math parser cannot read {text:?}"
 						);
 					}
