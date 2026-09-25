@@ -1,0 +1,59 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0 at one session and at two.
+//
+// Mallory's private key is HASH(gc), and gc crosses the wire in the clear,
+// so the attacker computes Mallory's key and the gpeer = gm scenario is a
+// corrupt peer: m1 in that run is the attacker's to read and is no claim.
+// The corruption inference once counted only public constants and disclosed
+// secrets as computable, never a public value observed on the wire, so it
+// labelled that scenario honest and reported ni as disclosed.
+// scenario_corrupt_by_derivation.vp is the counterweight, the same shape with
+// the ingredient declared public.
+attacker[active]
+
+principal Bob[
+	knows private b
+	gb = PUBKEY(b)
+]
+
+principal Carol[
+	generates c
+	gc = PUBKEY(c)
+]
+
+Carol -> Mallory: gc
+
+principal Mallory[
+	mk = HASH(gc)
+	gm = PUBKEY(mk)
+]
+
+principal Alice[
+	knows public gpeer
+	generates ni
+]
+
+Bob -> Alice: [gb]
+Mallory -> Alice: [gm]
+
+principal Alice[
+	m1 = PKE_ENC(gpeer, ni)
+]
+
+Alice -> Bob: m1
+
+principal Bob[
+	d = PKE_DEC(b, m1)
+	_ = HASH(d)
+]
+
+scenarios[
+	Alice[gpeer = gb]
+	Alice[gpeer = gm]
+]
+
+queries[
+	confidentiality? ni
+]

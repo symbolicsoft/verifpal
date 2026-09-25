@@ -1,0 +1,61 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a1 at one session and at two.
+//
+// The core of Woo-Lam Pi-f with the server's reply in the request's field
+// order. Bob sends the server {A, B, m3}Kbs, where m3 is Alice's answer to
+// his challenge, and expects {A, B, Nb}Kbs back. The attacker answers the
+// challenge with the bare nb it saw on the wire, so Bob's own request becomes
+// {A, B, nb}Kbs, exactly the reply he expects; reflected back to him, it
+// passes all three of his checks, and Bob accepts an m3 Alice never sent.
+// The solver matched a principal's own symbolic emission against a goal only
+// one way, so a goal whose fields were still free variables never bound m3,
+// and the reflection was found only once a second session supplied a
+// concrete reply. woolam_pif_pristine_pin.vp is the counterweight, where the
+// reply's field order differs from the request's.
+attacker[active]
+
+principal Bob[
+	knows private k_bs
+	knows public a_name, b_name
+	generates nb
+]
+
+Bob -> Alice: nb
+
+principal Alice[
+	knows private k_as
+	m3 = ENC(k_as, nb)
+]
+
+Alice -> Bob: m3
+
+principal Bob[
+	m4 = ENC(k_bs, CONCAT(a_name, b_name, m3))
+]
+
+Bob -> Server: m4
+
+principal Server[
+	knows private k_as, k_bs
+	knows public a_name
+	p4 = DEC(k_bs, m4)
+	ida, idb, tok = SPLIT(p4)?
+	_ = ASSERT(ida, a_name)?
+	m5 = ENC(k_bs, CONCAT(ida, idb, DEC(k_as, tok)))
+]
+
+Server -> Bob: m5
+
+principal Bob[
+	r_a, r_b, r_n = SPLIT(DEC(k_bs, m5))?
+	_ = ASSERT(r_a, a_name)?
+	_ = ASSERT(r_b, b_name)?
+	_ = ASSERT(r_n, nb)?
+	_ = HASH(m3, nb)
+]
+
+queries[
+	authentication? Alice -> Bob: m3
+]

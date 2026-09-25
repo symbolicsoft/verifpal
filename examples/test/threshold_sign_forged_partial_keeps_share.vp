@@ -1,0 +1,32 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0c1 at one session and at two.
+//
+// Alice's partial is declared forgeable and its nonce, commitments and message
+// are all public, but the partial itself is never disclosed: only its hash
+// leaves Alice. The assumption lets the attacker produce pa without s1, so the
+// second query fails. It does not hand over s1: a partial the attacker minted
+// is not one it can open with its nonce, since the share is exactly the
+// argument the forgery skipped. The closure once decomposed the forged pa like
+// a disclosed one and reported s1 as obtained.
+// threshold_sign_forgeable_is_not_a_reuse.vp is the counterweight, where a
+// disclosed partial with a public nonce does reveal its share.
+attacker[passive]
+
+principal Alice[
+	knows public n, cm, msg
+	generates k
+	s1, s2 = THRESHOLD_SPLIT[2](k)
+	pa = THRESHOLD_SIGN[forgeable](s1, n, cm, msg)
+	h = HASH(pa)
+]
+
+Alice -> Bob: h
+
+principal Bob[]
+
+queries[
+	confidentiality? s1
+	confidentiality? pa
+]

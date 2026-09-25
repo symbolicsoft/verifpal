@@ -660,7 +660,7 @@ impl<'a> Deducer<'a> {
 			if !contains_var(term) {
 				continue;
 			}
-			for bound in match_values(term, goal, s) {
+			for bound in unifiers(term, goal, s) {
 				out.extend(self.require_constructible(&bound, s, false));
 			}
 			if let Value::Primitive(p) = term
@@ -1037,6 +1037,16 @@ impl<'a> Deducer<'a> {
 		let solutions = self.satisfy_check(p, base);
 		self.memo.borrow_mut().clear();
 		solutions
+	}
+
+	pub(crate) fn equality_shapes(&self, p: &Primitive) -> Vec<Substitution> {
+		if !(primitive_is_equality(p.id) && p.arguments.len() == 2) {
+			return Vec::new();
+		}
+		let base = Substitution::default();
+		let mut out = self.invert(&p.arguments[0], &p.arguments[1], &base);
+		out.extend(self.invert(&p.arguments[1], &p.arguments[0], &base));
+		dedupe(out)
 	}
 
 	pub(crate) fn repair_check(&self, p: &Primitive, base: &Substitution) -> Vec<Substitution> {

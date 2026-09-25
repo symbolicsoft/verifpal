@@ -3,16 +3,24 @@
 //
 // Expected: c0a0 at one session and c0a1 at two.
 //
-// solver_oracle_input_certifies_key.vp with the name signed under a domain
-// tag, so a certificate over a name never verifies as a certificate over a
-// key. At two sessions the sibling session's honest certificate is a
-// replay.
+// solver_oracle_input_certifies_key.vp with names and keys signed under
+// distinct domain tags, so a certificate over a name never verifies as a
+// certificate over a key. At two sessions the sibling session's honest
+// certificate is a replay. Tagging the name alone is not enough: Carol would
+// then accept the name certificate together with the tagged name as Alice's
+// key, a type confusion the search does not propose because it offers a key
+// slot only public-key shaped values.
+//
+// The certificates reach Alice over a guarded leg. On an open leg the
+// attacker halts Alice by replacing her key certificate, then hands Carol
+// the genuine one it observed, and Carol accepts a certificate Alice never
+// relayed.
 
 attacker[active]
 
 principal Ca[
 	knows private sk
-	knows public c_name
+	knows public c_name, k_name
 	pk = PUBKEY(sk)
 ]
 
@@ -25,18 +33,19 @@ Alice -> Ca: name, [ga]
 
 principal Ca[
 	cert_name = SIGN(sk, CONCAT(c_name, name))
-	cert_key = SIGN(sk, ga)
+	cert_key = SIGN(sk, CONCAT(k_name, ga))
 ]
 
-Ca -> Alice: cert_name, cert_key
+Ca -> Alice: [cert_name], [cert_key]
 Ca -> Carol: [pk]
 
 Alice -> Carol: ga, cert_key
 
 principal Carol[
+	knows public k_name
 	generates c, n, s
 	gc = PUBKEY(c)
-	_ = SIGNVERIF(pk, ga, cert_key)?
+	_ = SIGNVERIF(pk, CONCAT(k_name, ga), cert_key)?
 	k = DH_KEX(ga, c)
 	e = AEAD_ENC(k, n, s, nil)
 ]

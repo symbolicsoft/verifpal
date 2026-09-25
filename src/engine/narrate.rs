@@ -496,6 +496,19 @@ impl<'a, 'b> Narrator<'a, 'b> {
 	pub(crate) fn installs(&mut self) {
 		let program = self.cx.program;
 		let km = self.cx.km;
+		for (run, state) in self.ex.runs.iter().enumerate() {
+			if state.idle {
+				let mut step = TraceStep::new(
+					"idle",
+					format!(
+						"{} never starts a session in this execution.",
+						program.runs[run].name
+					),
+				);
+				step.principal = Some(program.runs[run].name.clone());
+				self.steps.push(step);
+			}
+		}
 		for &(run, step, before) in &self.ex.order {
 			let d = match program.runs[run].steps[step].event {
 				Event::Recv(d) => d,
@@ -580,10 +593,15 @@ impl<'a, 'b> Narrator<'a, 'b> {
 							program.runs[delivery.sender].name,
 							self.spelled(sent, &own)
 						)),
-						None => was.push(format!(
-							"{} does not send it in this execution",
-							program.runs[delivery.sender].name
-						)),
+						None => {
+							let unsent = format!(
+								"{} does not send this message in this execution",
+								program.runs[delivery.sender].name
+							);
+							if !was.contains(&unsent) {
+								was.push(unsent);
+							}
+						}
 						Some(_) => {}
 					}
 				}

@@ -10,6 +10,8 @@ use crate::types::*;
 
 pub(crate) type Installs = Vec<(usize, usize, Value)>;
 
+pub(crate) const UNSTARTED: usize = usize::MAX;
+
 #[derive(Clone, Debug)]
 pub(crate) struct Held {
 	pub(crate) value: Value,
@@ -25,6 +27,7 @@ pub(crate) struct RunState {
 	pub(crate) pc: usize,
 	pub(crate) halted: Option<usize>,
 	pub(crate) frozen: bool,
+	pub(crate) idle: bool,
 }
 
 impl RunState {
@@ -131,14 +134,16 @@ pub(crate) fn execute(cx: &Context, installs: &Installs) -> Execution {
 	let km = cx.km;
 	let n = km.slots.len();
 	let mut ex = Execution {
-		runs: program
-			.runs
-			.iter()
-			.map(|_| RunState {
-				env: vec![None; n],
-				pc: 0,
-				halted: None,
-				frozen: false,
+		runs: (0..program.runs.len())
+			.map(|r| {
+				let idle = install_at(installs, r, UNSTARTED).is_some();
+				RunState {
+					env: vec![None; n],
+					pc: 0,
+					halted: None,
+					frozen: idle,
+					idle,
+				}
 			})
 			.collect(),
 		knowledge: cx.initial.clone(),

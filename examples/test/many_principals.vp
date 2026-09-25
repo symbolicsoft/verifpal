@@ -1,5 +1,18 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1a0a0a0a0a0f0 at one session, c1a1a1a1a1a1f1 at two.
+//
+// Server signs HASH(payload, nonce) and sends payload, nonce and the
+// signature in the clear to five principals, with its public key guarded.
+// payload is on the wire, so its confidentiality fails at both counts. At
+// one session each recipient's signature check admits only Server's
+// flight, which Server sent to it once. At two sessions nothing binds a
+// flight to a recipient run: the attacker replays Server#2's flight into
+// each recipient's first run, so each accepts payload#2 in both of its
+// runs while Server sent it to each once, and Alice and Alice#2 both accept
+// nonce#2, so it is not fresh. Freshness once asked only whether the value
+// contained a generated constant.
 
 attacker[active]
 

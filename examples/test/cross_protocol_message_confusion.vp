@@ -1,16 +1,25 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
 //
-// Expected: a1a0 — one key, two message formats, no domain separation. Bob
-// runs two protocols with Alice under the same MAC key, and a tag minted for
-// one of them is a valid tag for the other, so the attacker moves a message
-// between protocols and Bob accepts it in the wrong role.
+// Expected: a1a0 at one session, a1a1 at two — one key, two message
+// formats, no domain separation. Bob runs two protocols with Alice under the
+// same MAC key, and a tag minted for one of them is a valid tag for the
+// other, so the attacker moves a message between protocols and Bob accepts
+// it in the wrong role.
 //
 // The second pair prefixes a distinct public label into the MAC and nothing
 // else changes. That is the entire fix, and the model exists to show it as a
 // change in verdict rather than as advice: a tag over CONCAT(label, body)
 // cannot be reused where a different label is expected, because CONCAT is not
 // commutative and the recipient rebuilds the term it will compare against.
+//
+// The label fixes confusion, not replay. Every value here is a knows
+// constant or a MAC over one, so the flight is the same in every session:
+// at two sessions one copy of Alice never starts, the attacker replays the
+// other's flight to both of Bob's runs, and Bob accepts body_command_bound
+// twice though Alice sent it once. The executor once ran every copy of
+// every principal to completion, so each Bob run had an Alice emission to
+// match. At one session the one Bob accepts the one flight.
 
 attacker[active]
 

@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
 //
-// Expected: a1a0 at one session and at two.
+// Expected: a1a1 at one session and at two.
 //
 // Woo-Lam Pi, unrepaired: B -> A: Nb; A -> B: {Nb}Kas; B -> S: {A, {Nb}Kas}Kbs;
 // S -> B: {Nb}Kbs. B runs a responder exchange with Alice and one with
@@ -17,8 +17,14 @@
 // honest S would send there, but in this execution S sends ENC(k_bs,
 // DEC(k_as, nil)), so delivering {nb1}Kbs is a real attacker action; an
 // engine that drops installs equal to the pristine value misses the attack.
-// The second query holds: the m5a Bob accepts is the value S's honest run
-// sends him. woolam_pif_pristine_pin.vp is the repaired counterweight.
+//
+// The second query fails through the same crosswire. At one session Alice's
+// m3a is left alone; the attacker replaces Bob's m4a with {nb1}Kbs, which S
+// cannot split, so S halts on the A-branch, and delivers S's M-branch reply
+// {nb1}Kbs as m5a. Bob accepts, as S's answer about Alice, a reply S only
+// sent about Mallory. The judge once excused it because it equals the value
+// an honest S would send there. woolam_pif_pristine_pin.vp repairs the
+// crosswire.
 
 attacker[active]
 

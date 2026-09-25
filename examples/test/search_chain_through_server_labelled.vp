@@ -1,0 +1,64 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0 at one session and at two.
+//
+// search_chain_through_server.vp with the ticket under its own associated
+// data. The server's echo to Alice is still {nb, x}Kbs, but Bob opens his
+// ticket only under the ticket label, so the echo no longer stands in for it
+// and Bob's session key stays the server's kab.
+attacker[active]
+
+principal Bob[
+	knows private b, k_bs
+	knows public tkt
+	gb = PUBKEY(b)
+]
+
+Bob -> Alice: [gb]
+
+principal Alice[
+	generates a
+	c = PUBKEY(a)
+]
+
+Alice -> Bob: c
+
+principal Bob[
+	x = DH_KEX(c, b)
+	generates nb, n2
+	t2 = AEAD_ENC(k_bs, n2, CONCAT(x, nb), nil)
+]
+
+Bob -> Server: n2, t2
+
+principal Server[
+	knows private k_bs
+	knows public tkt
+	d = AEAD_DEC(k_bs, n2, t2, nil)?
+	x_s, nb_s = SPLIT(d)?
+	generates kab, n3, n4
+	t3 = AEAD_ENC(k_bs, n3, CONCAT(nb_s, kab), tkt)
+	t4 = AEAD_ENC(k_bs, n4, CONCAT(nb_s, x_s), nil)
+]
+
+Server -> Alice: n4, t4
+Server -> Bob: n3, t3
+
+principal Bob[
+	d3 = AEAD_DEC(k_bs, n3, t3, tkt)?
+	nb3, key = SPLIT(d3)?
+	_ = ASSERT(nb3, nb)?
+	generates secret_b, n_e
+	e = AEAD_ENC(key, n_e, secret_b, nil)
+]
+
+Bob -> Alice: n_e, e
+
+principal Alice[
+	_ = HASH(t4, e)
+]
+
+queries[
+	confidentiality? secret_b
+]

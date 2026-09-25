@@ -1,11 +1,12 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
 //
-// Expected: a1a0 — a chain of receipts where each step is supposed to cover
-// everything before it. The bare chain's third receipt covers only the third
-// message, so the attacker rewrites the first two and the final receipt still
-// verifies; the bound chain's third receipt covers a running hash of all
-// three, and rewriting anything at all breaks it.
+// Expected: a1a0 at one session, a1a1 at two — a chain of receipts where
+// each step is supposed to cover everything before it. The bare chain's
+// third receipt covers only the third message, so the attacker rewrites the
+// first two and the final receipt still verifies; the bound chain's third
+// receipt covers a running hash of all three, and rewriting anything at all
+// breaks it.
 //
 // This is what a transcript hash is FOR, expressed as a difference in verdict
 // rather than as a convention. The queries are asked about the FIRST message
@@ -13,6 +14,14 @@
 // to protect it — an implementation that folded the chain in the wrong order,
 // or that covered only the immediately preceding step, would pass a query
 // asked about the second message and fail this one.
+//
+// At two sessions the bound chain fails too, and not through a rewrite:
+// every step is a declared constant, so both flights are the same in every
+// session, and nothing Bob contributes binds them. One Alice session never
+// starts, the attacker replays the other's two flights to that session's
+// Bob, and both Bob runs accept a chain Alice sent once. The search once
+// filled only the first of two messages a waiting run expected from a sender
+// that never ran, so the second flight was never delivered.
 
 attacker[active]
 

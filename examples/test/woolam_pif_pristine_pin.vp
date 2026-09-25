@@ -16,6 +16,12 @@
 // Bob's own m3a is nil, which Alice never sent, and under positional
 // acceptance his uses of it in m4a and after the final check count. The second
 // query holds: S#2 sent that reply once and only Bob accepts it.
+//
+// S lists the principals in its reply as B, A, and Bob splits them in that
+// order, so a reply never has the shape of Bob's request {A, B, m3a}Kbs.
+// With the request's order, the attacker answers Bob's challenge with the
+// bare nb1 and reflects Bob's own request back to him as S's reply, which
+// is solver_reflected_request.vp.
 
 attacker[active]
 
@@ -70,7 +76,7 @@ principal Server[
 	p4b = DEC(k_bs, m4b)
 	idb, bidb, tokb = SPLIT(p4b)?
 	_ = ASSERT(idb, m_name)?
-	m5b = ENC(k_bs, CONCAT(idb, bidb, DEC(k_ms, tokb)))
+	m5b = ENC(k_bs, CONCAT(bidb, idb, DEC(k_ms, tokb)))
 ]
 
 Server -> Bob: m5b
@@ -81,13 +87,13 @@ principal Server[
 	p4a = DEC(k_bs, m4a)
 	ida, bida, toka = SPLIT(p4a)?
 	_ = ASSERT(ida, a_name)?
-	m5a = ENC(k_bs, CONCAT(ida, bida, DEC(k_as, toka)))
+	m5a = ENC(k_bs, CONCAT(bida, ida, DEC(k_as, toka)))
 ]
 
 Server -> Bob: m5a
 
 principal Bob[
-	r_ida, r_idb, r_a = SPLIT(DEC(k_bs, m5a))?
+	r_idb, r_ida, r_a = SPLIT(DEC(k_bs, m5a))?
 	_ = ASSERT(r_ida, a_name)?
 	_ = ASSERT(r_idb, b_name)?
 	_ = ASSERT(r_a, nb1)?

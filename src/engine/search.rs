@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use super::exec::{Context, Execution, Installs, execute, install_at};
+use super::exec::{Context, Execution, Installs, UNSTARTED, execute, install_at};
 use super::knowledge::{Knowledge, Origin};
 use super::program::Event;
 use crate::context::VerifyContext;
@@ -243,7 +243,9 @@ impl<'a, 'b> Search<'a, 'b> {
 			.map(|(run, slot, value)| {
 				format!(
 					"{}'s {} is {}",
-					self.cx.program.runs[*run].name, self.cx.km.slots[*slot].constant, value
+					self.cx.program.runs[*run].name,
+					self.slot_name(*slot),
+					value
 				)
 			})
 			.collect();
@@ -397,6 +399,71 @@ impl<'a, 'b> Search<'a, 'b> {
 		if self.union.len() != before && !self.done() {
 			self.fixpoint(false);
 		}
+		self.idle();
+	}
+
+	fn idle(&mut self) {
+		let km = self.cx.km;
+		let program = self.cx.program;
+		let mut senders: Vec<(usize, Vec<usize>)> = Vec::new();
+		for result in self.ctx.results_get() {
+			if result.resolved || result.query.kind != QueryKind::Authentication {
+				continue;
+			}
+			for q in std::iter::once(&result.query).chain(&result.variants) {
+				let Some(slot) = q.message.constant().ok().and_then(|c| km.index_of(c)) else {
+					continue;
+				};
+				let siblings = km.sibling_slots(slot);
+				for (r, run) in program.runs.iter().enumerate() {
+					if km.interchangeable_for(run.id, q.message.sender, slot)
+						&& !senders.iter().any(|(s, _)| *s == r)
+					{
+						senders.push((r, siblings.clone()));
+					}
+				}
+			}
+		}
+		for node in 0..self.nodes.len() {
+			for (r, siblings) in senders.clone() {
+				if self.done() {
+					return;
+				}
+				if self.nodes[node]
+					.installs
+					.iter()
+					.any(|(run, _, _)| *run == r)
+					|| !self.relied_on(node, r, &siblings)
+				{
+					continue;
+				}
+				let mut installs = self.nodes[node].installs.clone();
+				installs.push((r, UNSTARTED, crate::value::value_nil()));
+				self.as_family("idle", |search| search.consider(normalize(installs)));
+			}
+		}
+	}
+
+	fn relied_on(&self, node: usize, r: usize, siblings: &[usize]) -> bool {
+		let ex = &self.nodes[node].ex;
+		let program = self.cx.program;
+		program
+			.deliveries
+			.iter()
+			.zip(&ex.sent)
+			.filter(|(delivery, _)| delivery.sender == r)
+			.filter_map(|(delivery, sent)| Some(delivery.slots.iter().zip(sent.as_ref()?)))
+			.flatten()
+			.filter(|((slot, _), _)| siblings.contains(slot))
+			.any(|(_, v)| {
+				ex.runs.iter().enumerate().any(|(b, run)| {
+					b != r
+						&& siblings.iter().any(|&s| {
+							run.held(s)
+								.is_some_and(|h| h.sender.is_some() && h.value.equivalent(v, true))
+						})
+				})
+			})
 	}
 
 	fn fixpoint(&mut self, refined: bool) {
@@ -843,6 +910,9 @@ impl<'a, 'b> Search<'a, 'b> {
 	}
 
 	fn sibling_slot(&self, slot: usize, r: usize) -> Option<usize> {
+		if slot == UNSTARTED {
+			return Some(UNSTARTED);
+		}
 		let km = self.cx.km;
 		let id = km.slots[slot].constant.id;
 		let group = km.copy_siblings.get(&id)?;
@@ -1028,7 +1098,15 @@ impl<'a, 'b> Search<'a, 'b> {
 			if self.done() {
 				return;
 			}
-			let plan = self.merged(&[source.node], installs.clone());
+			let mut plan = self.merged(&[source.node], installs.clone());
+			let mut cone = Vec::new();
+			self.cone(source.run, source.slot, &mut cone);
+			for (r, s, v) in &self.nodes[source.node].installs {
+				if cone.contains(&(*r, *s)) && install_at(&plan, *r, *s).is_none() {
+					plan.push((*r, *s, v.clone()));
+				}
+			}
+			let plan = normalize(plan);
 			let cleared = self.cleared(&plan, &slots, source);
 			let settled = !same_installs(&plan, &installs)
 				&& self
@@ -1091,16 +1169,19 @@ impl<'a, 'b> Search<'a, 'b> {
 		let halts = halts_of(&ex);
 		let fills = self.fills(&ex);
 		self.settle(installs.clone(), ex);
-		if !fills.is_empty() && !self.done() {
-			let mut filled = installs;
-			filled.extend(fills);
-			let filled = normalize(filled);
-			if let Some(settled) = self.as_family("fill", |search| search.consider_derived(filled))
-			{
-				return Some(settled.halts);
-			}
+		match self.fill(installs, fills) {
+			Some(settled) => Some(settled.halts),
+			None => Some(halts),
 		}
-		Some(halts)
+	}
+
+	fn fill(&mut self, installs: Installs, fills: Installs) -> Option<Settled> {
+		if fills.is_empty() || self.done() {
+			return None;
+		}
+		let mut filled = installs;
+		filled.extend(fills);
+		self.as_family("fill", |search| search.consider_derived(normalize(filled)))
 	}
 
 	fn consider_derived(&mut self, installs: Installs) -> Option<Settled> {
@@ -1140,7 +1221,9 @@ impl<'a, 'b> Search<'a, 'b> {
 			return None;
 		}
 		let halts = halts_of(&ex);
-		let accepted = self.settle(installs, ex);
+		let fills = self.fills(&ex);
+		let accepted = self.settle(installs.clone(), ex);
+		self.fill(installs, fills);
 		Some(Settled { accepted, halts })
 	}
 
@@ -1212,11 +1295,20 @@ impl<'a, 'b> Search<'a, 'b> {
 			.map(|(run, slot, v)| {
 				format!(
 					"{}.{}={}",
-					self.cx.program.runs[*run].name, self.cx.km.slots[*slot].constant, v
+					self.cx.program.runs[*run].name,
+					self.slot_name(*slot),
+					v
 				)
 			})
 			.collect::<Vec<String>>()
 			.join(" ")
+	}
+
+	fn slot_name(&self, slot: usize) -> String {
+		match slot {
+			UNSTARTED => "unstarted".to_string(),
+			slot => self.cx.km.slots[slot].constant.to_string(),
+		}
 	}
 
 	fn tally(&mut self, family: &'static str, accepted: bool) {

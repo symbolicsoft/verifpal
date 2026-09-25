@@ -71,6 +71,30 @@ impl Candidates {
 			self.splits.push(value.clone());
 		}
 		self.recon.push(value.clone());
+		for rule in crate::primitive::combines_from(p.id) {
+			let Some(Value::Primitive(share)) = p.arguments.get(rule.share) else {
+				continue;
+			};
+			let Some(recompose) = recompose_rule(share.id) else {
+				continue;
+			};
+			let Some(secret) = share.arguments.get(recompose.reveal) else {
+				continue;
+			};
+			if share.id != rule.split || share.threshold == 0 {
+				continue;
+			}
+			let mut arguments = vec![secret.clone()];
+			arguments.extend(
+				rule.carry
+					.iter()
+					.filter_map(|&at| p.arguments.get(at).cloned()),
+			);
+			let whole = Value::primitive(rule.whole, arguments, 0);
+			if self.seen.insert(whole.clone()) {
+				self.recon.push(whole);
+			}
+		}
 	}
 }
 
@@ -203,9 +227,10 @@ impl Knowledge {
 		loop {
 			let snapshot = Arc::clone(&self.state);
 			let candidates = Arc::clone(&self.candidates);
+			let built = Arc::clone(&self.built);
 			let learned = {
 				let _memo = crate::theory::DeductionMemo::scoped(capabilities, &snapshot);
-				pass(capabilities, &snapshot, &candidates)
+				pass(capabilities, &snapshot, &candidates, &built)
 			};
 			let mut progress = false;
 			for (v, record) in learned {
@@ -242,6 +267,7 @@ fn pass(
 	capabilities: &CapabilityIndex,
 	attacker: &AttackerState,
 	candidates: &Candidates,
+	built: &TermSet,
 ) -> Vec<(Value, DerivationRecord)> {
 	let mut out: Vec<(Value, DerivationRecord)> = Vec::new();
 	let push = |out: &mut Vec<(Value, DerivationRecord)>, v: Value, d: DerivationRecord| {
@@ -249,11 +275,14 @@ fn pass(
 			out.push((v, d));
 		}
 	};
-	for known in attacker.known.iter() {
+	for (at, known) in attacker.known.iter().enumerate() {
 		let Value::Primitive(p) = known else {
 			continue;
 		};
-		if let Some(result) = can_decompose(p, capabilities, attacker) {
+		if let Some(result) = can_decompose(p, capabilities, attacker)
+			&& !forged(at, attacker)
+			&& !minted(p, known, capabilities, attacker, built)
+		{
 			for revealed in result.revealed {
 				push(
 					&mut out,
@@ -462,6 +491,29 @@ fn advance(choice: &mut [usize], base: usize) -> bool {
 	false
 }
 
+fn forged(at: usize, attacker: &AttackerState) -> bool {
+	matches!(
+		attacker.derivations.get(at),
+		Some(
+			DerivationRecord::Broken {
+				capability: Capability::Forgeable,
+				..
+			} | DerivationRecord::ReusedForge { .. }
+		)
+	)
+}
+
+fn minted(
+	p: &Arc<Primitive>,
+	held: &Value,
+	capabilities: &CapabilityIndex,
+	attacker: &AttackerState,
+	built: &TermSet,
+) -> bool {
+	!built.contains(held)
+		&& can_reconstruct_primitive(p, capabilities, attacker).is_some_and(|b| b.forged.is_some())
+}
+
 fn reuse_pairs(
 	capabilities: &CapabilityIndex,
 	attacker: &AttackerState,
@@ -483,9 +535,7 @@ fn reuse_pairs(
 		}) {
 			continue;
 		}
-		let mints = can_reconstruct_primitive(p, capabilities, attacker)
-			.is_some_and(|b| b.forged.is_some());
-		if mints && !built.contains(known) {
+		if minted(p, known, capabilities, attacker, built) {
 			continue;
 		}
 		let mut key = u64::from(p.id);
@@ -547,5 +597,82 @@ fn reassembled(
 	out.push(value.clone());
 	for argument in &p.arguments {
 		reassembled(argument, inputs, seen, out);
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::engine::exec::{Context, Installs, execute};
+	use crate::engine::program::Program;
+
+	fn share_disclosed(src: &str, forge: bool) -> bool {
+		let _generation = crate::context::GenerationGuard::enter();
+		let m = crate::parser::parse_string("kmf.vp", src).expect("parses");
+		let km = crate::sanity::sanity(&m).expect("sane");
+		let program = Program::of(&m, &km);
+		let cx = Context::new(&program, &km);
+		let honest = |name: &str| {
+			let slot = km
+				.slots
+				.iter()
+				.find(|s| s.constant.name.as_ref() == name)
+				.expect("declared");
+			crate::theory::reduce_once(&crate::value::resolve_trace_constant(&slot.constant, &km))
+		};
+		let installs: Installs = if forge {
+			let partial = Value::primitive(
+				crate::primitive::PRIM_THRESHOLD_SIGN,
+				vec![
+					honest("kmf_s1"),
+					crate::value::value_nil(),
+					honest("kmf_ca"),
+					honest("kmf_m"),
+				],
+				0,
+			);
+			let run = program
+				.runs
+				.iter()
+				.position(|r| r.name == "Coordinator")
+				.expect("run");
+			let slot = km
+				.slots
+				.iter()
+				.position(|s| s.constant.name.as_ref() == "kmf_p")
+				.expect("declared");
+			vec![(run, slot, partial)]
+		} else {
+			Vec::new()
+		};
+		let ex = execute(&cx, &installs);
+		assert!(ex.stuck.is_empty());
+		obtainable(&honest("kmf_s1"), &km.capabilities, &ex.knowledge.state)
+	}
+
+	#[test]
+	fn a_minted_partial_does_not_reveal_the_share_it_was_forged_over() {
+		let model = |leak: &str| {
+			format!(
+				"attacker[active]\n\
+				principal Alice[\n\
+				generates kmf_k, kmf_na, kmf_m\n\
+				kmf_s1, kmf_s2 = THRESHOLD_SPLIT[2](kmf_k)\n\
+				kmf_ca = PUBKEY(kmf_na)\n\
+				kmf_p = THRESHOLD_SIGN[forgeable](kmf_s1, kmf_na, kmf_ca, kmf_m)\n\
+				{leak}\
+				]\n\
+				Alice -> Coordinator: kmf_ca, kmf_m, kmf_p\n\
+				principal Coordinator[\n\
+				_ = HASH(kmf_p)\n\
+				]\n\
+				queries[\n\
+				confidentiality? kmf_s1\n\
+				]\n"
+			)
+		};
+		assert!(!share_disclosed(&model(""), false));
+		assert!(!share_disclosed(&model(""), true));
+		assert!(share_disclosed(&model("leaks kmf_na\n"), false));
 	}
 }

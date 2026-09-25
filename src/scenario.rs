@@ -565,11 +565,20 @@ fn compromised_constants(m: &Model) -> IdMap<ValueId, i32> {
 			.flat_map(declared_ids)
 			.collect(),
 		compromised: IdMap::default(),
+		observed: IdMap::default(),
 	};
 	loop {
 		let mut changed = false;
 		for &(id, phase) in &disclosures {
 			for (exposed, at) in attacker.exposed(id, phase) {
+				if attacker
+					.observed
+					.get(&exposed)
+					.is_none_or(|&known| at < known)
+				{
+					attacker.observed.insert(exposed, at);
+					changed = true;
+				}
 				if secret.contains(&exposed)
 					&& attacker
 						.compromised
@@ -605,6 +614,7 @@ struct Disclosure<'m> {
 	assignments: IdMap<ValueId, &'m Value>,
 	public: IdSet<ValueId>,
 	compromised: IdMap<ValueId, i32>,
+	observed: IdMap<ValueId, i32>,
 }
 
 impl<'m> Disclosure<'m> {
@@ -680,7 +690,11 @@ impl<'m> Disclosure<'m> {
 			if c.is_nil() || self.public.contains(&c.id) {
 				continue;
 			}
-			at = at.max(self.compromised.get(&c.id).copied()?);
+			let known = [self.compromised.get(&c.id), self.observed.get(&c.id)]
+				.into_iter()
+				.flatten()
+				.min()?;
+			at = at.max(*known);
 		}
 		Some(at)
 	}

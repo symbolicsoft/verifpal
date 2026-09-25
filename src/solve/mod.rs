@@ -271,6 +271,13 @@ fn oracle_input_goals(
 			};
 			foreign.insert(vars::attacker_var_id(slot), filler);
 		}
+		let inverter = deduce::Deducer::with_basis(
+			km,
+			attacker,
+			&other,
+			crate::hashing::TermSet::default(),
+			Substitution::default(),
+		);
 		for c in 0..km.slots.len() {
 			if km.slots[c].creator != other_principal {
 				continue;
@@ -280,6 +287,22 @@ fn oracle_input_goals(
 			};
 			if !prim.instance_check || !vars::contains_var(&other.terms[c]) {
 				continue;
+			}
+			for bound in inverter.equality_shapes(prim) {
+				for &slot in &other.var_slots {
+					let id = vars::attacker_var_id(slot);
+					let Some(value) = bound.get(&id) else {
+						continue;
+					};
+					let shape = vars::apply(value, &bound);
+					if matches!(shape, Value::Primitive(_))
+						&& !wanted
+							.iter()
+							.any(|(w, t)| *t == Some(id) && w.equivalent(&shape, true))
+					{
+						wanted.push((shape, Some(id)));
+					}
+				}
 			}
 			let shapes: Vec<(Value, Option<ValueId>)> =
 				match crate::primitive::rewrite_rule(prim.id) {

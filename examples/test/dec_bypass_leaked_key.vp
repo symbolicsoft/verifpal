@@ -1,9 +1,15 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
 //
-// Expected: a1a0. The leaked key permits a concrete ciphertext forgery in the
-// first flight. The independent secret key protects the second. Declared
-// nonces keep honest ciphertexts identical across sessions.
+// Expected: a1a0 at one session, a1a1 at two. The leaked key permits a
+// concrete ciphertext forgery in the first flight. The independent secret
+// key protects the second from forgery but not from replay: declared nonces
+// keep honest ciphertexts identical across sessions, so at two sessions one
+// copy of Alice never starts, the attacker replays the other's e_held to
+// both of Bob's runs, and Bob accepts twice a ciphertext Alice sent once.
+// The executor once ran every copy of every principal to completion, so
+// each Bob run had an Alice emission to match. At one session the one Bob
+// accepts the one flight.
 
 attacker[active]
 

@@ -1,0 +1,32 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a1 at one session and at two.
+//
+// relay_origin_authenticated.vp's counterweight: Alice and Carol share the
+// MAC key and the message m, and it is Carol, not Alice, who sends m to Bob.
+// Alice never emits m at all, so Bob's acceptance of it as Alice's has no
+// emission to match, even though no attacker action is needed: m reaches Bob
+// from a principal the query does not name.
+attacker[active]
+
+principal Alice[
+	knows private k, m
+	_ = MAC(k, m)
+]
+
+principal Carol[
+	knows private k, m
+	t = MAC(k, m)
+]
+
+Carol -> Bob: [m], [t]
+
+principal Bob[
+	knows private k
+	_ = ASSERT(MAC(k, m), t)?
+]
+
+queries[
+	authentication? Alice -> Bob: m
+]

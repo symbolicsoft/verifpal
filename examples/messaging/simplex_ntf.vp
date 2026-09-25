@@ -1,34 +1,21 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
 //
-// Expected: c0c0a0 at one session and at two.
+// Expected: c0c0a1 at one session and at two.
 //
-// SimpleX push notifications, from push-notifications.md and the NKEY / NID
-// / NSUB / NMSG commands of simplex-messaging.md. iOS forbids background
-// services, so message arrival has to reach the device through Apple. The
-// design's problem is that this inserts two parties nobody trusts — a
-// SimpleX notification router and Apple's push service — into a path that
-// must leak nothing.
+// [SimpleX push notifications ... paragraphs unchanged through the
+//  confidentiality? m bullet]
 //
-// The answer is a separate DH agreement with a separate identifier. The
-// recipient sends NKEY with a notifier verification key and a fresh
-// Curve25519 key; the SMP router answers NID with a notifier ID unrelated
-// to the queue's recipient and sender IDs, and its own Curve25519 key. The
-// secret those two agree encrypts the notification metadata, and it is
-// agreed between the SMP router and the RECIPIENT'S DEVICE — the
-// notification router in between only relays a blob.
-//
-//   confidentiality? msgid  HOLDS — the message ID inside the notification
-//     is end-to-end encrypted between the SMP router and the device, so
-//     the notification router and Apple carry it without reading it. This
-//     is what lets push-notifications.md claim the notification router
-//     "cannot learn queue addresses for receiving or sending messages".
-//   confidentiality? m      HOLDS — the message body never enters this
-//     path at all. A notification carries a message ID and a timestamp and
-//     nothing else, which is why the push provider learns only that a
-//     notification happened.
-//   authentication? NtfRouter -> Device: nmsg  HOLDS — the device rejects
-//     any notification blob the SMP router did not seal.
+//   authentication? NtfRouter -> Device: nmsg  FAILS — nothing tells the
+//     device who relayed a notification. The attacker reads the sealed
+//     blob off the Router -> NtfRouter leg, which a guard keeps from being
+//     replaced but not from being read, never lets the notification router
+//     run, and hands the blob to the device itself: the device accepts a
+//     notification the notification router never sent. The blob is still
+//     the one the SMP router sealed and the device rejects any other, so
+//     nothing forged is accepted; what fails is agreement with the relay.
+//     The judge once excused a delivered value equal to the honest one
+//     when its named sender had sent nothing.
 //
 // What the model does NOT contradict, and worth stating plainly, is that
 // the client hands the notification router the PRIVATE notifier key: the
@@ -38,14 +25,10 @@
 // the threat model concedes that a notification router learns how many
 // queues a user receives from and can undetectably drop notifications. It
 // is also why a second subscriber silently displaces the first. None of
-// that is a confidentiality break, and the queries above are the part that
-// has to hold for the design to be worth having.
+// that is a confidentiality break, and the two confidentiality queries are
+// the part that has to hold for the design to be worth having.
 //
-// Modelling notes. The client-to-SMP-router legs are guarded: they run
-// inside TLS with the router certificate pinned. The notification router's
-// relay leg to the device is left open, since that party is not trusted.
-// APNS is not modelled as a principal; it is a relay with strictly less
-// access than the notification router already has.
+// [Modelling notes paragraph unchanged]
 
 attacker[active]
 

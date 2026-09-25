@@ -5,6 +5,12 @@
 // fourth share and one unguarded participant. One share plus one oracle is
 // two pieces, and the threshold is three, so the attacker is one partial
 // short and the verifier accepts only the coordinator's signature.
+//
+// The participants' commitments and partials reach the coordinator over
+// authenticated channels. Aggregation needs nothing secret, so on open
+// channels the attacker makes the coordinator abort and hands the verifier
+// the signature itself, which the verifier accepts though the coordinator
+// never sent it: threshold_sign_public_aggregation.vp pins that separately.
 
 attacker[active]
 
@@ -51,9 +57,9 @@ principal Carol[
 	cc = PUBKEY(nc)
 ]
 
-Alice -> Coordinator: ca
-Bob -> Coordinator: cb
-Carol -> Coordinator: cc
+Alice -> Coordinator: [ca]
+Bob -> Coordinator: [cb]
+Carol -> Coordinator: [cc]
 
 principal Coordinator[
 	generates m
@@ -78,9 +84,9 @@ principal Carol[
 	pc = THRESHOLD_SIGN(sc, nc, cl_c, m)
 ]
 
-Alice -> Coordinator: pa
-Bob -> Coordinator: pb
-Carol -> Coordinator: pc
+Alice -> Coordinator: [pa]
+Bob -> Coordinator: [pb]
+Carol -> Coordinator: [pc]
 
 principal Coordinator[
 	sig = THRESHOLD_JOIN(pa, pb, pc)

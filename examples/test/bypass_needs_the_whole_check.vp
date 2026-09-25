@@ -1,10 +1,15 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
 //
-// Expected: a0. Knowing k does not supply the secret associated data ad. The
-// attacker cannot construct a different ciphertext accepted by Bob. The
-// companion with leaked ad permits a concrete forgery. Declared nonces keep
-// the ciphertext identical across sessions.
+// Expected: a0 at one session, a1 at two. Knowing k does not supply the
+// secret associated data ad. The attacker cannot construct a different
+// ciphertext accepted by Bob. The companion with leaked ad permits a concrete
+// forgery. Declared nonces keep the ciphertext identical across sessions,
+// and that is what fails at two: the attacker leaves Alice unstarted and
+// replays Alice#2's n_c and c to Bob, so Bob and Bob#2 both decrypt a
+// ciphertext Alice sent once. Bob generates s only after accepting c, so
+// nothing he contributes binds it. Every session once had to start, so both
+// Alices sent c. The forgery question is answered at one session.
 
 attacker[active]
 

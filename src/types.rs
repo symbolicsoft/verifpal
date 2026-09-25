@@ -1335,6 +1335,22 @@ impl ProtocolTrace {
 		Self::grouped(&self.actors, a, b)
 	}
 
+	pub(crate) fn sibling_slots(&self, slot: usize) -> Vec<usize> {
+		let id = self.slots[slot].constant.id;
+		let mut out = vec![slot];
+		for group in [&self.session_siblings, &self.copy_siblings]
+			.into_iter()
+			.filter_map(|groups| groups.get(&id))
+		{
+			for &at in group.iter().filter_map(|sid| self.index.get(sid)) {
+				if !out.contains(&at) {
+					out.push(at);
+				}
+			}
+		}
+		out
+	}
+
 	pub(crate) fn interchangeable_for(&self, a: PrincipalId, b: PrincipalId, slot: usize) -> bool {
 		if Self::grouped(&self.interchangeable, a, b) {
 			return true;

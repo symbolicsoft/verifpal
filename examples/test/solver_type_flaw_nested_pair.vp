@@ -1,0 +1,56 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0 at one session, c1 at two.
+//
+// The core of Syverson's type-flaw attack on BAN-Yahalom. Bob's request to
+// the server is {A, Na}Kbs and his ticket is {A, <Kab, Nb>}Kbs. At two
+// sessions the attacker opens Bob#2 with Na := <nil, Nb>, using the Nb it saw
+// Bob send, and Bob#2's request {A, <nil, Nb>}Kbs has exactly the shape of
+// Bob's ticket: Bob accepts nil as the session key and encrypts secret_b
+// under it. The solver once took the shapes a victim's checks demand only
+// from the outermost rewrite, so the constraint Bob's later SPLIT and ASSERT
+// put on the ticket's plaintext never reached Bob#2's Na and no compound value
+// was ever proposed there. At one session no second Bob run exists to serve
+// as the oracle. solver_type_flaw_nested_pair_tagged.vp is the counterweight.
+attacker[active]
+
+principal Alice[
+	generates na
+]
+
+Alice -> Bob: na
+
+principal Bob[
+	knows private k_bs
+	knows public a_name
+	generates nb, n2
+	t2 = AEAD_ENC(k_bs, n2, CONCAT(a_name, na), nil)
+]
+
+Bob -> Server: nb, n2, t2
+
+principal Server[
+	knows private k_bs
+	knows public a_name
+	_ = AEAD_DEC(k_bs, n2, t2, nil)?
+	generates kab, n3
+	t3 = AEAD_ENC(k_bs, n3, CONCAT(a_name, CONCAT(kab, nb)), nil)
+]
+
+Server -> Bob: n3, t3
+
+principal Bob[
+	d = AEAD_DEC(k_bs, n3, t3, nil)?
+	a_b, rest = SPLIT(d)?
+	kab_b, nb_b = SPLIT(rest)?
+	_ = ASSERT(nb_b, nb)?
+	generates secret_b, n_e
+	e = AEAD_ENC(kab_b, n_e, secret_b, nil)
+]
+
+Bob -> Alice: n_e, e
+
+queries[
+	confidentiality? secret_b
+]

@@ -1,13 +1,20 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
 //
-// Expected: a1a0 — MAC declares forgeable_secret, and nothing exercised it.
-// The attacker substitutes an order of its own and mints the tag to match, and
-// Bob's ASSERT passes on a message Alice never sent.
+// Expected: a1a0 at one session, a1a1 at two — MAC declares
+// forgeable_secret, and nothing exercised it. The attacker substitutes an
+// order of its own and mints the tag to match, and Bob's ASSERT passes on a
+// message Alice never sent.
 //
 // The two flights use two different MAC keys. Under one key the attacker would
 // not need the assumption at all: it would swap the two (order, tag) pairs and
 // both queries would fail for a reason the annotation has nothing to do with.
+//
+// At two sessions order_firm fails anyway, and not through the annotation:
+// every order and tag is the same in every session, so the attacker leaves
+// Alice unstarted and replays Alice#2's whole flight to Bob, and Bob and
+// Bob#2 both accept order_firm, which Alice sent once. That the forgeable
+// key does not reach the firm one is pinned at one session.
 
 attacker[active]
 

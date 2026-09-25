@@ -1,10 +1,15 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
-// Expected: a0 at one session and at two.
+//
+// Expected: a0 at one session, a1 at two.
 //
 // auth_tampered_static_replay.vp with x guarded. The attacker can no longer
-// divert Alice, so Alice and Alice#2 each send MAC(k, x) and Bob and Bob#2
-// each accept one: two emissions, two acceptances.
+// divert Alice, but it has no need to: tag = MAC(k, x) is the same in every
+// session, so it leaves Alice unstarted and replays Alice#2's tag to Bob.
+// Bob and Bob#2 both pass their checks on MAC(k, x), which Alice sent once:
+// duplicate acceptance. The guard once kept this model at a0, when every
+// session had to start and both Alices sent the tag. At one session no other
+// Alice sends MAC(k, x) and the attacker cannot mint it: a0.
 attacker[active]
 
 principal Carol[

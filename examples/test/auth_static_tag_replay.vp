@@ -1,0 +1,36 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a0 at one session, a1 at two.
+//
+// Alice's tag is MAC(k, nil) in every session and nothing binds it to Bob's
+// challenge. At two sessions Alice#2 never starts a session, the attacker
+// replays Alice's tag to Bob#2, and both Bob runs accept a tag Alice sent
+// once. The executor once ran every copy of every principal to completion,
+// so each Bob always had an Alice emission of the same tag to match and the
+// replay was invisible. At one session the one Bob accepts the one tag.
+// auth_static_tag_challenge_bound.vp is the counterweight.
+attacker[active]
+
+principal Bob[
+	knows private k
+	generates nb
+]
+
+Bob -> Alice: nb
+
+principal Alice[
+	knows private k
+	tag = MAC(k, nil)
+]
+
+Alice -> Bob: tag
+
+principal Bob[
+	_ = ASSERT(tag, MAC(k, nil))?
+	h = HASH(nb, tag)
+]
+
+queries[
+	authentication? Alice -> Bob: tag
+]

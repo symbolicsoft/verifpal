@@ -1,0 +1,50 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0 at one session and at two.
+//
+// solver_type_flaw_nested_pair.vp with the request and the ticket under
+// different associated data. Bob#2 still encrypts whatever Na the attacker
+// chooses, but under the request label, and Bob opens his ticket only under
+// the ticket label, so no request can stand in for a ticket.
+attacker[active]
+
+principal Alice[
+	generates na
+]
+
+Alice -> Bob: na
+
+principal Bob[
+	knows private k_bs
+	knows public a_name, req, tkt
+	generates nb, n2
+	t2 = AEAD_ENC(k_bs, n2, CONCAT(a_name, na), req)
+]
+
+Bob -> Server: nb, n2, t2
+
+principal Server[
+	knows private k_bs
+	knows public a_name, req, tkt
+	_ = AEAD_DEC(k_bs, n2, t2, req)?
+	generates kab, n3
+	t3 = AEAD_ENC(k_bs, n3, CONCAT(a_name, CONCAT(kab, nb)), tkt)
+]
+
+Server -> Bob: n3, t3
+
+principal Bob[
+	d = AEAD_DEC(k_bs, n3, t3, tkt)?
+	a_b, rest = SPLIT(d)?
+	kab_b, nb_b = SPLIT(rest)?
+	_ = ASSERT(nb_b, nb)?
+	generates secret_b, n_e
+	e = AEAD_ENC(kab_b, n_e, secret_b, nil)
+]
+
+Bob -> Alice: n_e, e
+
+queries[
+	confidentiality? secret_b
+]

@@ -1,26 +1,33 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
 //
-// Expected: c0a0 at one session, c0a1 at two.
+// Expected: c0a1 at one session and at two.
 //
 // A simplified model of the Firefox Sync account protocol ("onepw"): one
 // password, stretched into two independent keys with different destinies —
 // an encryption key the server must NEVER learn, and an authentication
 // token the server is explicitly given. The security of the whole design
-// rests on that split, and both queries hold (c0a0):
+// rests on that split, and the split holds; what fails is the server's
+// place in delivering the ciphertext:
 //
 //   confidentiality? data                        HOLDS — the server (and
 //     the attacker) only ever see h2 and the ciphertext e1; the encryption
 //     key h1 never leaves the client, and HKDF's outputs tell you nothing
 //     about each other.
-//   authentication? Server -> ComputerB: e1     HOLDS at one session —
-//     ComputerB accepts e1 only if the *checked* AEAD_DEC under its own
-//     password-derived h1b succeeds. The attacker cannot forge such a
-//     ciphertext without the password, so the only e1 that passes is the
-//     one ComputerA created. At two sessions that one e1 is accepted
-//     twice: the attacker replaces one ComputerB's h2b, that Server run
-//     halts before releasing e1, and the attacker delivers the e1 the
-//     other Server run sent. That is a duplicate acceptance, not a forgery.
+//   authentication? Server -> ComputerB: e1     FAILS — ComputerB accepts
+//     e1 only if the *checked* AEAD_DEC under its own password-derived h1b
+//     succeeds. The attacker cannot forge such a ciphertext without the
+//     password, so the only e1 that passes is the one ComputerA created.
+//     But ComputerA uploads that e1 in the clear, so the server's login
+//     checks do not decide whether ComputerB gets it. The attacker
+//     replaces username on the upload, the server halts at its first
+//     ASSERT and never releases e1, and the attacker hands ComputerB the
+//     e1 it observed on the upload: ComputerB accepts a ciphertext the
+//     server never sent. At two sessions the attacker halts one Server run
+//     the same way and delivers the e1 the other Server run sent: one
+//     emission accepted twice, a duplicate acceptance, not a forgery. The
+//     judge once excused a delivered value equal to the honest one when
+//     the sender had not sent it, and this query held at one session.
 //
 // The instructive move is the HKDF split:
 //     h1, h2 = HKDF(pass, salt, nil)

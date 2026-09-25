@@ -14,6 +14,12 @@
 // key and the dealer never uses it again, the attacker sees every partial and learns neither the key nor a
 // share, and the only signature the verifier accepts is the one the
 // coordinator sent.
+//
+// The participants' commitments and partials reach the coordinator over
+// authenticated channels. Aggregation needs nothing secret, so on open
+// channels the attacker makes the coordinator abort and hands the verifier
+// the signature itself, which the verifier accepts though the coordinator
+// never sent it: threshold_sign_public_aggregation.vp pins that separately.
 
 attacker[active]
 
@@ -48,8 +54,8 @@ principal Bob[
 	cb = PUBKEY(nb)
 ]
 
-Alice -> Coordinator: ca
-Bob -> Coordinator: cb
+Alice -> Coordinator: [ca]
+Bob -> Coordinator: [cb]
 
 principal Coordinator[
 	generates m
@@ -68,8 +74,8 @@ principal Bob[
 	pb = THRESHOLD_SIGN(sb, nb, cl_b, m)
 ]
 
-Alice -> Coordinator: pa
-Bob -> Coordinator: pb
+Alice -> Coordinator: [pa]
+Bob -> Coordinator: [pb]
 
 principal Coordinator[
 	sig = THRESHOLD_JOIN(pa, pb)

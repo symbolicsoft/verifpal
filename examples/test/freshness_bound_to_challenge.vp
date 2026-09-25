@@ -1,0 +1,34 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: f0a0 at one session and at two.
+//
+// freshness_replayed_across_sessions.vp with Bob's own challenge inside the
+// signature. Alice#2's flight signs nb#2, so Bob's check rejects it, and no
+// two Bob runs can be made to accept the same na.
+attacker[active]
+
+principal Bob[
+	generates nb
+]
+
+Bob -> Alice: nb
+
+principal Alice[
+	knows private ska
+	gka = PUBKEY(ska)
+	generates na
+	s1 = SIGN(ska, CONCAT(na, nb))
+]
+
+Alice -> Bob: [gka], na, s1
+
+principal Bob[
+	_ = SIGNVERIF(gka, CONCAT(na, nb), s1)?
+	u = HASH(na)
+]
+
+queries[
+	freshness? na
+	authentication? Alice -> Bob: na
+]

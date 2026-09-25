@@ -1,11 +1,15 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
 //
-// Expected: c0a1a0 at one session, c0a1a1 at two — a message crossing four
+// Expected: c0a1a1 at one session and at two — a message crossing four
 // principals, end-to-end authenticated only on the last hop. Every
 // intermediary forwards without checking anything, so the authentication
-// query asked at an unchecked hop fails. At one session the one asked where
-// the MAC is verified holds.
+// query asked at an unchecked hop fails. The one asked where the MAC is
+// verified fails too, because HopTwo can be bypassed: at one session the
+// attacker replaces body at HopOne with nil, so HopTwo forwards nil, and
+// hands Dana the body it observed on Alice's send. Dana's checks pass on a
+// body HopTwo never sent. The judge once excused a delivered value equal to
+// the honest one when the sender had not sent it, and pinned a0 there.
 //
 // Four hops is the point: attacker knowledge, provenance and the wire metadata
 // on each slot all have to survive being copied from principal to principal
@@ -15,16 +19,16 @@
 // reporting the wrong provenance — most likely by attributing the message to
 // the first hop rather than to whoever actually put it on the wire.
 // The nonce on `n_body` is declared rather than generated so the ciphertext
-// stays the same value in every session. That makes the last query fail at
-// two sessions anyway: the attacker replaces body at HopOne with nil, so
-// HopTwo forwards nil to Dana, and delivers Dana the body HopTwo#2 sends in
-// its place. Dana and Dana#2 both pass their checks on a body HopTwo sent
-// once: duplicate acceptance, as in auth_withheld_static_replay.vp with the
-// sender diverted rather than halted. The search once never restored an
-// honest input at a recipient that a tampered upstream run had made halt,
-// and in some declaration orders the executor delivered an install before
-// its sender sent the same value, marking HopTwo's forwarded copy
-// attacker-authored and reporting a duplicate for the wrong reason.
+// stays the same value in every session. At two sessions the attacker
+// replaces body at HopOne with nil, so HopTwo forwards nil to Dana, and
+// delivers Dana the body HopTwo#2 sends in its place. Dana and Dana#2 both
+// pass their checks on a body HopTwo sent once: duplicate acceptance, as in
+// auth_withheld_static_replay.vp with the sender diverted rather than
+// halted. The search once never restored an honest input at a recipient
+// that a tampered upstream run had made halt, and in some declaration orders
+// the executor delivered an install before its sender sent the same value,
+// marking HopTwo's forwarded copy attacker-authored and reporting a duplicate
+// for the wrong reason.
 
 attacker[active]
 

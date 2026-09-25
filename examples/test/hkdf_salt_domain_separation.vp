@@ -5,6 +5,11 @@
 // A fixed, distinct info term separates the exposed token from the wrapping
 // key even when their untrusted salts coincide. The salt-substitution
 // forgery is refused; an honest sibling's ciphertext remains replayable.
+// The client's upload is guarded and the query is restricted to executions
+// in which the server forwards the item, so what is asked is the device's
+// check, not whether the attacker can bypass a server that only relays:
+// it can, by making the server forward nil and handing the device the
+// upload it observed. hkdf_salt_substitution.vp is the counterweight.
 attacker[active]
 
 principal Server[]
@@ -17,7 +22,7 @@ principal Client[
 	sealed = AEAD_ENC(wrapping_key, item_nonce, item, nil)
 ]
 
-Client -> Server: token, token_salt, wrapping_salt, item_nonce, sealed
+Client -> Server: [token], [token_salt], [wrapping_salt], [item_nonce], [sealed]
 Server -> Device: token_salt, wrapping_salt, item_nonce, sealed
 
 principal Device[
@@ -28,5 +33,7 @@ principal Device[
 
 queries[
 	confidentiality? item
-	authentication? Server -> Device: sealed
+	authentication? Server -> Device: sealed[
+		precondition[Server -> Device: sealed]
+	]
 ]

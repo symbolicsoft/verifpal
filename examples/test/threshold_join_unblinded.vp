@@ -1,0 +1,42 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1 at one session and at two.
+//
+// Two signers return threshold partials over Alice's blinded message, and
+// Alice's blinding factor leaks. The attacker combines the two partials into
+// SIGN(key, bm) itself, then unblinds it with the leaked factor and the
+// message it opened from bm, obtaining the notary's signature on m. The
+// closure once considered a combined signature only when some principal
+// computed THRESHOLD_JOIN over the partials, so the attacker's power depended
+// on a computation nobody discloses. threshold_join_unblinded_sealed.vp is
+// the counterweight.
+attacker[passive]
+
+principal Alice[
+	knows private kb, m
+	bm = BLIND(kb, m)
+	leaks kb
+]
+
+Alice -> Signers: bm
+
+principal Signers[
+	knows private key
+	generates n1, n2
+	s1, s2 = THRESHOLD_SPLIT[2](key)
+	cm = CONCAT(PUBKEY(n1), PUBKEY(n2))
+	p1 = THRESHOLD_SIGN(s1, n1, cm, bm)
+	p2 = THRESHOLD_SIGN(s2, n2, cm, bm)
+]
+
+Signers -> Alice: cm, p1, p2
+
+principal Notary[
+	knows private key, m
+	sig = SIGN(key, m)
+]
+
+queries[
+	confidentiality? sig
+]

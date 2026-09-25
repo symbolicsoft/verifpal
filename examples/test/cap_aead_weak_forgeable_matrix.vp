@@ -1,10 +1,11 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
 //
-// Expected: c1c0c1a0a1a1 — the whole point of splitting `weak` from
-// `forgeable`, written out as a truth table. AEAD_ENC is the only primitive
-// that declares both, so it is the only place the two can be told apart, and
-// three ciphertexts under three keys cover every combination:
+// Expected: c1c0c1a0a1a1 at one session, c1c0c1a1a1a1 at two — the whole
+// point of splitting `weak` from `forgeable`, written out as a truth table.
+// AEAD_ENC is the only primitive that declares both, so it is the only place
+// the two can be told apart, and three ciphertexts under three keys cover
+// every combination:
 //
 //   [weak]             readable, unforgeable   c1 a0
 //   [forgeable]        unreadable, forgeable   c0 a1
@@ -14,10 +15,13 @@
 // verdict three times. Three keys rather than one is what keeps the rows
 // independent: under a shared key the forged ciphertext from one row would be
 // accepted in another, and the table would fill in for the wrong reason.
-// The nonces on `n_e_weak`, `n_e_forge`, `n_e_both` are declared rather than generated so the ciphertext
-// stays the same value in every session, as it was before nonces were named:
-// generated per run it would add a cross-session duplicate acceptance at two
-// sessions, which is not what this model is about.
+//
+// The nonces on `n_e_weak`, `n_e_forge`, `n_e_both` are declared rather than
+// generated, so every ciphertext is the same value in every session. At two
+// sessions the attacker therefore leaves Alice unstarted and replays
+// Alice#2's flight to Bob, and Bob and Bob#2 both accept e_weak, which Alice
+// sent once. The [weak] row reads a1 there for a reason neither capability
+// has anything to do with, so the table is read at one session.
 
 attacker[active]
 

@@ -1,0 +1,36 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0 at one session and at two.
+//
+// threshold_join_unblinded.vp without the blinding factor's leak. The
+// attacker still combines the partials into SIGN(key, bm), but neither
+// unblinds it nor learns m, so the notary's signature stays out of reach.
+attacker[passive]
+
+principal Alice[
+	knows private kb, m
+	bm = BLIND(kb, m)
+]
+
+Alice -> Signers: bm
+
+principal Signers[
+	knows private key
+	generates n1, n2
+	s1, s2 = THRESHOLD_SPLIT[2](key)
+	cm = CONCAT(PUBKEY(n1), PUBKEY(n2))
+	p1 = THRESHOLD_SIGN(s1, n1, cm, bm)
+	p2 = THRESHOLD_SIGN(s2, n2, cm, bm)
+]
+
+Signers -> Alice: cm, p1, p2
+
+principal Notary[
+	knows private key, m
+	sig = SIGN(key, m)
+]
+
+queries[
+	confidentiality? sig
+]

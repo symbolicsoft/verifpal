@@ -1,17 +1,20 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
-// Expected: a0
 //
-// ENC is unauthenticated, so a stream-cipher-style ciphertext can be mauled:
-// holding ENC(k, CONCAT(lo, lo)) the attacker builds a ciphertext under the
-// same k carrying a payload of its own, without ever learning k. Bob's checked
-// SPLIT then succeeds on a value Alice never sent, and he MACs a half of it.
+// Expected: a0 at one session, a1 at two.
 //
-// Bob reaches c only through the checked SPLIT, so when the attacker cannot
-// maul, every substitution fails that check and halts him before c is used at
-// all. That is what makes the counterweight sharp: cap_malleable_absent.vp is
-// this same model without the annotation, and there the query holds. The pair
-// keeps `malleable` from being either a no-op or a blanket authenticity break.
+// cap_malleable_enc.vp without the `malleable` annotation. ENC is
+// unauthenticated, but without the assumption the attacker cannot maul
+// ENC(k, CONCAT(lo, lo)) into a ciphertext of its own under k. Bob reaches c
+// only through the checked SPLIT, so every substitution fails that check and
+// halts him before c is used at all: a0, where the annotated model is a1.
+// The pair keeps `malleable` from being either a no-op or a blanket
+// authenticity break.
+//
+// At two sessions c fails without any mauling: it is built from knows
+// constants and is the same in every session, so the attacker leaves Alice
+// unstarted and replays Alice#2's c to Bob, and Bob and Bob#2 both accept a
+// ciphertext Alice sent once. The pair is read at one session.
 
 attacker[active]
 

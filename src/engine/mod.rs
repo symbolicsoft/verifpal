@@ -94,13 +94,12 @@ pub(crate) fn judge(
 	honest: &Execution,
 ) {
 	for phase in 0..=cx.km.max_phase {
-		let claims = |p: PrincipalId| ctx.claims_apply_at(p, phase);
+		let claims = |p: PrincipalId| ctx.claims_at(p, phase);
 		let violation = |ex: &Execution, q: &Query| {
 			Judge {
 				cx,
 				ex: ex.at(phase),
 				whole: ex,
-				honest,
 				claims: &claims,
 			}
 			.evaluate(q)
@@ -273,6 +272,7 @@ fn report(
 			slot,
 			value,
 			used,
+			repeated: None,
 		} => {
 			narrator.built_from(*slot, value);
 			format!(
@@ -281,6 +281,24 @@ fn report(
 				shown(&narrator, *slot, value),
 				name(*run),
 				narrator.declared(*used)
+			)
+		}
+		Violation::Stale {
+			run,
+			slot,
+			value,
+			used,
+			repeated: Some(other),
+		} => {
+			narrator.gate(*run, *used);
+			format!(
+				"{} ({}) is used by {} in {}, and {} accepts the same value: the attacker keeps \
+				 it the same across sessions, so it is not fresh.",
+				km.slots[*slot].constant,
+				shown(&narrator, *slot, value),
+				name(*run),
+				narrator.declared(*used),
+				name(*other)
 			)
 		}
 		Violation::Linked {

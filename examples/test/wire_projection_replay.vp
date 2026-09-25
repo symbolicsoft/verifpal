@@ -1,5 +1,17 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a1 at one session and at two.
+//
+// Alice sends CONCAT(n1, n2) to Bob under a guard and takes n2 coming back
+// as proof that Bob received it. A guard stops replacement, not reading:
+// the attacker splits Alice's tuple off the wire, never lets Bob run, and
+// answers with n2 itself. Alice's ASSERT passes on a value Bob never sent,
+// so agreement with Bob fails; an echo of something sent in the clear
+// shows only that someone saw it. The model was added for SPLIT's
+// projection index, and pinned a0 while the judge excused a delivered value
+// equal to the honest one when its sender had sent nothing.
+// concat_split_replay.vp, where Bob signs his answer, is the counterweight.
 
 attacker[active]
 

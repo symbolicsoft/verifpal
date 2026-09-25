@@ -1,0 +1,43 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a0 at one session and at two.
+//
+// auth_mac_reflection.vp with each MAC naming the role that computed it.
+// Bob#2 still answers any challenge the attacker sends, but its answer is
+// MAC(k, CONCAT(b_name, x)), and Bob checks Alice's response against
+// MAC(k, CONCAT(a_name, nb)): no Bob run can produce what a Bob run accepts,
+// so the reflection has nothing to reflect.
+attacker[active]
+
+principal Alice[
+	knows private k
+	knows public a_name, b_name
+	generates na
+]
+
+Alice -> Bob: na
+
+principal Bob[
+	knows private k
+	knows public a_name, b_name
+	generates nb
+	tb = MAC(k, CONCAT(b_name, na))
+]
+
+Bob -> Alice: nb, tb
+
+principal Alice[
+	_ = ASSERT(MAC(k, CONCAT(b_name, na)), tb)?
+	ta = MAC(k, CONCAT(a_name, nb))
+]
+
+Alice -> Bob: ta
+
+principal Bob[
+	_ = ASSERT(MAC(k, CONCAT(a_name, nb)), ta)?
+]
+
+queries[
+	authentication? Alice -> Bob: ta
+]

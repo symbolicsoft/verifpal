@@ -329,7 +329,7 @@ fn auto_queries_asks_more_than_the_model_wrote() {
 	let (generated, generated_code) =
 		crate::verify::verify_auto_queries("examples/test/hmac_ok.vp", 2).expect("analyses");
 	assert_eq!(written_code, "c0a1");
-	assert_eq!(generated_code, "c0c0c0a0a0a1a1f1f1f0f0");
+	assert_eq!(generated_code, "c0c0c0a0a0a1a1f1f1f1f1");
 	assert!(generated.len() > written.len());
 }
 
@@ -394,8 +394,8 @@ fn test_injective_recipient_nonce_unchecked() {
 
 #[test]
 fn test_woolam_pi_pristine_pin() {
-	run_model("woolam_pi_pristine_pin.vp", "a1a0");
-	run_model_sessions("woolam_pi_pristine_pin.vp", 1, "a1a0");
+	run_model("woolam_pi_pristine_pin.vp", "a1a1");
+	run_model_sessions("woolam_pi_pristine_pin.vp", 1, "a1a1");
 }
 #[test]
 fn test_woolam_pif_pristine_pin() {
@@ -1513,7 +1513,7 @@ fn test_cap_malleable_enc() {
 }
 #[test]
 fn test_cap_malleable_absent() {
-	run_model("cap_malleable_absent.vp", "a0");
+	run_model("cap_malleable_absent.vp", "a1");
 }
 #[test]
 fn test_cap_weak_kem_resolved() {
@@ -1606,7 +1606,7 @@ fn test_firefox_sync() {
 		"examples/transport-layer/firefox-sync.vp",
 		"firefox-sync.vp",
 		1,
-		"c0a0",
+		"c0a1",
 	);
 	run_model_at(
 		"examples/transport-layer/firefox-sync.vp",
@@ -1755,13 +1755,13 @@ fn test_simplex_proxy() {
 	run_model_at(
 		"examples/messaging/simplex_proxy.vp",
 		"simplex_proxy.vp",
-		"c0a0a1",
+		"c0a1a1",
 	);
 	run_model_sessions_at(
 		"examples/messaging/simplex_proxy.vp",
 		"simplex_proxy.vp",
 		1,
-		"c0a0a1",
+		"c0a1a1",
 	);
 }
 #[test]
@@ -1783,13 +1783,13 @@ fn test_simplex_ntf() {
 	run_model_at(
 		"examples/messaging/simplex_ntf.vp",
 		"simplex_ntf.vp",
-		"c0c0a0",
+		"c0c0a1",
 	);
 	run_model_sessions_at(
 		"examples/messaging/simplex_ntf.vp",
 		"simplex_ntf.vp",
 		1,
-		"c0c0a0",
+		"c0c0a1",
 	);
 }
 #[test]
@@ -2031,7 +2031,7 @@ fn test_concat_split_replay() {
 }
 #[test]
 fn test_wire_projection_replay() {
-	run_model("wire_projection_replay.vp", "a0");
+	run_model("wire_projection_replay.vp", "a1");
 }
 #[test]
 fn test_forged_flight_mitm() {
@@ -2080,7 +2080,7 @@ fn test_public_constant_is_never_confidential() {
 }
 #[test]
 fn test_bypass_needs_the_whole_check() {
-	run_model("bypass_needs_the_whole_check.vp", "a0");
+	run_model("bypass_needs_the_whole_check.vp", "a1");
 }
 #[test]
 fn test_bypass_needs_the_whole_check_ad_leaked() {
@@ -2322,7 +2322,7 @@ fn test_precondition_accepted_key() {
 }
 #[test]
 fn test_precondition_freshness_halt() {
-	run_model("precondition_freshness_halt.vp", "f1f0");
+	run_model("precondition_freshness_halt.vp", "f1f1");
 	run_model_sessions("precondition_freshness_halt.vp", 1, "f1f0");
 }
 #[test]
@@ -2726,7 +2726,7 @@ fn test_exa2() {
 }
 #[test]
 fn test_fakeauth() {
-	run_model_sessions("fakeauth.vp", 1, "a0");
+	run_model_sessions("fakeauth.vp", 1, "a1");
 	run_model("fakeauth.vp", "a1");
 }
 #[test]
@@ -2869,7 +2869,7 @@ fn test_double_ratchet() {
 }
 #[test]
 fn test_many_principals() {
-	run_model("many_principals.vp", "c1a1a1a1a1a1f0");
+	run_model("many_principals.vp", "c1a1a1a1a1a1f1");
 }
 #[test]
 fn test_psk_with_dh() {
@@ -3180,7 +3180,7 @@ fn test_anonymous_constants_many() {
 }
 #[test]
 fn test_assert_nested_deep() {
-	run_model("assert_nested_deep.vp", "a0a1");
+	run_model("assert_nested_deep.vp", "a1a1");
 }
 #[test]
 fn test_blind_double_blinded() {
@@ -3209,7 +3209,7 @@ fn test_broadcast_one_malicious_member() {
 }
 #[test]
 fn test_cap_aead_weak_forgeable_matrix() {
-	run_model("cap_aead_weak_forgeable_matrix.vp", "c1c0c1a0a1a1");
+	run_model("cap_aead_weak_forgeable_matrix.vp", "c1c0c1a1a1a1");
 }
 #[test]
 fn test_cap_err_hkdf_weak() {
@@ -3229,15 +3229,15 @@ fn test_cap_forgeable_cert_chain() {
 }
 #[test]
 fn test_cap_forgeable_mac() {
-	run_model("cap_forgeable_mac.vp", "a1a0");
+	run_model("cap_forgeable_mac.vp", "a1a1");
 }
 #[test]
 fn test_cap_malleable_from_phase() {
-	run_model("cap_malleable_from_phase.vp", "a0a1");
+	run_model("cap_malleable_from_phase.vp", "a1a1");
 }
 #[test]
 fn test_cap_malleable_key_scoped() {
-	run_model("cap_malleable_key_scoped.vp", "a1a0");
+	run_model("cap_malleable_key_scoped.vp", "a1a1");
 }
 #[test]
 fn test_cap_weak_enc() {
@@ -3261,7 +3261,7 @@ fn test_cap_weak_pubkey_pke() {
 }
 #[test]
 fn test_checked_order_halt() {
-	run_model("checked_order_halt.vp", "a1a0");
+	run_model("checked_order_halt.vp", "a1a1");
 }
 #[test]
 fn test_concat_arity_roundtrip() {
@@ -3277,11 +3277,11 @@ fn test_concat_nested_projection() {
 }
 #[test]
 fn test_cross_protocol_message_confusion() {
-	run_model("cross_protocol_message_confusion.vp", "a1a0");
+	run_model("cross_protocol_message_confusion.vp", "a1a1");
 }
 #[test]
 fn test_dec_bypass_leaked_key() {
-	run_model("dec_bypass_leaked_key.vp", "a1a0");
+	run_model("dec_bypass_leaked_key.vp", "a1a1");
 }
 #[test]
 fn test_dh_exponent_reuse() {
@@ -3554,7 +3554,7 @@ fn test_leak_of_derived_not_root() {
 }
 #[test]
 fn test_mac_then_encrypt_order() {
-	run_model("mac_then_encrypt_order.vp", "a1a0");
+	run_model("mac_then_encrypt_order.vp", "a1a1");
 }
 #[test]
 fn test_mutual_auth_both_directions() {
@@ -3578,7 +3578,7 @@ fn test_nonce_echo_reflection() {
 }
 #[test]
 fn test_oauth_code_interception() {
-	run_model("oauth_code_interception.vp", "c1a0a0");
+	run_model("oauth_code_interception.vp", "c1a1a0");
 }
 #[test]
 fn test_otp_counter_freshness() {
@@ -3645,11 +3645,11 @@ fn test_pubkey_of_pubkey_rejected() {
 }
 #[test]
 fn test_receipt_chain_broken_link() {
-	run_model("receipt_chain_broken_link.vp", "a1a0");
+	run_model("receipt_chain_broken_link.vp", "a1a1");
 }
 #[test]
 fn test_relay_four_hops() {
-	run_model_sessions("relay_four_hops.vp", 1, "c0a1a0");
+	run_model_sessions("relay_four_hops.vp", 1, "c0a1a1");
 	run_model_sessions("relay_four_hops.vp", 2, "c0a1a1");
 }
 #[test]
@@ -3755,7 +3755,7 @@ fn test_session_sign_oracle_cross_two_sessions() {
 }
 #[test]
 fn test_session_three_party_relay_one_session() {
-	run_model_sessions("session_three_party_relay.vp", 1, "c0a0");
+	run_model_sessions("session_three_party_relay.vp", 1, "c0a1");
 }
 #[test]
 fn test_session_three_party_relay_two_sessions() {
@@ -3791,7 +3791,7 @@ fn test_split_narrower_than_concat() {
 }
 #[test]
 fn test_split_stuck_halts() {
-	run_model("split_stuck_halts.vp", "a0a1");
+	run_model("split_stuck_halts.vp", "a1a1");
 }
 #[test]
 fn test_station_to_station() {
@@ -4174,7 +4174,7 @@ fn test_relay_guarded_replay_is_not_a_duplicate() {
 #[test]
 fn test_relay_guarded_replay_open_hop() {
 	run_model("relay_guarded_replay_open_hop.vp", "a1a0");
-	run_model_sessions("relay_guarded_replay_open_hop.vp", 1, "a0a0");
+	run_model_sessions("relay_guarded_replay_open_hop.vp", 1, "a1a0");
 }
 #[test]
 fn test_duplicate_acceptance_no_forward() {
@@ -4217,6 +4217,11 @@ fn test_cap_forgeable_is_not_a_reuse_pair() {
 fn test_cap_forgeable_guard_never_adds_an_attack() {
 	run_model("cap_forgeable_guard_never_adds_an_attack.vp", "c0");
 	run_model_sessions("cap_forgeable_guard_never_adds_an_attack.vp", 1, "c0");
+}
+#[test]
+fn test_threshold_sign_forged_partial_keeps_share() {
+	run_model("threshold_sign_forged_partial_keeps_share.vp", "c0c1");
+	run_model_sessions("threshold_sign_forged_partial_keeps_share.vp", 1, "c0c1");
 }
 #[test]
 fn test_threshold_sign_forgeable_is_not_a_reuse() {
@@ -4700,20 +4705,26 @@ fn test_unlink_origin_late_disclosure() {
 
 #[test]
 fn test_auth_withheld_static_replay() {
-	run_model_sessions("auth_withheld_static_replay.vp", 1, "a0");
-	run_model_sessions("auth_withheld_static_replay.vp", 2, "a1");
+	for model in [
+		"auth_withheld_static_replay.vp",
+		"auth_withheld_static_replay_unchecked.vp",
+	] {
+		run_model_sessions(model, 1, "a0");
+		run_model_sessions(model, 2, "a1");
+	}
 	for sessions in [1, 2] {
-		run_model_sessions("auth_withheld_static_replay_unchecked.vp", sessions, "a0");
 		run_model_sessions("auth_withheld_static_replay_tag_guarded.vp", sessions, "a0");
 	}
 }
 
 #[test]
 fn test_auth_tampered_static_replay() {
-	run_model_sessions("auth_tampered_static_replay.vp", 1, "a0");
-	run_model_sessions("auth_tampered_static_replay.vp", 2, "a1");
-	for sessions in [1, 2] {
-		run_model_sessions("auth_tampered_static_replay_guarded.vp", sessions, "a0");
+	for model in [
+		"auth_tampered_static_replay.vp",
+		"auth_tampered_static_replay_guarded.vp",
+	] {
+		run_model_sessions(model, 1, "a0");
+		run_model_sessions(model, 2, "a1");
 	}
 }
 
@@ -4723,7 +4734,7 @@ fn test_order_relay_declared() {
 		"order_relay_declared_first.vp",
 		"order_relay_declared_later.vp",
 	] {
-		run_model_sessions(model, 1, "a0");
+		run_model_sessions(model, 1, "a1");
 		run_model_sessions(model, 2, "a1");
 	}
 }
@@ -4846,5 +4857,107 @@ fn test_equivalence_held_values_are_compared() {
 	for sessions in [1, 2] {
 		run_model_sessions("equivalence_borrowed_while_starved.vp", sessions, "e1");
 		run_model_sessions("equivalence_knows_creator_halts.vp", sessions, "e1");
+	}
+}
+
+#[test]
+fn test_auth_mac_reflection() {
+	run_model_sessions("auth_mac_reflection.vp", 1, "a0");
+	run_model("auth_mac_reflection.vp", "a1");
+	for sessions in [1, 2] {
+		run_model_sessions("auth_mac_reflection_bound.vp", sessions, "a0");
+	}
+}
+
+#[test]
+fn test_relay_origin() {
+	for sessions in [1, 2] {
+		run_model_sessions("relay_origin_authenticated.vp", sessions, "a0");
+		run_model_sessions("relay_origin_other_sender.vp", sessions, "a1");
+	}
+}
+
+#[test]
+fn test_relay_scenario_genuine_replay() {
+	run_model_sessions("relay_scenario_genuine_replay.vp", 1, "a0a0");
+	run_model("relay_scenario_genuine_replay.vp", "a1a0");
+}
+
+#[test]
+fn test_freshness_replayed_across_sessions() {
+	run_model_sessions("freshness_replayed_across_sessions.vp", 1, "f0a0");
+	run_model("freshness_replayed_across_sessions.vp", "f1a1");
+	for sessions in [1, 2] {
+		run_model_sessions("freshness_bound_to_challenge.vp", sessions, "f0a0");
+	}
+}
+
+#[test]
+fn test_auth_static_tag_replay() {
+	run_model_sessions("auth_static_tag_replay.vp", 1, "a0");
+	run_model("auth_static_tag_replay.vp", "a1");
+	for sessions in [1, 2] {
+		run_model_sessions("auth_static_tag_challenge_bound.vp", sessions, "a0");
+	}
+}
+
+#[test]
+fn test_phase_claims_unrelated_leak() {
+	for sessions in [1, 2] {
+		run_model_sessions("phase_claims_unrelated_leak.vp", sessions, "f0e0");
+	}
+}
+
+#[test]
+fn test_scenario_forward_secrecy() {
+	for sessions in [1, 2] {
+		run_model_sessions(
+			"scenario_forward_secrecy_with_honest_peer.vp",
+			sessions,
+			"c1",
+		);
+		run_model_sessions("scenario_forward_secrecy_without_leak.vp", sessions, "c0");
+		run_model_sessions("scenario_corrupt_by_observation.vp", sessions, "c0");
+	}
+}
+
+#[test]
+fn test_unchecked_signature_failure() {
+	for sessions in [1, 2] {
+		run_model_sessions("unchecked_signature_failure.vp", sessions, "c1");
+		run_model_sessions("unchecked_signature_failure_checked.vp", sessions, "c0");
+	}
+}
+
+#[test]
+fn test_threshold_join_unblinded() {
+	for sessions in [1, 2] {
+		run_model_sessions("threshold_join_unblinded.vp", sessions, "c1");
+		run_model_sessions("threshold_join_unblinded_sealed.vp", sessions, "c0");
+	}
+}
+
+#[test]
+fn test_threshold_sign_public_aggregation() {
+	for sessions in [1, 2] {
+		run_model_sessions("threshold_sign_public_aggregation.vp", sessions, "c0c0a1");
+	}
+}
+
+#[test]
+fn test_solver_reflected_request() {
+	for sessions in [1, 2] {
+		run_model_sessions("solver_reflected_request.vp", sessions, "a1");
+	}
+}
+
+#[test]
+fn test_solver_type_flaw_nested_pair() {
+	run_model_sessions("solver_type_flaw_nested_pair.vp", 1, "c0");
+	run_model("solver_type_flaw_nested_pair.vp", "c1");
+	for sessions in [1, 2] {
+		run_model_sessions("solver_type_flaw_nested_pair_tagged.vp", sessions, "c0");
+		run_model_sessions("search_chain_through_server.vp", sessions, "c1");
+		run_model_sessions("search_chain_through_server_labelled.vp", sessions, "c0");
 	}
 }

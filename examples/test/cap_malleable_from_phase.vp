@@ -1,9 +1,10 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
 //
-// Expected: a0a1 — the same declared malleability, on two ciphertexts written
-// the same way in the same block, with an onset at phase 1. The flight Bob
-// processes in phase 0 is safe and the flight he processes in phase 1 is not.
+// Expected: a0a1 at one session, a1a1 at two — the same declared
+// malleability, on two ciphertexts written the same way in the same block,
+// with an onset at phase 1. The flight Bob processes in phase 0 is safe and
+// the flight he processes in phase 1 is not.
 //
 // `from phase N` had only ever been tested on `weak`, where the effect is a
 // disclosure. On `malleable` the effect is a construction the solver is
@@ -15,8 +16,14 @@
 // The two flights are keyed separately, and the control run is what forces
 // that: under one key the attacker needs no malleability at all in phase 1,
 // because the phase 0 ciphertext is still in its hands and Bob's later SPLIT
-// accepts it verbatim. Stripping the annotation from this model must take the
-// second verdict back to a0, and with a shared key it does not.
+// accepts it verbatim. At one session, stripping the annotation from this
+// model must take the second verdict back to a0, and with a shared key it
+// does not.
+//
+// At two sessions c_now fails too, without any mauling: both ciphertexts are
+// built from knows constants, so the attacker leaves Alice unstarted and
+// replays Alice#2's c_now to Bob, and Bob and Bob#2 both accept a value Alice
+// sent once. The onset is pinned at one session.
 
 attacker[active]
 

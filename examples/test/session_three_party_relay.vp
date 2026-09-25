@@ -1,18 +1,23 @@
 // SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: CC-BY-SA-4.0
-// Expected: c0a1 at two sessions, c0a0 at one.
+//
+// Expected: c0a1 at one session and at two.
 //
 // A relay is where a phantom cross-session path would show up first: the
 // message passes through a principal that cannot read it, so Proxy's own state
 // holds a ciphertext addressed to somebody else, in every session, and the
 // attacker is free to shuffle them. Carol must still end up with a message
-// Alice actually sent.
+// Alice actually sent, and she does: nothing else passes her MAC check.
 //
-// She does not, and for a reason worth naming: replaying the sibling session's
-// ciphertext into this one relocates a value Alice honestly sent, forging
-// nothing, but Carol accepts it a second time and injective agreement fails.
-// At one session there is no sibling ciphertext to shuffle and c0a0 holds,
-// which is where the relay's own soundness is pinned.
+// The query names Proxy, though, and Proxy can be bypassed. The attacker
+// replaces sealed on Alice's send with nil, Proxy forwards nil, and the
+// attacker hands Carol the sealed it observed on Alice's send: Carol accepts
+// a ciphertext Alice sent and Proxy never did. That is the minimal attack at
+// both session counts. At two sessions replaying the sibling session's
+// ciphertext is a second one: it relocates a value Alice honestly sent,
+// forging nothing, but Carol accepts it a second time. The judge once
+// excused a delivered value equal to the honest one when the sender had not
+// sent it, which pinned c0a0 at one session.
 // Confidentiality holds throughout because the relay never holds the key. The
 // model is the negative control for session_pke_cross_feed.vp — same public-key
 // encryption, same long-term key, but nothing downstream of Carol's decryption

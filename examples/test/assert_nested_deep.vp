@@ -1,10 +1,10 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
 //
-// Expected: a0a1 — ASSERT compares two terms for equality and nothing else, so
-// what protects a value is not the comparison but the `?` that makes a failed
-// comparison halt the principal. Bob runs two of them over four-deep hash
-// chains: one checked, one not.
+// Expected: a0a1 at one session, a1a1 at two. ASSERT compares two terms for
+// equality and nothing else, so what protects a value is not the comparison
+// but the `?` that makes a failed comparison halt the principal. Bob runs two
+// of them over four-deep hash chains: one checked, one not.
 //
 // The unchecked comparison fails on every honest run — shallow is not the deep
 // chain and never was — and the model still loads, because an unchecked
@@ -12,6 +12,13 @@
 // uses the value anyway, which is exactly what makes the second query fail.
 // core_rule_assert has to walk both terms to their leaves to answer the first
 // one, so this is also the deepest equality comparison in the tree.
+//
+// At two sessions deep fails as well, for a reason the check has nothing to
+// do with: deep is built from knows constants, so it is the same in every
+// session. The attacker leaves Alice unstarted and replays Alice#2's flight
+// to Bob, and Bob and Bob#2 both pass the checked ASSERT on a value Alice
+// sent once. Every session once had to start, so both Alices sent deep. The
+// checked comparison is pinned at one session.
 
 attacker[active]
 

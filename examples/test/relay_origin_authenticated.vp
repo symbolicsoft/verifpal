@@ -1,0 +1,36 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a0 at one session and at two.
+//
+// Alice's MAC'd message reaches Bob through Carol over guarded legs, and the
+// query names its origin, Alice, rather than the relay. Alice sent x toward
+// Bob and Carol forwarded exactly that, so Bob's acceptance is matched by
+// Alice's emission. The judge once read any honest value arriving from a
+// principal other than the named sender as a substitution, and failed this
+// model in the honest run with a trace in which the attacker did nothing.
+// relay_origin_other_sender.vp is the counterweight.
+attacker[active]
+
+principal Alice[
+	knows private k
+	generates m
+	x = MAC(k, m)
+]
+
+Alice -> Carol: [m], [x]
+
+principal Carol[
+	_ = HASH(m, x)
+]
+
+Carol -> Bob: [m], [x]
+
+principal Bob[
+	knows private k
+	_ = ASSERT(MAC(k, m), x)?
+]
+
+queries[
+	authentication? Alice -> Bob: x
+]

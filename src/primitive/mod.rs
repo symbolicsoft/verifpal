@@ -495,6 +495,10 @@ pub(crate) fn combine_rules(id: PrimitiveId) -> &'static [CombineRule] {
 	prim_spec(id).map_or(&[], |s| s.combine.as_slice())
 }
 
+pub(crate) fn combines_from(partial: PrimitiveId) -> impl Iterator<Item = &'static CombineRule> {
+	prim_specs().flat_map(move |spec| spec.combine.iter().filter(move |r| r.partial == partial))
+}
+
 pub(crate) fn combines_into(
 	whole: PrimitiveId,
 ) -> impl Iterator<Item = (PrimitiveId, &'static CombineRule)> {

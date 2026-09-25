@@ -1,0 +1,32 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a0 at one session and at two.
+//
+// auth_static_tag_replay.vp with Bob's challenge under the MAC. A tag Alice
+// computed for one Bob run fails every other Bob run's check, so however many
+// Alice sessions the attacker withholds, no tag is accepted twice.
+attacker[active]
+
+principal Bob[
+	knows private k
+	generates nb
+]
+
+Bob -> Alice: nb
+
+principal Alice[
+	knows private k
+	tag = MAC(k, nb)
+]
+
+Alice -> Bob: tag
+
+principal Bob[
+	_ = ASSERT(tag, MAC(k, nb))?
+	h = HASH(nb, tag)
+]
+
+queries[
+	authentication? Alice -> Bob: tag
+]

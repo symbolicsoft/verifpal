@@ -5,6 +5,9 @@
 // The receiving device accepts an untrusted wrapping salt. Replacing it
 // with the public token salt makes the exposed token its decryption key,
 // allowing an attacker-authored ciphertext to pass the checked decryption.
+// The upload is guarded and the query restricted to executions in which the
+// server forwards the item, as in hkdf_salt_domain_separation.vp, so the
+// attack is the salt substitution itself and not a bypass of the server.
 attacker[active]
 
 principal Server[]
@@ -17,7 +20,7 @@ principal Client[
 	sealed = AEAD_ENC(wrapping_key, item_nonce, item, nil)
 ]
 
-Client -> Server: token, token_salt, wrapping_salt, item_nonce, sealed
+Client -> Server: [token], [token_salt], [wrapping_salt], [item_nonce], [sealed]
 Server -> Device: token_salt, wrapping_salt, item_nonce, sealed
 
 principal Device[
@@ -28,5 +31,7 @@ principal Device[
 
 queries[
 	confidentiality? item
-	authentication? Server -> Device: sealed
+	authentication? Server -> Device: sealed[
+		precondition[Server -> Device: sealed]
+	]
 ]

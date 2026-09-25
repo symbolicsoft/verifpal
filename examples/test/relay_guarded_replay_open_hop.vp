@@ -1,14 +1,21 @@
 /* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
  * SPDX-License-Identifier: CC-BY-SA-4.0 */
-
-// Expected: a0a0 at one session and a1a0 at two.
+//
+// Expected: a1a0 at one session and at two.
 //
 // relay_guarded_replay_is_not_a_duplicate.vp with the relay's own leg left
-// open. Now the attacker does not need the leg above: it takes Bob's other
-// run's flight off the wire and hands it to this Carol, who accepts a
-// sending Bob made once and his other Carol accepts too. That is a genuine
-// duplicate acceptance, and it is what keeps the guarded case from being
-// read as a blanket exemption.
+// open. At two sessions the attacker does not need the leg above: it takes
+// Bob's other run's flight off the wire and hands it to this Carol, who
+// accepts a sending Bob made once and his other Carol accepts too. That is
+// a genuine duplicate acceptance, and it is what keeps the guarded case
+// from being read as a blanket exemption.
+//
+// At one session the open leg lets the attacker skip Bob entirely. It reads
+// Alice's signed pair off the guarded Alice -> Bob leg, never lets Bob run,
+// and hands the pair to Carol, whose check passes on Alice's own signature:
+// Carol accepts m from a Bob who never sent it. The judge once excused a
+// delivered value equal to the honest one when its sender had sent nothing.
+// Carol -> Dave stays guarded, so Dave takes only what Carol sent: a0.
 
 attacker[active]
 

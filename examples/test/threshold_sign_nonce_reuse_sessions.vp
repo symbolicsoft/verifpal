@@ -11,6 +11,10 @@
 // holds no freshness, so under a long-term key it accepts the other
 // session's signed message a second time, and the report says so as a
 // duplicate acceptance rather than a forgery.
+//
+// The participants' commitments and partials reach the coordinator over
+// authenticated channels, as in threshold_sign.vp, so the attacker cannot
+// make the coordinator abort and aggregate in its place.
 
 attacker[active]
 
@@ -45,8 +49,8 @@ principal Bob[
 	cb = PUBKEY(nb)
 ]
 
-Alice -> Coordinator: ca
-Bob -> Coordinator: cb
+Alice -> Coordinator: [ca]
+Bob -> Coordinator: [cb]
 
 principal Coordinator[
 	generates m
@@ -65,8 +69,8 @@ principal Bob[
 	pb = THRESHOLD_SIGN(sb, nb, cl_b, m)
 ]
 
-Alice -> Coordinator: pa
-Bob -> Coordinator: pb
+Alice -> Coordinator: [pa]
+Bob -> Coordinator: [pb]
 
 principal Coordinator[
 	sig = THRESHOLD_JOIN(pa, pb)

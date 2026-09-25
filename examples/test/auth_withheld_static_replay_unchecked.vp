@@ -1,12 +1,15 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
-// Expected: a0 at one session and at two.
+//
+// Expected: a0 at one session, a1 at two.
 //
 // auth_withheld_static_replay.vp with Alice's ASSERT unchecked. Replacing c no
-// longer halts Alice, so every Alice sends her tag and every Bob's receipt of
-// MAC(k, nil) is matched by an emission: a replay across sessions delivers the
-// very value the recipient's own Alice sent, and nothing is accepted more
-// often than it is sent.
+// longer halts Alice, but the attacker has no need to halt her: tag =
+// MAC(k, nil) is the same in every session, so it leaves Alice unstarted and
+// replays Alice#2's tag to Bob. Bob and Bob#2 both pass their checks on
+// MAC(k, nil), which Alice sent once. When every session had to start, each
+// Bob's receipt was matched by his own Alice's emission and this model held.
+// At one session no other Alice sends the tag: a0.
 attacker[active]
 
 principal Charlie[

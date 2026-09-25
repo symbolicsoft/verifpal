@@ -1,9 +1,15 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
-// Expected: a0 at one session, a1 at two, and the same codes as
+//
+// Expected: a1 at one session and at two, and the same codes as
 // order_relay_declared_later.vp, which differs only in where Hop's first
 // block sits.
 //
+// At one session the attacker bypasses Relay: it replaces body at Hop with
+// nil, so Hop and Relay forward nil, and hands Bob the body it observed on
+// Alice's send. Bob's ASSERT passes on a body Relay never sent. The judge
+// once excused a delivered value equal to the honest one when the sender
+// had not sent it, which pinned a0 at one session.
 // body = MAC(k, label) is the same in every session. At two sessions the
 // attacker replaces body at Hop with nil, so Relay forwards nil and Bob's
 // check would halt him, and delivers Bob the body Relay#2 sends in its place:

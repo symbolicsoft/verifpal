@@ -1,10 +1,10 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
 //
-// Expected: a0a1 — SPLIT is a definition_check primitive, so it may carry `?`,
-// and a SPLIT whose argument does not reduce to a CONCAT is a FAILED CHECK
-// rather than merely a stuck term. The two flights are identical but for that
-// one character.
+// Expected: a0a1 at one session, a1a1 at two — SPLIT is a definition_check
+// primitive, so it may carry `?`, and a SPLIT whose argument does not reduce
+// to a CONCAT is a FAILED CHECK rather than merely a stuck term. The two
+// flights are identical but for that one character.
 //
 // Under the check, every ciphertext the attacker can build decrypts to
 // something that is not a bundle, the projection fails, and Bob is truncated
@@ -16,6 +16,15 @@
 // the attacker would swap the two ciphertexts, the checked SPLIT would succeed
 // on a genuine bundle, and both queries would fail for a reason that has
 // nothing to do with checking.
+//
+// At two sessions the checked flight fails anyway, for a reason that has
+// nothing to do with checking: lo, hi and both keys are knows constants, so
+// each bundle is the same in every session. One copy of Alice never starts,
+// the attacker replays the other's genuine bundle_checked to both of Bob's
+// runs, the checked SPLIT succeeds on it, and Bob accepts twice what Alice
+// sent once. The executor once ran every copy of every principal to
+// completion, so each Bob run had an Alice emission to match. The checking
+// contrast is the one-session code.
 
 attacker[active]
 

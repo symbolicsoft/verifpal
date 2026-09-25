@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
 //
-// Expected: c0a0a1 at one session and at two.
+// Expected: c0a1a1 at one session and at two.
 //
 // SimpleX 2-hop onion message routing: the SMP proxy, added in SMP v8 and
 // called "private routing" in the clients. Queues live on routers the
@@ -22,13 +22,22 @@
 //     to either. That is the point of the layer: the spec notes the proxy
 //     must reuse one session with all clients for a given destination, so
 //     without s2r it would see every client's queues.
-//   authentication? Proxy -> Client: gssk   HOLDS — the anti-MITM-by-proxy
-//     measure, and it works. The client validates the certificate chain
-//     against the fingerprint carried in the router address it already has
-//     from the queue URI, then checks the session key's signature under
-//     that certificate. A proxy that substitutes its own session key fails
-//     both. Take the fingerprint check out and the proxy reads everything;
-//     that check is the whole argument.
+//   authentication? Proxy -> Client: gssk   FAILS, but not to a MITM by
+//     the proxy. The client validates the certificate chain against the
+//     fingerprint carried in the router address it already has from the
+//     queue URI, then checks the session key's signature under that
+//     certificate. A proxy that substitutes its own session key fails
+//     both, and no key but the router's own passes them. Take the
+//     fingerprint check out and the proxy reads everything; that check is
+//     the whole argument. What fails is the proxy's own part: the
+//     attacker corrupts certsig on its way to the proxy, the proxy halts
+//     at its signature check and never sends PKEY, and the attacker hands
+//     the client the router's gca, gssk and certsig from the
+//     router-to-proxy wire. The client accepts the router's genuine key
+//     from a proxy that never sent it; nothing in the model authenticates
+//     the proxy to the client. The judge once excused a delivered value
+//     equal to the honest one when the sender had not sent it, and this
+//     query held.
 //   authentication? Proxy -> Router: rfwd   FAILS — the destination router
 //     accepts a forwarded transmission the proxy did not send, at one
 //     session and at two. This is not the replay the specification already
@@ -58,7 +67,7 @@
 // man-in-the-middle who has already defeated TLS on that hop, which is a
 // strictly stronger adversary than the one the claim addresses. What
 // survives either way is the s2r layer, which is why the message body and
-// the destination queue stay hidden in the first two queries.
+// the destination queue stay hidden.
 //
 // The fix is the one the protocol already has in the other direction: sign
 // the proxy's handshake key, or require the service certificate that

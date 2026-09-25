@@ -6,6 +6,12 @@
 // FROST hiding-and-binding pair. Once her partial and the public signing
 // context are observed, the attacker recovers her signing share from one
 // partial. One share is still below the threshold for recovering the key.
+//
+// The participants' commitments and partials reach the coordinator over
+// authenticated channels. Aggregation needs nothing secret, so on open
+// channels the attacker makes the coordinator abort and hands the verifier
+// the signature itself, which the verifier accepts though the coordinator
+// never sent it: threshold_sign_public_aggregation.vp pins that separately.
 
 attacker[active]
 
@@ -41,8 +47,8 @@ principal Bob[
 	cb = PUBKEY(nb)
 ]
 
-Alice -> Coordinator: ca
-Bob -> Coordinator: cb
+Alice -> Coordinator: [ca]
+Bob -> Coordinator: [cb]
 
 principal Coordinator[
 	generates m
@@ -61,8 +67,8 @@ principal Bob[
 	pb = THRESHOLD_SIGN(sb, nb, cl_b, m)
 ]
 
-Alice -> Coordinator: pa
-Bob -> Coordinator: pb
+Alice -> Coordinator: [pa]
+Bob -> Coordinator: [pb]
 
 principal Coordinator[
 	sig = THRESHOLD_JOIN(pa, pb)

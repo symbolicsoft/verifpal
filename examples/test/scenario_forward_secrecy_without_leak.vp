@@ -1,0 +1,49 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0 at one session and at two.
+//
+// scenario_forward_secrecy_with_honest_peer.vp without Bob's phase-1 leak.
+// Both scenarios stay honest throughout and no key ever reaches the
+// attacker, so m stays confidential in every run.
+attacker[passive]
+
+principal Bob[
+	knows private b
+	gb = PUBKEY(b)
+]
+
+principal Carol[
+	knows private c
+	gc = PUBKEY(c)
+]
+
+Bob -> Alice: [gb]
+Carol -> Alice: [gc]
+
+principal Alice[
+	knows public gpeer
+	generates m
+	e = PKE_ENC(gpeer, m)
+]
+
+Alice -> Dave: e
+
+principal Dave[
+	_ = HASH(e)
+]
+
+phase[1]
+
+principal Bob[
+	_ = HASH(b)
+]
+
+scenarios[
+	Alice[gpeer = gb]
+	Alice[gpeer = gc]
+]
+
+queries[
+	confidentiality? m
+]

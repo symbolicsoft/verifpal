@@ -211,8 +211,12 @@ impl VerifyContext {
 			.or_insert(outstanding);
 	}
 
-	pub(crate) fn claims_apply_at(&self, principal: PrincipalId, phase: i32) -> bool {
-		self.nothing_is_honest_at(phase) || self.is_honest_at(principal, phase)
+	pub(crate) fn claims_at(&self, principal: PrincipalId, phase: i32) -> Option<i32> {
+		let Some(corrupt_from) = self.corrupt_from.as_ref().filter(|c| !c.is_empty()) else {
+			return Some(phase);
+		};
+		let &from = corrupt_from.get(&principal)?;
+		Some(phase.min(from - 1))
 	}
 
 	pub(crate) fn is_honest_at(&self, principal: PrincipalId, phase: i32) -> bool {
@@ -220,14 +224,6 @@ impl VerifyContext {
 			corrupt_from
 				.get(&principal)
 				.is_some_and(|&corrupt_from| phase < corrupt_from)
-		})
-	}
-
-	fn nothing_is_honest_at(&self, phase: i32) -> bool {
-		self.corrupt_from.as_ref().is_some_and(|corrupt_from| {
-			corrupt_from
-				.values()
-				.all(|&corrupt_from| phase >= corrupt_from)
 		})
 	}
 
@@ -512,14 +508,21 @@ mod tests {
 		let m = parse_string("cat.vp", src).expect("parse");
 
 		let plain = VerifyContext::new(&m, Vec::new(), 2, None, Vec::new(), Vec::new());
-		assert!(plain.claims_apply_at(1, 0));
-		assert!(plain.claims_apply_at(9, 0));
+		assert_eq!(plain.claims_at(1, 0), Some(0));
+		assert_eq!(plain.claims_at(9, 1), Some(1));
 
 		let mut honest: IdMap<PrincipalId, i32> = IdMap::default();
 		honest.insert(1, i32::MAX);
+		honest.insert(3, 2);
 		let mixed = VerifyContext::new(&m, Vec::new(), 2, Some(honest), Vec::new(), Vec::new());
-		assert!(mixed.claims_apply_at(1, 0));
-		assert!(!mixed.claims_apply_at(2, 0));
+		assert_eq!(mixed.claims_at(1, 0), Some(0));
+		assert_eq!(mixed.claims_at(2, 0), None);
+		assert_eq!(mixed.claims_at(3, 1), Some(1));
+		assert_eq!(
+			mixed.claims_at(3, 2),
+			Some(1),
+			"a run corrupt from a later phase answers for what it held while honest"
+		);
 
 		let corrupt = VerifyContext::new(
 			&m,
@@ -529,8 +532,9 @@ mod tests {
 			Vec::new(),
 			Vec::new(),
 		);
-		assert!(
-			corrupt.claims_apply_at(2, 0),
+		assert_eq!(
+			corrupt.claims_at(2, 0),
+			Some(0),
 			"a model with nothing honest to relativise against must not hold vacuously"
 		);
 		assert!(

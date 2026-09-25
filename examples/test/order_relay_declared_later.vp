@@ -1,10 +1,13 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
-// Expected: a0 at one session, a1 at two.
+//
+// Expected: a1 at one session and at two.
 //
 // order_relay_declared_first.vp with Hop's `knows public label` moved from
 // its own leading block into Alice's, so Alice is declared first. The model
-// is the same protocol and must get the same codes.
+// is the same protocol and must get the same codes, for the same reasons:
+// at one session the attacker bypasses Relay, and at two it replays the
+// body Relay#2 sent into Bob.
 attacker[active]
 
 principal Alice[

@@ -1,0 +1,58 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a0a0 at one session, a1a0 at two.
+//
+// Bob verifies Alice's signed message under the key his scenario binds and
+// forwards it to Carol under guards. In the peer = mpk scenario Bob@2 halts in
+// the honest run, since Alice did not sign under Mallory's key. At one
+// session the attacker can replay Alice@2's genuinely signed flight into Bob,
+// whose check passes; Bob forwards it, once, and Carol accepts it, once.
+// Nothing is forged and nothing is accepted twice, so both queries hold. The
+// relayed leg was once judged a forgery whenever the value Bob forwarded had
+// been installed upstream and no sibling relay happened to forward the same
+// value, which here it cannot, Bob@2 having halted. At two sessions Alice's
+// other session supplies a second honest flight: Bob and Bob#2 then both
+// accept m#2, which Alice sent once, so the first query fails as a duplicate
+// acceptance, while the relayed leg still carries what each Bob forwarded.
+// relay_halt_before_forward_leaked.vp is the counterweight, where the relayed
+// value is a genuine forgery.
+attacker[active]
+
+principal Alice[
+	knows private sk
+	pk = PUBKEY(sk)
+	generates m
+	s = SIGN(sk, m)
+]
+
+principal Mallory[
+	knows private mk
+	mpk = PUBKEY(mk)
+	leaks mk
+]
+
+Alice -> Bob: [pk], m, s
+Mallory -> Bob: [mpk]
+Alice -> Carol: [pk]
+
+principal Bob[
+	knows public peer
+	_ = SIGNVERIF(peer, m, s)?
+]
+
+Bob -> Carol: [m], [s]
+
+principal Carol[
+	_ = SIGNVERIF(pk, m, s)?
+]
+
+scenarios[
+	Bob[peer = pk]
+	Bob[peer = mpk]
+]
+
+queries[
+	authentication? Alice -> Bob: m
+	authentication? Bob -> Carol: m
+]

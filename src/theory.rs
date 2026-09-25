@@ -508,7 +508,20 @@ fn can_reconstruct_primitive_directly(
 ) -> Option<ReconstructResult> {
 	let (rewritten, rewrite_value) = can_rewrite(p);
 	if !rewritten {
-		return None;
+		let Value::Primitive(failed) = &rewrite_value else {
+			return None;
+		};
+		return (!primitive_is_core(p.id)
+			&& !p.instance_check
+			&& failed
+				.arguments
+				.iter()
+				.all(|a| obtainable(a, capabilities, attacker)))
+		.then(|| ReconstructResult {
+			from: failed.arguments.clone(),
+			forged: None,
+			combined: false,
+		});
 	}
 	if primitive_is_core(p.id)
 		&& primitive_core_get(p.id).is_ok_and(|s| s.definition_check)

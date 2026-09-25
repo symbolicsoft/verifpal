@@ -1,0 +1,38 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0 at one session and at two.
+//
+// unchecked_signature_failure.vp with the `?` restored. Swapping gb now halts
+// Alice at the verification, before she derives a key or encrypts s, and an
+// unswapped gb leaves a key only Alice and Bob can compute.
+attacker[active]
+
+principal Bob[
+	knows private sb
+	generates b
+	gb = PUBKEY(b)
+	pkb = PUBKEY(sb)
+	sig = SIGN(sb, gb)
+]
+
+Bob -> Alice: [pkb], gb, sig
+
+principal Alice[
+	generates a, s
+	ga = PUBKEY(a)
+	v = SIGNVERIF(pkb, gb, sig)?
+	k = HASH(DH_KEX(gb, a), v)
+	e = ENC(k, s)
+]
+
+Alice -> Bob: ga, e
+
+principal Bob[
+	kb = HASH(DH_KEX(ga, b), gb)
+	d = DEC(kb, e)
+]
+
+queries[
+	confidentiality? s
+]

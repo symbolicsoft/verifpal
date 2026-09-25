@@ -1,17 +1,22 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
 //
-// Expected: a1a0 — cap_malleable_enc.vp and cap_malleable_absent.vp say this
-// across two files; saying it in one, under one attacker, with two ciphertexts
-// of IDENTICAL shape differing only in their key and their annotation, closes
-// the gap those two leave open. Mauling is licensed per call site, so holding
-// one maulable ciphertext must not license reshaping a structurally identical
-// one under a different key.
+// Expected: a1a0 at one session, a1a1 at two — cap_malleable_enc.vp and
+// cap_malleable_absent.vp say this across two files; saying it in one, under
+// one attacker, with two ciphertexts of IDENTICAL shape differing only in
+// their key and their annotation, closes the gap those two leave open.
+// Mauling is licensed per call site, so holding one maulable ciphertext must
+// not license reshaping a structurally identical one under a different key.
 //
 // Both of Bob's SPLITs are checked, so in the unmauled flight every
 // substitution the attacker can build fails the check and halts him before the
 // projected field is ever used. That is what makes a1 against a0 the sharp
 // pair rather than two shades of the same verdict.
+//
+// At two sessions c_firm fails as well, through no mauling: both ciphertexts
+// are the same in every session, so the attacker leaves Alice unstarted and
+// replays Alice#2's flight to Bob, and Bob and Bob#2 both accept c_firm,
+// which Alice sent once. The key scoping is pinned at one session.
 
 attacker[active]
 

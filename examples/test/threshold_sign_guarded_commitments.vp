@@ -7,6 +7,12 @@
 // supply a partial under its leaked share without knowing a committed nonce.
 // Opening the commitment channels, as in threshold_sign_leaked_share_and_oracle,
 // instead permits a commitment to the attacker's own nonce and a real forgery.
+//
+// The participants' commitments and partials reach the coordinator over
+// authenticated channels. Aggregation needs nothing secret, so on open
+// channels the attacker makes the coordinator abort and hands the verifier
+// the signature itself, which the verifier accepts though the coordinator
+// never sent it: threshold_sign_public_aggregation.vp pins that separately.
 
 attacker[active]
 
@@ -62,8 +68,8 @@ principal Bob[
 	pb = THRESHOLD_SIGN(sb, nb, cl_b, m)
 ]
 
-Alice -> Coordinator: pa
-Bob -> Coordinator: pb
+Alice -> Coordinator: [pa]
+Bob -> Coordinator: [pb]
 
 principal Coordinator[
 	sig = THRESHOLD_JOIN(pa, pb)

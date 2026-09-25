@@ -1,13 +1,14 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
 //
-// Expected: a1a0 — encrypt-then-MAC and MAC-then-encrypt, distinguished by
-// what happens when the MAC key alone is compromised. Under encrypt-then-MAC
-// the tag covers the ciphertext, so an attacker holding the MAC key rewrites
-// the ciphertext and re-tags it; Bob's ASSERT passes and he decrypts something
-// Alice never sent. Under MAC-then-encrypt the tag lives INSIDE the
-// encryption, so producing an acceptable record needs the encryption key,
-// which the attacker does not have.
+// Expected: a1a0 at one session, a1a1 at two — encrypt-then-MAC and
+// MAC-then-encrypt, distinguished by what happens when the MAC key alone is
+// compromised. Under encrypt-then-MAC the tag covers the ciphertext, so an
+// attacker holding the MAC key rewrites the ciphertext and re-tags it; Bob's
+// ASSERT passes and he decrypts something Alice never sent. Under
+// MAC-then-encrypt the tag lives INSIDE the encryption, so producing an
+// acceptable record needs the encryption key, which the attacker does not
+// have.
 //
 // The composition order is usually argued the other way round — encrypt-then-
 // MAC is the one the literature recommends, and rightly, because it lets the
@@ -27,6 +28,14 @@
 // AEAD inside there is nothing left for the ordering to decide — the decryption
 // rejects the forgery on its own and both flights hold, which says something
 // about AEADs and nothing about ordering.
+//
+// At two sessions the second flight fails too, and that is about neither
+// order. Every key and message here is a knows constant, so each record is
+// the same in every session: one copy of Alice never starts, the attacker
+// replays the other's record_mte to both of Bob's runs, and Bob accepts it
+// twice though Alice sent it once. The executor once ran every copy of
+// every principal to completion, so each Bob run had an Alice emission to
+// match. The ordering contrast is the one-session code.
 
 attacker[active]
 

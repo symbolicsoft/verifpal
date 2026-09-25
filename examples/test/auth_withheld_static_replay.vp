@@ -1,5 +1,6 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
+//
 // Expected: a0 at one session, a1 at two (GitHub issue #39).
 //
 // Alice's tag = MAC(k, nil) is the same in every session. At two sessions the
@@ -12,9 +13,11 @@
 // equality now only rules out forgery. The search also never delivered a
 // replay into a receive left waiting by a halted sender, since it filled only
 // partly installed unsent messages. At one session no other Alice sends the
-// tag, so the attacker cannot supply it: a0.
-// auth_withheld_static_replay_unchecked.vp and
-// auth_withheld_static_replay_tag_guarded.vp are the counterweights.
+// tag, so the attacker cannot supply it: a0. Leaving Alice unstarted gives
+// the same attack, so auth_withheld_static_replay_unchecked.vp fails at two
+// sessions too. auth_withheld_static_replay_tag_guarded.vp is the
+// counterweight: its guarded tag leaves Bob waiting for a tag that an
+// unstarted or halted Alice never sends.
 attacker[active]
 
 principal Charlie[

@@ -1,0 +1,44 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1 at one session and at two.
+//
+// Alice verifies Bob's signature on his ephemeral key but forgets the `?`,
+// and mixes the verification result into her key. The attacker swaps gb for
+// PUBKEY(nil): the verification fails, Alice carries on with the failed term,
+// and every input of that term is known, since pkb and sig are on the wire
+// and PUBKEY(nil) is the attacker's own. A failed unchecked primitive is a
+// value like any other, so the attacker computes it, derives k and opens e.
+// The closure once refused to build any term that did not reduce, so an
+// unchecked failure was out of the attacker's reach even with every argument
+// in hand. unchecked_signature_failure_checked.vp is the counterweight.
+attacker[active]
+
+principal Bob[
+	knows private sb
+	generates b
+	gb = PUBKEY(b)
+	pkb = PUBKEY(sb)
+	sig = SIGN(sb, gb)
+]
+
+Bob -> Alice: [pkb], gb, sig
+
+principal Alice[
+	generates a, s
+	ga = PUBKEY(a)
+	v = SIGNVERIF(pkb, gb, sig)
+	k = HASH(DH_KEX(gb, a), v)
+	e = ENC(k, s)
+]
+
+Alice -> Bob: ga, e
+
+principal Bob[
+	kb = HASH(DH_KEX(ga, b), gb)
+	d = DEC(kb, e)
+]
+
+queries[
+	confidentiality? s
+]

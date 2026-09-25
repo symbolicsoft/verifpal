@@ -1,14 +1,21 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
 //
-// Expected: f1f0
+// Expected: f1f0 at one session, f1f1 at two.
 //
 // The attacker replaces the nonce n with a value of its own before Bob
 // hashes it, so Bob successfully uses a value containing nothing fresh and
 // the plain freshness query fails. The same substitution fails Bob's MAC
 // check on the next line, so he halts before sending done to Alice. The
 // gated query is restricted to executions in which that send happens, and
-// in every one of them the MAC verified and n is Alice's fresh nonce.
+// in every one of them the MAC verified and n is a nonce Alice generated.
+//
+// That settles one session but not two. Nothing binds Alice's flight to
+// Bob's run, so the attacker replays Alice#2's n#2 and its MAC into Bob:
+// the MAC verifies, Bob sends done, and Bob and Bob#2 both accept n#2.
+// Freshness fails when the attacker keeps a value the same across sessions
+// and has it accepted again, so the gated query fails too. Freshness once
+// asked only whether the value contained a generated constant.
 
 attacker[active]
 

@@ -1,5 +1,6 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
+//
 // Expected: a0 at one session, a1 at two.
 //
 // Alice's tag = MAC(k, x) is the same in every session. At two sessions the
@@ -10,7 +11,9 @@
 // instead of diverting it. The search once only filled receives whose sender
 // never sent, and never restored the honest input at a recipient that the
 // tampered sender made halt. At one session no other Alice sends MAC(k, x):
-// a0. auth_tampered_static_replay_guarded.vp is the counterweight.
+// a0. Leaving Alice unstarted gives the same attack, so
+// auth_tampered_static_replay_guarded.vp, which cannot divert Alice, reaches
+// the same verdicts.
 attacker[active]
 
 principal Carol[

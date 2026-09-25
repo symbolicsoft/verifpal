@@ -1,10 +1,11 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
 //
-// Expected: a1a0 — two checked decryptions in a row, and the attacker can only
-// pass the first. It holds k_first because it leaked, so it seals a message of
-// its own and Bob's first check passes; it cannot do the same for the second,
-// so any substitution there fails and truncates Bob's state at that point.
+// Expected: a1a0 at one session, a1a1 at two — two checked decryptions in a
+// row, and the attacker can only pass the first. It holds k_first because it
+// leaked, so it seals a message of its own and Bob's first check passes; it
+// cannot do the same for the second, so any substitution there fails and
+// truncates Bob's state at that point.
 //
 // What the model pins is the ORDER. halted_at records the earliest failed
 // check and reexec truncates there, so a value used before the halt is still
@@ -12,10 +13,13 @@
 // discarding the whole state rather than its tail — would take the first
 // verdict down to a0 and hide a genuine forgery behind an unrelated failure
 // further down the same principal.
-// The nonces on `n_e_first`, `n_e_second` are declared rather than generated so the ciphertext
-// stays the same value in every session, as it was before nonces were named:
-// generated per run it would add a cross-session duplicate acceptance at two
-// sessions, which is not what this model is about.
+//
+// The nonces on `n_e_first`, `n_e_second` are declared rather than generated,
+// so both ciphertexts are the same value in every session. At two sessions
+// the attacker therefore leaves Alice unstarted and replays Alice#2's flight
+// to Bob, and Bob and Bob#2 both accept e_second, which Alice sent once. That
+// replay has nothing to do with the halt order, which is pinned at one
+// session.
 
 attacker[active]
 

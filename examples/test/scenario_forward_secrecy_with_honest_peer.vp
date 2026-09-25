@@ -1,0 +1,54 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1 at one session and at two.
+//
+// Alice encrypts m to her peer's static key in phase 0, and Bob's key leaks
+// in phase 1. The gpeer = gb scenario is honest in phase 0 and corrupt from
+// phase 1, so at phase 1 it answers for what it held at the end of phase 0,
+// including m, against what the attacker knows by then, including b: no
+// forward secrecy. Claims of a run corrupt from a later phase were once
+// dropped at that phase unless no scenario at all was honest there, so the
+// always-honest gc scenario hid this failure, which the model without it
+// reports. scenario_forward_secrecy_without_leak.vp is the counterweight.
+attacker[passive]
+
+principal Bob[
+	knows private b
+	gb = PUBKEY(b)
+]
+
+principal Carol[
+	knows private c
+	gc = PUBKEY(c)
+]
+
+Bob -> Alice: [gb]
+Carol -> Alice: [gc]
+
+principal Alice[
+	knows public gpeer
+	generates m
+	e = PKE_ENC(gpeer, m)
+]
+
+Alice -> Dave: e
+
+principal Dave[
+	_ = HASH(e)
+]
+
+phase[1]
+
+principal Bob[
+	leaks b
+]
+
+scenarios[
+	Alice[gpeer = gb]
+	Alice[gpeer = gc]
+]
+
+queries[
+	confidentiality? m
+]

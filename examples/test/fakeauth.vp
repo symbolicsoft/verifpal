@@ -1,18 +1,24 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
 //
-// Expected: a0 at one session, a1 at two. The phone accepts the wrapped
+// Expected: a1 at one session and at two. The phone accepts the wrapped
 // private key only through a checked AEAD_DEC under a key derived from the
 // private password, which the attacker never holds, so no blob but the one
-// Alice stored passes, and at one session that blob is not forged.
+// Alice stored passes. But Alice uploads that blob in the clear, so the
+// Server's ASSERT on the phone's credential does not decide whether the
+// phone gets it. At one session the attacker replaces
+// alicephone_master_auth with nil, the Server halts at its ASSERT before
+// releasing the blob, and the attacker hands the phone the ciphertext it
+// observed on Alice's upload: the phone accepts a blob the Server never
+// sent. The judge once excused a delivered value equal to the honest one
+// when the sender had not sent it, and pinned a0 at one session.
 // The nonce on `n_e_alice_private_key` is declared rather than generated, so
 // the ciphertext is the same value in every session. At two sessions the
-// attacker replaces one phone's alicephone_master_auth, that Server run halts
-// at its ASSERT before releasing the blob, and the attacker delivers the blob
-// the other Server run sent in its place. The phones accept one emission
-// twice: a duplicate acceptance, not a forgery (GitHub issue #39). The judge
-// once dismissed an installed value equal to the recipient's honest one
-// before counting emissions.
+// attacker halts one Server run the same way and delivers the blob the other
+// Server run sent in its place. The phones accept one emission twice: a
+// duplicate acceptance, not a forgery (GitHub issue #39). The judge once
+// dismissed an installed value equal to the recipient's honest one before
+// counting emissions.
 
 attacker[active]
 
