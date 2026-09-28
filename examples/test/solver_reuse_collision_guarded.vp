@@ -1,0 +1,39 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0 at one session and at two.
+//
+// Counterweight to solver_reuse_collision_in_tuple.vp: the tuple is guarded, so
+// Carol's nonce is the one Dave generated and no collision is available. The
+// solver still offers held nonces at the reuse rule's pinned position; nothing
+// can be delivered there, and the two ciphertexts never form a pair.
+
+attacker[active]
+
+principal Alice[
+	knows private k, m1
+	knows public n
+	e1 = AEAD_ENC(k, n, m1, nil)
+	leaks e1
+]
+
+principal Dave[
+	knows public tg
+	generates cn
+	hello = CONCAT(tg, cn)
+]
+
+Dave -> Carol: [hello]
+
+principal Carol[
+	knows private k
+	knows public tg
+	_, cn_c = SPLIT(hello)?
+	generates m2
+	e2 = AEAD_ENC(k, cn_c, m2, nil)
+	leaks e2
+]
+
+queries[
+	confidentiality? m1
+]

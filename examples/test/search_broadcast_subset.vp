@@ -1,0 +1,60 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1 at one session and at two.
+//
+// broadcast_consistent_replacement.vp with a third recipient. Alice's share
+// goes to Bob, Carol and Dave; Dave checks it against a guarded hash and Bob
+// waits for Dave's guarded ack. The attacker must replace the share at Bob and
+// Carol and leave Dave alone: replacing it nowhere else leaves Bob and Carol
+// disagreeing, and replacing it at Dave too halts Dave and starves Bob.
+//
+// A proposal was installed either at the proposing run alone or, for a value
+// several runs receive, at every one of them, so a subset was never tried. The
+// broadcast probe now retries without the recipients it halted, which is that
+// subset and nothing more speculative.
+//
+// search_broadcast_subset_guarded.vp guards Carol's copy and holds.
+attacker[active]
+
+principal Alice[
+	generates a
+	ga = PUBKEY(a)
+	hga = HASH(ga)
+]
+
+Alice -> Bob: ga
+Alice -> Carol: ga
+Alice -> Dave: ga, [hga]
+
+principal Bob[
+	generates b, sb
+	gb = PUBKEY(b)
+	hb = HASH(ga)
+]
+
+principal Carol[
+	hc = HASH(ga)
+]
+
+principal Dave[
+	_ = ASSERT(HASH(ga), hga)?
+	generates ackd
+]
+
+Bob -> Carol: [hb]
+Carol -> Bob: [hc]
+Dave -> Bob: [ackd]
+
+principal Bob[
+	_ = ASSERT(hb, hc)?
+	kb = DH_KEX(ga, b)
+	generates n
+	e = AEAD_ENC(kb, n, sb, ackd)
+]
+
+Bob -> Alice: gb, n, e
+
+queries[
+	confidentiality? sb
+]

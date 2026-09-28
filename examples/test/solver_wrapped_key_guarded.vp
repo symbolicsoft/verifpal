@@ -1,0 +1,37 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0 at one session and at two.
+//
+// Counterweight to solver_wrapped_key_decomposition.vp: the same double
+// wrapping, but the delivery is guarded, so the attacker cannot put its own
+// key inside it. The solver still shapes the key argument into PUBKEY(..) and
+// asks what would have to arrive; nothing can, and `secret` stays confidential.
+
+attacker[active]
+
+principal Bob[
+	knows public hk, hk2
+	knows private sk
+	pk = PUBKEY(sk)
+	wb = ENC(hk2, ENC(hk, pk))
+]
+
+Bob -> Alice: [wb]
+
+principal Alice[
+	knows public hk, hk2
+	knows private secret
+	pk_a = DEC(hk, DEC(hk2, wb))
+	e = PKE_ENC(pk_a, secret)
+]
+
+Alice -> Bob: e
+
+principal Bob[
+	secret_b = PKE_DEC(sk, e)
+]
+
+queries[
+	confidentiality? secret
+]

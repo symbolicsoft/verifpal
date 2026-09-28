@@ -3318,7 +3318,8 @@ fn test_dh_x3dh_signed_prekey() {
 }
 #[test]
 fn test_downgrade_algorithm_choice() {
-	run_model("downgrade_algorithm_choice.vp", "c1a1c0a0");
+	run_model_sessions("downgrade_algorithm_choice.vp", 1, "c1a1c0a0");
+	run_model("downgrade_algorithm_choice.vp", "c1a1c0a1");
 }
 #[test]
 fn test_eap_tunnel_channel_binding() {
@@ -3586,7 +3587,8 @@ fn test_otp_counter_freshness() {
 }
 #[test]
 fn test_phase_ad_reuse() {
-	run_model("phase_ad_reuse.vp", "a1a0");
+	run_model_sessions("phase_ad_reuse.vp", 1, "a1a0");
+	run_model("phase_ad_reuse.vp", "a1a1");
 }
 #[test]
 fn test_phase_delayed_use() {
@@ -4948,6 +4950,123 @@ fn test_threshold_sign_public_aggregation() {
 fn test_solver_reflected_request() {
 	for sessions in [1, 2] {
 		run_model_sessions("solver_reflected_request.vp", sessions, "a1");
+	}
+}
+
+#[test]
+fn test_solver_sealed_share_substitution() {
+	for sessions in [1, 2] {
+		run_model_sessions("solver_sealed_share_substitution.vp", sessions, "c1");
+		run_model_sessions("solver_sealed_share_signed.vp", sessions, "c0");
+	}
+}
+
+#[test]
+fn test_solver_wrapped_key_decomposition() {
+	for sessions in [1, 2] {
+		run_model_sessions("solver_wrapped_key_decomposition.vp", sessions, "c1");
+		run_model_sessions("solver_wrapped_key_guarded.vp", sessions, "c0");
+		run_model_sessions("solver_sealed_key_and_nonce.vp", sessions, "c1");
+		run_model_sessions("solver_sealed_key_and_nonce_guarded.vp", sessions, "c0");
+	}
+}
+
+#[test]
+fn test_solver_ring_member_in_tuple() {
+	for sessions in [1, 2] {
+		run_model_sessions("solver_ring_member_in_tuple.vp", sessions, "a1");
+		run_model_sessions("solver_ring_member_guarded.vp", sessions, "a0");
+	}
+}
+
+#[test]
+fn test_solver_key_slot_type_flaw() {
+	for sessions in [1, 2] {
+		run_model_sessions("solver_key_slot_type_flaw.vp", sessions, "a1");
+		run_model_sessions("solver_key_slot_type_flaw_bound.vp", sessions, "a0");
+	}
+}
+
+#[test]
+fn test_solver_split_prefix_replay() {
+	for sessions in [1, 2] {
+		run_model_sessions("solver_split_prefix_replay.vp", sessions, "c1");
+		run_model_sessions("solver_split_prefix_bound.vp", sessions, "c0");
+	}
+}
+
+#[test]
+fn test_solver_relay_genuine_key() {
+	for sessions in [1, 2] {
+		run_model_sessions("solver_relay_genuine_key.vp", sessions, "c1");
+		run_model_sessions("solver_relay_genuine_key_bound.vp", sessions, "c0");
+	}
+}
+
+#[test]
+fn test_solver_oracle_through_projection() {
+	for sessions in [1, 2] {
+		run_model_sessions("solver_oracle_through_projection.vp", sessions, "c1");
+		run_model_sessions("solver_oracle_through_projection_domain.vp", sessions, "c0");
+	}
+}
+
+#[test]
+fn test_solver_reuse_collision_in_tuple() {
+	for sessions in [1, 2] {
+		run_model_sessions("solver_reuse_collision_in_tuple.vp", sessions, "c1");
+		run_model_sessions("solver_reuse_collision_guarded.vp", sessions, "c0");
+	}
+}
+
+#[test]
+fn test_search_broadcast_subset() {
+	for sessions in [1, 2] {
+		run_model_sessions("search_broadcast_subset.vp", sessions, "c1");
+		run_model_sessions("search_broadcast_subset_guarded.vp", sessions, "c0");
+	}
+}
+
+#[test]
+fn test_search_idle_upstream_relay() {
+	run_model_sessions("search_idle_upstream_relay.vp", 1, "a0");
+	run_model("search_idle_upstream_relay.vp", "a1");
+	run_model_sessions("search_idle_with_sibling_replay.vp", 1, "a0");
+	run_model("search_idle_with_sibling_replay.vp", "a1");
+	for sessions in [1, 2] {
+		run_model_sessions("search_idle_upstream_guarded.vp", sessions, "a0");
+		run_model_sessions("search_idle_with_sibling_bound.vp", sessions, "a0");
+	}
+}
+
+#[test]
+fn test_search_unlink_two_oracles() {
+	for sessions in [1, 2] {
+		run_model_sessions("search_unlink_two_oracles.vp", sessions, "u1");
+		run_model_sessions("search_unlink_one_oracle.vp", sessions, "u1");
+		run_model_sessions("search_unlink_two_oracles_guarded.vp", sessions, "u0");
+	}
+}
+
+#[test]
+fn test_search_fill_rebuilds_message() {
+	for sessions in [1, 2] {
+		run_model_sessions("search_fill_rebuilds_message.vp", sessions, "a1");
+		run_model_sessions("search_fill_rebuilds_private.vp", sessions, "a0");
+	}
+}
+
+#[test]
+fn test_unblind_over_chosen_message() {
+	for sessions in [1, 2] {
+		run_model_sessions("unblind_over_chosen_message.vp", sessions, "a1");
+	}
+}
+
+#[test]
+fn test_unlink_carrier_field_not_shared() {
+	for sessions in [1, 2] {
+		run_model_sessions("unlink_carrier_field_not_shared.vp", sessions, "u0");
 	}
 }
 

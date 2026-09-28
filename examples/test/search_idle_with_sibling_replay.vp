@@ -1,0 +1,39 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a0 at one session, a1 at two.
+//
+// The companion to search_idle_upstream_relay.vp, where silencing a run is only
+// half the flight. Alice#2 never starts, so Bob#2 waits on a message nobody
+// sent; the attacker hands him session 1's whole flight, and the static tag is
+// accepted by both runs of Bob against Alice's single emission.
+//
+// A run left waiting on an unsent message was completed with the honest value
+// when the attacker could derive it and nil otherwise. Here the honest values
+// are Alice#2's, which she never generated, so every slot became nil and Bob#2
+// halted at his MAC check before the tag was ever reached. The sibling session's
+// values are derivable and are what a replay into a starved receive means, so
+// they are offered as a second completion.
+//
+// search_idle_with_sibling_bound.vp binds the tag to Bob's own nonce and holds.
+attacker[active]
+
+principal Alice[
+	knows private k, kn
+	generates na
+	t = MAC(kn, na)
+	tag = MAC(k, nil)
+]
+
+Alice -> Bob: na, t, tag
+
+principal Bob[
+	knows private k, kn
+	_ = ASSERT(t, MAC(kn, na))?
+	_ = ASSERT(tag, MAC(k, nil))?
+	_ = HASH(na, tag)
+]
+
+queries[
+	authentication? Alice -> Bob: tag
+]

@@ -1,0 +1,55 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1 at one session and at two.
+//
+// Bob's hello carries an ephemeral key and the server's long-term key in one
+// tuple, and Alice checks the second against a copy she already trusts before
+// sealing to the first. The attacker has to do both things at once: put its own
+// key in the ephemeral field and leave the server's key exactly as it was. Keep
+// both and nothing is gained; replace both and Alice's check halts her.
+//
+// Free positions inside a proposal were filled with the attacker's own key
+// whenever the honest value there was a public key, and only otherwise with the
+// honest value the attacker holds, so preserving a key was not expressible and
+// the pair of moves could not be written down. Preserving a held value now comes
+// first and the attacker's own key is still offered separately, so relaying and
+// substituting both stay reachable.
+//
+// solver_relay_genuine_key_bound.vp checks the ephemeral key too, and holds.
+attacker[active]
+
+principal Server[
+	knows private xs
+	ns = PUBKEY(xs)
+]
+
+Server -> Alice: [ns]
+Server -> Bob: [ns]
+
+principal Bob[
+	knows public hk
+	generates b, hn
+	gb = PUBKEY(b)
+	hello = AEAD_ENC(hk, hn, CONCAT(gb, ns), nil)
+]
+
+Bob -> Alice: hn, hello
+
+principal Alice[
+	knows public hk
+	knows private secret
+	gb_a, ns_a = SPLIT(AEAD_DEC(hk, hn, hello, nil))?
+	_ = ASSERT(ns_a, ns)?
+	e = PKE_ENC(gb_a, secret)
+]
+
+Alice -> Bob: e
+
+principal Bob[
+	secret_b = PKE_DEC(b, e)
+]
+
+queries[
+	confidentiality? secret
+]

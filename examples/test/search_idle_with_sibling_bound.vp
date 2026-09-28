@@ -1,0 +1,37 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a0 at one session and at two.
+//
+// Counterweight to search_idle_with_sibling_replay.vp: the tag is bound to a
+// nonce Bob generates, so each run of Bob only accepts a tag made for it. The
+// search still silences Alice#2 and still offers the sibling session's flight
+// as the completion; Bob#2's check rejects a tag built over Bob's nonce.
+
+attacker[active]
+
+principal Bob[
+	generates nb
+]
+
+Bob -> Alice: nb
+
+principal Alice[
+	knows private k, kn
+	generates na
+	t = MAC(kn, na)
+	tag = MAC(k, nb)
+]
+
+Alice -> Bob: na, t, tag
+
+principal Bob[
+	knows private k, kn
+	_ = ASSERT(t, MAC(kn, na))?
+	_ = ASSERT(tag, MAC(k, nb))?
+	_ = HASH(na, tag)
+]
+
+queries[
+	authentication? Alice -> Bob: tag
+]

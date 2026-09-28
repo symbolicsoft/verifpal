@@ -1,7 +1,8 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
 //
-// Expected: a1a0 — associated data is a replay domain, and reusing it across
+// Expected: a1a0 at one session, a1a1 at two — associated data is a replay
+// domain, and reusing it across
 // phases hands the attacker one. Bob accepts the phase 1 flight under the same
 // associated data he accepted the phase 0 flight under, so the attacker simply
 // re-sends the old ciphertext and Bob's checked decryption succeeds on a
@@ -11,7 +12,15 @@
 // Its old ciphertext no longer reduces under the new ad — AEAD_DEC's rewrite
 // matches position 2 against position 2 — so the same replay fails the check
 // and halts Bob before the value is used. Domain separation is the entire
-// difference between the two verdicts.
+// difference between the two verdicts at one session.
+//
+// At two sessions the second flight falls as well, for an unrelated reason the
+// first flight already showed: `n_e_fresh_one` is `knows private`, so both
+// copies of Alice hold the same nonce and `e_fresh_one` is literally one
+// ciphertext. The attacker leaves Alice unstarted, replays Alice#2's whole
+// transcript into Bob, and Bob and Bob#2 each accept that one ciphertext, so
+// agreement is not injective. Domain separation stops the cross-phase replay;
+// it does not make a session-shared nonce fresh.
 // The nonce on `n_e_fresh_one` is declared rather than generated so the ciphertext
 // stays the same value in every session, as it was before nonces were named:
 // generated per run it would add a cross-session duplicate acceptance at two

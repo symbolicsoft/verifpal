@@ -37,7 +37,22 @@ pub(crate) fn build(
 	principal: PrincipalId,
 	attacker: &AttackerState,
 ) -> SymbolicState {
-	build_with(controllable, km, principal, attacker, &[], false)
+	build_with(controllable, km, principal, attacker, &[], false, true)
+}
+
+pub(crate) fn build_unshaped(
+	controllable: &crate::solve::control::Controllable,
+	km: &ProtocolTrace,
+	principal: PrincipalId,
+	attacker: &AttackerState,
+) -> SymbolicState {
+	build_with(controllable, km, principal, attacker, &[], false, false)
+}
+
+pub(crate) fn has_key_shaped_slot(km: &ProtocolTrace) -> bool {
+	km.slots
+		.iter()
+		.any(|slot| crate::primitive::value_is_key_derivation(&slot.initial_value))
 }
 
 pub(crate) fn build_assuming_honest(
@@ -47,7 +62,7 @@ pub(crate) fn build_assuming_honest(
 	attacker: &AttackerState,
 	honest: &[usize],
 ) -> SymbolicState {
-	build_with(controllable, km, principal, attacker, honest, false)
+	build_with(controllable, km, principal, attacker, honest, false, true)
 }
 
 pub(crate) fn build_addressed(
@@ -57,7 +72,7 @@ pub(crate) fn build_addressed(
 	attacker: &AttackerState,
 	honest: &[usize],
 ) -> SymbolicState {
-	build_with(controllable, km, principal, attacker, honest, true)
+	build_with(controllable, km, principal, attacker, honest, true, true)
 }
 
 struct Walk<'a> {
@@ -76,6 +91,7 @@ fn build_with(
 	attacker: &AttackerState,
 	honest: &[usize],
 	addressed: bool,
+	shaped: bool,
 ) -> SymbolicState {
 	let n = km.slots.len();
 	let mut var_terms: Vec<Option<Value>> = vec![None; n];
@@ -86,11 +102,10 @@ fn build_with(
 			continue;
 		}
 		let trace_slot = &km.slots[idx];
-		*slot = Some(shaped_var(
-			idx,
-			&trace_slot.initial_value,
-			&trace_slot.constant.name,
-		));
+		*slot = Some(match shaped {
+			true => shaped_var(idx, &trace_slot.initial_value, &trace_slot.constant.name),
+			false => attacker_var(idx, &trace_slot.constant.name),
+		});
 		var_slots.push(idx);
 	}
 

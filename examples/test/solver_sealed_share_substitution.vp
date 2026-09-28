@@ -1,0 +1,56 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1 at one session and at two.
+//
+// Bob's Diffie-Hellman share travels inside a hello sealed under a public
+// key, as in Threema's group-call Hello under GCHK when the attacker holds
+// GCK. The attacker opens the hello, re-seals it with PUBKEY(nil) in place of
+// gb, forges Bob's key confirmation under DH_KEX(ga, nil), which is the key
+// Alice now derives, and opens `e`. The solver used to commute DH_KEX only
+// when its public share was already written as PUBKEY(..): Alice's share is a
+// projection out of the opened hello, and the tuple shape her confirmation
+// check demands leaves it free, so neither was ever shaped as the attacker's
+// key and the man-in-the-middle was missed. With gb sent in the clear it was
+// always found. solver_sealed_share_signed.vp is the counterweight.
+attacker[active]
+
+principal Alice[
+	knows public hello_key, bob_tag
+	knows private secret
+	generates a
+	ga = PUBKEY(a)
+]
+
+Alice -> Bob: ga
+
+principal Bob[
+	knows public hello_key, bob_tag
+	generates b, hello_nonce, conf_nonce
+	gb = PUBKEY(b)
+	hello = AEAD_ENC(hello_key, hello_nonce, CONCAT(bob_tag, gb), nil)
+	kb = DH_KEX(ga, b)
+	conf = AEAD_ENC(kb, conf_nonce, bob_tag, nil)
+]
+
+Bob -> Alice: hello_nonce, hello, conf_nonce, conf
+
+principal Alice[
+	hello_pt = AEAD_DEC(hello_key, hello_nonce, hello, nil)?
+	tag_a, gb_a = SPLIT(hello_pt)?
+	_ = ASSERT(tag_a, bob_tag)?
+	k = DH_KEX(gb_a, a)
+	conf_pt = AEAD_DEC(k, conf_nonce, conf, nil)?
+	generates n
+	e = AEAD_ENC(k, n, secret, nil)
+]
+
+Alice -> Bob: n, e
+
+principal Bob[
+	secret_b = AEAD_DEC(kb, n, e, nil)?
+]
+
+queries[
+	confidentiality? secret
+]

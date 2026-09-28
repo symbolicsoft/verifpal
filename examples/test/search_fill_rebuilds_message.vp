@@ -1,0 +1,52 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a1 at one session and at two.
+//
+// Relay reseals Alice's nonce under a public key before passing it on with her
+// ciphertext. The attacker never needs Relay at all: it watches Alice's flight
+// to Relay, which is guarded against replacement but not against being read,
+// leaves Relay unstarted, and builds the sealed message itself.
+//
+// Completing a starved receive offered the honest value when it was derivable
+// and nil otherwise. The honest box carries Relay's own nonce, which a run that
+// never started never generated, so the whole message collapsed to nil and Bob
+// halted opening it. Rebuilding the honest message from the parts this
+// execution can actually derive, and nil only where it cannot, is what the
+// attacker does here.
+//
+// search_fill_rebuilds_private.vp seals under a key the attacker lacks.
+attacker[active]
+
+principal B[
+	generates nb
+]
+
+B -> A: [nb]
+
+principal A[
+	knows private k
+	generates n, m
+	e = AEAD_ENC(k, n, m, nb)
+]
+
+A -> R: [n], [e]
+
+principal R[
+	knows public sk
+	generates sn
+	box = AEAD_ENC(sk, sn, n, nil)
+]
+
+R -> B: sn, box, e
+
+principal B[
+	knows private k
+	knows public sk
+	n_b = AEAD_DEC(sk, sn, box, nil)?
+	d = AEAD_DEC(k, n_b, e, nb)?
+]
+
+queries[
+	authentication? R -> B: e
+]

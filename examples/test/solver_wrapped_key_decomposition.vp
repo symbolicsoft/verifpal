@@ -1,0 +1,45 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1 at one session and at two.
+//
+// Bob's public key reaches Alice wrapped twice under keys the attacker holds,
+// and nothing checks it, so the attacker opens the wrapping and re-seals its
+// own key. Alice then encrypts to a key the attacker owns.
+//
+// The route the solver needs is decomposition of Alice's PKE_ENC: that rule
+// hands over the plaintext once its key argument is a public key whose secret
+// the attacker has. The filter that reads the key argument only accepts a term
+// already written PUBKEY(..), and here the argument is DEC(hk, DEC(hk2, wb)),
+// so the whole route was refused and the goal had no path at all. Rejecting a
+// position that still holds a variable throws away the question of what the
+// attacker would have to send to put the right shape there, which is what
+// solver_sealed_share_substitution.vp asks on the commutativity side.
+// solver_wrapped_key_guarded.vp is the counterweight.
+attacker[active]
+
+principal Bob[
+	knows public hk, hk2
+	knows private sk
+	pk = PUBKEY(sk)
+	wb = ENC(hk2, ENC(hk, pk))
+]
+
+Bob -> Alice: wb
+
+principal Alice[
+	knows public hk, hk2
+	knows private secret
+	pk_a = DEC(hk, DEC(hk2, wb))
+	e = PKE_ENC(pk_a, secret)
+]
+
+Alice -> Bob: e
+
+principal Bob[
+	secret_b = PKE_DEC(sk, e)
+]
+
+queries[
+	confidentiality? secret
+]

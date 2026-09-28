@@ -1,0 +1,48 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: u0 at one session and at two.
+//
+// Counterweight to search_unlink_two_oracles.vp: Carol's input is guarded, so
+// her oracle only ever decrypts what Alice sent and y stays hidden. The merge
+// still combines the executions that supply the shared secret's ingredients;
+// with only x available there is no s, and the two tokens stay unlinkable.
+
+attacker[active]
+
+principal Alice[
+	knows private kb, kc
+	knows public c1, c2
+	generates x, y
+	s = HASH(x, y)
+	tok1 = HASH(s, c1)
+	tok2 = HASH(s, c2)
+	ex = ENC(kb, x)
+	ey = ENC(kc, y)
+	eb = ENC(kb, nil)
+	ec = ENC(kc, nil)
+]
+
+Alice -> Dave: ex, ey, tok1, tok2
+Alice -> Bob: eb
+Alice -> Carol: [ec]
+
+principal Bob[
+	knows private kb
+	db = DEC(kb, eb)
+	leaks db
+]
+
+principal Carol[
+	knows private kc
+	dc = DEC(kc, ec)
+	leaks dc
+]
+
+principal Dave[
+	_ = HASH(ex, ey, tok1, tok2)
+]
+
+queries[
+	unlinkability? tok1, tok2
+]

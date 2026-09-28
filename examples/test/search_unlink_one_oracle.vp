@@ -1,0 +1,47 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: u1 at one session and at two.
+//
+// The one-oracle companion to search_unlink_two_oracles.vp: the shared secret
+// needs only Bob's oracle, so a single execution already holds it and no merge
+// is required. This is the case that always passed, and the pair is what says
+// the merge is about combining executions rather than about the link itself.
+
+attacker[active]
+
+principal Alice[
+	knows private kb, kc
+	knows public c1, c2
+	generates x, y
+	s = HASH(x, nil)
+	tok1 = HASH(s, c1)
+	tok2 = HASH(s, c2)
+	ex = ENC(kb, x)
+	eb = ENC(kb, nil)
+	ec = ENC(kc, nil)
+]
+
+Alice -> Dave: ex, tok1, tok2
+Alice -> Bob: eb
+Alice -> Carol: ec
+
+principal Bob[
+	knows private kb
+	db = DEC(kb, eb)
+	leaks db
+]
+
+principal Carol[
+	knows private kc
+	dc = DEC(kc, ec)
+	leaks dc
+]
+
+principal Dave[
+	_ = HASH(ex, tok1, tok2)
+]
+
+queries[
+	unlinkability? tok1, tok2
+]

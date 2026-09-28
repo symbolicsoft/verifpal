@@ -1,0 +1,57 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a1 at one session and at two.
+//
+// Bob's ring member arrives inside a tuple Alice splits, and the attacker puts
+// its own key in that field and signs the challenge itself. Alice's ring
+// verification passes over a ring she was handed, so the message is not Bob's.
+//
+// The shaping fallback that would put PUBKEY(..) in the signer position ran
+// only when the check offered no rewrite shapes at all. RINGSIGNVERIF offers
+// plenty: its first three positions each match any of the three ring slots, so
+// shapes exist, they all place Carol's keys in the signer slot, and the
+// attacker can solve none of them. The check then looked satisfied-or-hopeless
+// and the position was never reshaped. Two tests were wrong: the fallback
+// belongs after the shapes fail, not only when there are none, and a position
+// counts as already-good only if some inner slot accepts what is there rather
+// than any inner slot accepting anything at all — the ring's other members
+// accept everything, which is what masked this.
+//
+// solver_ring_member_guarded.vp guards the tuple and holds.
+attacker[active]
+
+principal Carol[
+	knows private c, d
+	gc = PUBKEY(c)
+	gd = PUBKEY(d)
+]
+
+Carol -> Bob: [gc], [gd]
+Carol -> Alice: [gc], [gd]
+
+principal Alice[
+	generates ch
+]
+
+Alice -> Bob: ch
+
+principal Bob[
+	knows public hk
+	knows private sk
+	pk = PUBKEY(sk)
+	wb = CONCAT(pk, hk)
+	generates m
+	sg = RINGSIGN(sk, gc, gd, CONCAT(ch, m))
+]
+
+Bob -> Alice: wb, m, sg
+
+principal Alice[
+	pk_a, x_a = SPLIT(wb)
+	_ = RINGSIGNVERIF(pk_a, gc, gd, CONCAT(ch, m), sg)?
+]
+
+queries[
+	authentication? Bob -> Alice: m
+]

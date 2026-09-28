@@ -140,7 +140,7 @@ fn rewrite_to_kem_secret(p: &Primitive) -> Value {
 
 fn rewrite_to_unblind(p: &Primitive) -> Value {
 	let inner = match &p.arguments[1] {
-		Value::Primitive(inner_p) => inner_p.arguments[1].clone(),
+		Value::Primitive(inner_p) => inner_p.arguments.get(1).cloned().unwrap_or_else(value_nil),
 		_ => value_nil(),
 	};
 	Value::primitive(PRIM_SIGN, vec![p.arguments[0].clone(), inner], 0)

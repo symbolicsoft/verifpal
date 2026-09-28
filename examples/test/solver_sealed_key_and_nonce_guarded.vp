@@ -1,0 +1,43 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0 at one session and at two.
+//
+// Counterweight to solver_sealed_key_and_nonce.vp: the sealing key is private
+// to Bob and Alice, so the attacker cannot build a box at all. The solver still
+// shapes the key position and asks what would have to arrive; every answer
+// needs `hk`, which it does not have, and `m` stays confidential.
+
+attacker[active]
+
+principal Bob[
+	knows private hk
+	knows public label
+	generates b, hn
+	pk = PUBKEY(b)
+	wb = AEAD_ENC(hk, hn, pk, nil)
+	lb = HASH(label)
+]
+
+Bob -> Alice: hn, wb, lb
+
+principal Alice[
+	knows private hk
+	knows public label
+	_ = ASSERT(lb, HASH(label))?
+	pk_a = AEAD_DEC(hk, hn, wb, nil)
+	generates m, en
+	ct, ss = KEM_ENCAP(pk_a, en)
+	e = AEAD_ENC(ss, en, m, nil)
+]
+
+Alice -> Bob: ct, en, e
+
+principal Bob[
+	ss_b = KEM_DECAP(b, ct)
+	m_b = AEAD_DEC(ss_b, en, e, nil)
+]
+
+queries[
+	confidentiality? m
+]

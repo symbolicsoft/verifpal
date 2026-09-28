@@ -1,0 +1,45 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a0 at one session and at two.
+//
+// Counterweight to search_fill_rebuilds_message.vp: the resealing key is
+// private to Relay and Bob, so the attacker cannot build the box that a
+// silenced Relay would have sent. The search still leaves Relay unstarted and
+// still tries to rebuild the message from what it can derive; the key is not
+// among those parts, and Bob accepts nothing.
+
+attacker[active]
+
+principal B[
+	generates nb
+]
+
+B -> A: [nb]
+
+principal A[
+	knows private k
+	generates n, m
+	e = AEAD_ENC(k, n, m, nb)
+]
+
+A -> R: [n], [e]
+
+principal R[
+	knows private sk
+	generates sn
+	box = AEAD_ENC(sk, sn, n, nil)
+]
+
+R -> B: sn, box, e
+
+principal B[
+	knows private k
+	knows private sk
+	n_b = AEAD_DEC(sk, sn, box, nil)?
+	d = AEAD_DEC(k, n_b, e, nb)?
+]
+
+queries[
+	authentication? R -> B: e
+]

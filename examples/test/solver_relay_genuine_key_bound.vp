@@ -1,0 +1,51 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0 at one session and at two.
+//
+// Counterweight to solver_relay_genuine_key.vp: the ephemeral key is signed
+// under a key only Bob and Alice hold, so the attacker cannot put its own key
+// in that field while preserving the one beside it. The solver still preserves
+// the held server key and still offers its own in the ephemeral position; the
+// signature check is what tells the two apart.
+
+attacker[active]
+
+principal Server[
+	knows private xs
+	ns = PUBKEY(xs)
+]
+
+Server -> Alice: [ns]
+Server -> Bob: [ns]
+
+principal Bob[
+	knows public hk
+	knows private xs_known
+	generates b, hn
+	gb = PUBKEY(b)
+	gb_tag = SIGN(xs_known, gb)
+	hello = AEAD_ENC(hk, hn, CONCAT(gb, ns), nil)
+]
+
+Bob -> Alice: hn, hello, gb_tag
+
+principal Alice[
+	knows public hk
+	knows private secret
+	gb_a, ns_a = SPLIT(AEAD_DEC(hk, hn, hello, nil))?
+	knows private xs_known
+	_ = ASSERT(ns_a, ns)?
+	_ = SIGNVERIF(PUBKEY(xs_known), gb_a, gb_tag)?
+	e = PKE_ENC(gb_a, secret)
+]
+
+Alice -> Bob: e
+
+principal Bob[
+	secret_b = PKE_DEC(b, e)
+]
+
+queries[
+	confidentiality? secret
+]

@@ -1,0 +1,47 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a1 at one session and at two.
+//
+// The signer splits its request out of a tuple the attacker controls, so it
+// signs a value of the attacker's choosing rather than a blinding. Alice then
+// unblinds that signature and passes it on as hers.
+//
+// This model existed to crash the analysis rather than to state an attack: the
+// rule that reads an unblinding reached into the signature's message for the
+// blinded value and indexed its second argument without asking whether it had
+// one. Every legitimate firing of the rule has a BLIND there, but the solver
+// also builds shapes against goals that do not, and a one-argument term in that
+// position panicked. Reading the position through the registry rather than by
+// index keeps the shape building total, and the attack it was hiding is real.
+attacker[active]
+
+principal Alice[
+	knows public tg
+	generates r, note
+	req = CONCAT(tg, BLIND(r, note))
+]
+
+Alice -> Signer: req
+
+principal Signer[
+	knows private sk
+	_, blinded = SPLIT(req)?
+	bs = SIGN(sk, blinded)
+]
+
+Signer -> Alice: bs
+
+principal Alice[
+	sig = UNBLIND(r, note, bs)
+]
+
+Alice -> Verifier: note, sig
+
+principal Verifier[
+	_ = HASH(note, sig)
+]
+
+queries[
+	authentication? Alice -> Verifier: note
+]

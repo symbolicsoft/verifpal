@@ -1,0 +1,59 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1 at one session and at two.
+//
+// Otway-Rees read from Bob's side, and the reason spore_otway_rees.vp's attack
+// must not depend on how the model spells the decryption. Bob seals the
+// three-field request {nb, m_id, a_name}Kbs and the server answers with the
+// two-field {nb, kab}Kbs. SPLIT takes a prefix, so handing Bob his own request
+// back as the answer passes his nonce check and leaves kab_b = m_id, which
+// travelled in the clear.
+//
+// Reaching it means proposing a tuple wider than the projection needs. The
+// shapes offered for a projection were the narrowest arity that covers it and
+// the arity of the honest value, both 2 here, so the three-field request never
+// unified with the two-field answer and the replay was never proposed. The
+// arities the attacker can actually supply are the ones the protocol's own
+// terms have, so those are now offered too. Writing Bob's decryption on its own
+// line finds it either way, which is exactly why the two spellings must agree.
+//
+// solver_split_prefix_bound.vp is the counterweight.
+attacker[active]
+
+principal Alice[
+	generates m_id
+]
+
+Alice -> Bob: m_id
+
+principal Bob[
+	knows private k_bs
+	knows public a_name
+	generates nb, n_t2
+	t2 = AEAD_ENC(k_bs, n_t2, CONCAT(nb, m_id, a_name), nil)
+]
+
+Bob -> Server: n_t2, t2
+
+principal Server[
+	knows private k_bs
+	nb_s, m_s, a_s = SPLIT(AEAD_DEC(k_bs, n_t2, t2, nil))?
+	generates kab, n_t4
+	t4 = AEAD_ENC(k_bs, n_t4, CONCAT(nb_s, kab), nil)
+]
+
+Server -> Bob: n_t4, t4
+
+principal Bob[
+	nb_b, kab_b = SPLIT(AEAD_DEC(k_bs, n_t4, t4, nil))?
+	_ = ASSERT(nb_b, nb)?
+	generates bsecret, n_e
+	e = AEAD_ENC(kab_b, n_e, bsecret, nil)
+]
+
+Bob -> Alice: n_e, e
+
+queries[
+	confidentiality? bsecret
+]

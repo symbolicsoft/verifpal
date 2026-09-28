@@ -1,0 +1,62 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0 at one session and at two.
+//
+// Counterweight to solver_sealed_share_substitution.vp. The hello is still
+// sealed under a public key and the solver still shapes Bob's share as
+// PUBKEY(nil) inside a re-sealed hello, but Bob now signs gb under a key
+// Alice holds authentically and Alice verifies that signature before she
+// derives k. The attacker has no signature over a share it owns, and
+// replaying Bob#2's share with Bob#2's signature gives Alice a key under
+// b#2, which the attacker lacks. `secret` stays confidential.
+attacker[active]
+
+principal Bob[
+	knows public hello_key, bob_tag
+	knows private bob_lt
+	bob_pub = PUBKEY(bob_lt)
+]
+
+Bob -> Alice: [bob_pub]
+
+principal Alice[
+	knows public hello_key, bob_tag
+	knows private secret
+	generates a
+	ga = PUBKEY(a)
+]
+
+Alice -> Bob: ga
+
+principal Bob[
+	generates b, hello_nonce, conf_nonce
+	gb = PUBKEY(b)
+	gb_sig = SIGN(bob_lt, gb)
+	hello = AEAD_ENC(hello_key, hello_nonce, CONCAT(bob_tag, gb, gb_sig), nil)
+	kb = DH_KEX(ga, b)
+	conf = AEAD_ENC(kb, conf_nonce, bob_tag, nil)
+]
+
+Bob -> Alice: hello_nonce, hello, conf_nonce, conf
+
+principal Alice[
+	hello_pt = AEAD_DEC(hello_key, hello_nonce, hello, nil)?
+	tag_a, gb_a, gb_sig_a = SPLIT(hello_pt)?
+	_ = ASSERT(tag_a, bob_tag)?
+	_ = SIGNVERIF(bob_pub, gb_a, gb_sig_a)?
+	k = DH_KEX(gb_a, a)
+	conf_pt = AEAD_DEC(k, conf_nonce, conf, nil)?
+	generates n
+	e = AEAD_ENC(k, n, secret, nil)
+]
+
+Alice -> Bob: n, e
+
+principal Bob[
+	secret_b = AEAD_DEC(kb, n, e, nil)?
+]
+
+queries[
+	confidentiality? secret
+]

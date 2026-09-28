@@ -1,0 +1,34 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a0 at one session and at two.
+//
+// Counterweight to search_idle_upstream_relay.vp: the forwarded tag is guarded,
+// so a silenced second flight gives the attacker nothing to put in its place.
+// The search still leaves Alice#2 unstarted and still looks upstream; Bob#2
+// simply waits, and no run accepts a tag twice.
+
+attacker[active]
+
+principal Alice[
+	knows private k
+	tag = MAC(k, nil)
+]
+
+principal Relay[
+	generates x
+]
+
+Relay -> Bob: [x]
+Alice -> Relay: [tag]
+Relay -> Bob: [tag]
+
+principal Bob[
+	knows private k
+	_ = ASSERT(tag, MAC(k, nil))?
+	_ = HASH(x, tag)
+]
+
+queries[
+	authentication? Relay -> Bob: tag
+]

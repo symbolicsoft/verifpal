@@ -1,0 +1,54 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0 at one session and at two.
+//
+// Counterweight to solver_split_prefix_replay.vp: request and answer carry
+// different leading domain tags and both are checked, so the prefix of one is
+// never the prefix of the other. The solver still offers the wider tuple the
+// protocol contains and still proposes the replay; Bob's tag check halts him
+// before kab_b is used, and `bsecret` stays confidential.
+
+attacker[active]
+
+principal Alice[
+	generates m_id
+]
+
+Alice -> Bob: m_id
+
+principal Bob[
+	knows private k_bs
+	knows public a_name
+	generates nb, n_t2
+	knows public dom_req
+	t2 = AEAD_ENC(k_bs, n_t2, CONCAT(dom_req, nb, m_id, a_name), nil)
+]
+
+Bob -> Server: n_t2, t2
+
+principal Server[
+	knows private k_bs
+	knows public dom_req, dom_ans
+	d_s, nb_s, m_s, a_s = SPLIT(AEAD_DEC(k_bs, n_t2, t2, nil))?
+	_ = ASSERT(d_s, dom_req)?
+	generates kab, n_t4
+	t4 = AEAD_ENC(k_bs, n_t4, CONCAT(dom_ans, nb_s, kab), nil)
+]
+
+Server -> Bob: n_t4, t4
+
+principal Bob[
+	knows public dom_ans
+	d_b, nb_b, kab_b = SPLIT(AEAD_DEC(k_bs, n_t4, t4, nil))?
+	_ = ASSERT(d_b, dom_ans)?
+	_ = ASSERT(nb_b, nb)?
+	generates bsecret, n_e
+	e = AEAD_ENC(kab_b, n_e, bsecret, nil)
+]
+
+Bob -> Alice: n_e, e
+
+queries[
+	confidentiality? bsecret
+]

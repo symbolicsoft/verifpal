@@ -1,0 +1,43 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1 at one session and at two.
+//
+// Bob hashes his key with whatever field he splits out of Alice's hello, so he
+// is a keyed-hash oracle. The attacker asks him for HASH(kb, t1), which is the
+// key Alice sealed `secret` under, by sending the tag and t1 as the tuple.
+//
+// The oracle is reached by unifying Bob's emission with the goal, and plain
+// unification cannot see through a projection: matching SPLIT(hello)|1 against
+// t1 means solving for the tuple that puts t1 at that position, which is
+// inversion rather than matching. The same oracle with the field sent on its
+// own was always found, so this is a question of spelling, not of power. The
+// fallback runs only when unification found nothing and only for a wire term
+// that projects a variable, which is the one shape it cannot handle.
+//
+// solver_oracle_through_projection_domain.vp separates the two domains.
+attacker[active]
+
+principal Alice[
+	knows private kb
+	knows public t1, tg
+	generates secret, m
+	z = ENC(HASH(kb, t1), secret)
+	leaks z
+	hello = CONCAT(tg, m)
+]
+
+Alice -> Bob: hello
+
+principal Bob[
+	knows private kb
+	knows public tg
+	_, m_b = SPLIT(hello)?
+	o1 = HASH(kb, m_b)
+]
+
+Bob -> Alice: o1
+
+queries[
+	confidentiality? secret
+]

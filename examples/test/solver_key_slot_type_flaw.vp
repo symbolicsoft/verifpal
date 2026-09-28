@@ -1,0 +1,66 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a1 at one session and at two.
+//
+// Bob signs whatever public key reaches him, and separately signs a message
+// bound to Carol's fresh challenge. Nothing says the two signatures are over
+// different kinds of thing, so the attacker sends CONCAT(nil, nc) where Bob
+// expects a key: Bob's first signature is then exactly the shape Carol's check
+// accepts, and Carol takes it as the second. The challenge is fresh and Carol
+// still accepts a signature Bob made in another context.
+//
+// A wire slot whose honest value is a public key was offered to the solver only
+// as PUBKEY(variable), so no non-key value could ever stand in for it. That
+// shape is what every Diffie-Hellman man-in-the-middle needs and cannot simply
+// be dropped: removing it loses the relay attack that
+// solver_key_slot_type_flaw_bound.vp's sibling pins. The search therefore ends
+// with one more pass over the same runs in which key slots are plain variables,
+// so both the key substitution and the type flaw are reachable.
+attacker[active]
+
+principal Bob[
+	knows private skb
+	pkb = PUBKEY(skb)
+]
+
+Bob -> Alice: [pkb]
+Bob -> Carol: [pkb]
+
+principal Carol[
+	generates nc
+]
+
+Carol -> Bob: nc
+
+principal Alice[
+	generates a
+	ga = PUBKEY(a)
+]
+
+Alice -> Bob: ga
+
+principal Bob[
+	sig = SIGN(skb, ga)
+]
+
+Bob -> Alice: sig
+
+principal Alice[
+	_ = SIGNVERIF(pkb, ga, sig)?
+]
+
+principal Bob[
+	generates m
+	msig = SIGN(skb, CONCAT(m, nc))
+]
+
+Bob -> Carol: m, msig
+
+principal Carol[
+	_ = SIGNVERIF(pkb, CONCAT(m, nc), msig)?
+]
+
+queries[
+	authentication? Bob -> Carol: msig
+]

@@ -1,0 +1,62 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a0 at one session and at two.
+//
+// Counterweight to solver_key_slot_type_flaw.vp: the two signatures carry
+// different domain tags, so no output of the key-signing oracle has the shape
+// the message check accepts. The solver still offers non-key values at the key
+// slot and still asks the oracle for the message shape; the tags make the two
+// shapes impossible to confuse, and Carol accepts only what Bob sent her.
+
+attacker[active]
+
+principal Bob[
+	knows private skb
+	pkb = PUBKEY(skb)
+]
+
+Bob -> Alice: [pkb]
+Bob -> Carol: [pkb]
+
+principal Carol[
+	generates nc
+]
+
+Carol -> Bob: nc
+
+principal Alice[
+	generates a
+	ga = PUBKEY(a)
+]
+
+Alice -> Bob: ga
+
+principal Bob[
+	knows public dom_key
+	sig = SIGN(skb, CONCAT(dom_key, ga))
+]
+
+Bob -> Alice: sig
+
+principal Alice[
+	knows public dom_key
+	_ = SIGNVERIF(pkb, CONCAT(dom_key, ga), sig)?
+]
+
+principal Bob[
+	generates m
+	knows public dom_msg
+	msig = SIGN(skb, CONCAT(dom_msg, m, nc))
+]
+
+Bob -> Carol: m, msig
+
+principal Carol[
+	knows public dom_msg
+	_ = SIGNVERIF(pkb, CONCAT(dom_msg, m, nc), msig)?
+]
+
+queries[
+	authentication? Bob -> Carol: msig
+]

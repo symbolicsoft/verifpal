@@ -1,0 +1,46 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a0 at one session and at two.
+//
+// Counterweight to solver_ring_member_in_tuple.vp: the tuple carrying Bob's
+// ring member is guarded, so the attacker cannot put its own key in the ring.
+// The solver still reshapes the signer position and asks for the tuple that
+// would carry it; that tuple cannot be replaced, and the ring keeps its meaning.
+
+attacker[active]
+
+principal Carol[
+	knows private c, d
+	gc = PUBKEY(c)
+	gd = PUBKEY(d)
+]
+
+Carol -> Bob: [gc], [gd]
+Carol -> Alice: [gc], [gd]
+
+principal Alice[
+	generates ch
+]
+
+Alice -> Bob: ch
+
+principal Bob[
+	knows public hk
+	knows private sk
+	pk = PUBKEY(sk)
+	wb = CONCAT(pk, hk)
+	generates m
+	sg = RINGSIGN(sk, gc, gd, CONCAT(ch, m))
+]
+
+Bob -> Alice: [wb], m, sg
+
+principal Alice[
+	pk_a, x_a = SPLIT(wb)
+	_ = RINGSIGNVERIF(pk_a, gc, gd, CONCAT(ch, m), sg)?
+]
+
+queries[
+	authentication? Bob -> Alice: m
+]

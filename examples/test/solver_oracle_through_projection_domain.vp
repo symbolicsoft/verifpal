@@ -1,0 +1,37 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0 at one session and at two.
+//
+// Counterweight to solver_oracle_through_projection.vp: the sealing key and the
+// oracle's answers are separated by a domain tag, so nothing Bob will compute
+// has the shape of Alice's key. The solver still inverts the projection and
+// still asks Bob for the tuple that would produce the goal; no tuple does.
+
+attacker[active]
+
+principal Alice[
+	knows private kb
+	knows public t1, tg
+	generates secret, m
+	knows public dom_seal, dom_oracle
+	z = ENC(HASH(kb, dom_seal, t1), secret)
+	leaks z
+	hello = CONCAT(tg, m)
+]
+
+Alice -> Bob: hello
+
+principal Bob[
+	knows private kb
+	knows public tg
+	_, m_b = SPLIT(hello)?
+	knows public dom_oracle
+	o1 = HASH(kb, dom_oracle, m_b)
+]
+
+Bob -> Alice: o1
+
+queries[
+	confidentiality? secret
+]

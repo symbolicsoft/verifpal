@@ -1,0 +1,46 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1 at one session and at two.
+//
+// The KEM face of solver_wrapped_key_decomposition.vp, and the reason the
+// repair has to carry more than one slot. Bob's encapsulation key is sealed
+// under a public key with a fresh nonce sent beside it, and Alice checks only
+// an unrelated label. Substituting the sealed key is not enough on its own:
+// the attacker has to send its own nonce too, or Alice opens the box with the
+// nonce Bob chose and gets nothing. Solving the key position for the shape the
+// decomposition filter wants binds both slots at once, which is what makes the
+// flight executable.
+//
+// solver_sealed_key_and_nonce_guarded.vp guards the nonce instead, and holds.
+attacker[active]
+
+principal Bob[
+	knows public hk, label
+	generates b, hn
+	pk = PUBKEY(b)
+	wb = AEAD_ENC(hk, hn, pk, nil)
+	lb = HASH(label)
+]
+
+Bob -> Alice: hn, wb, lb
+
+principal Alice[
+	knows public hk, label
+	_ = ASSERT(lb, HASH(label))?
+	pk_a = AEAD_DEC(hk, hn, wb, nil)
+	generates m, en
+	ct, ss = KEM_ENCAP(pk_a, en)
+	e = AEAD_ENC(ss, en, m, nil)
+]
+
+Alice -> Bob: ct, en, e
+
+principal Bob[
+	ss_b = KEM_DECAP(b, ct)
+	m_b = AEAD_DEC(ss_b, en, e, nil)
+]
+
+queries[
+	confidentiality? m
+]

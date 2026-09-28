@@ -1,7 +1,8 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
 //
-// Expected: c1a1c0a0 — a negotiated cipher suite with nothing binding the
+// Expected: c1a1c0a0 at one session, c1a1c0a1 at two — a negotiated cipher
+// suite with nothing binding the
 // negotiation. The client offers two suites, the attacker deletes the strong
 // one, and the server picks what is left. The traffic under the weak suite is
 // readable because the weak suite is declared invertible; the traffic that
@@ -12,6 +13,13 @@
 // protection is not about the algorithms at all — it is about whether the
 // choice is authenticated afterwards — and this is the model that separates
 // those two things.
+//
+// The transcript MAC answers the deletion, not replay. Both offers are built
+// from public constants alone, so every session's `offer_bound` and its tag are
+// the same two values, and the server contributes nothing before checking them.
+// At two sessions the attacker leaves the client unstarted and replays the other
+// copy's flight, so the server accepts one offer twice against a single client
+// emission: a duplicate acceptance, reported as such, not a forgery.
 
 attacker[active]
 

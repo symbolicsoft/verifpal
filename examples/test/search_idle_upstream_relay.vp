@@ -1,0 +1,41 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a0 at one session, a1 at two.
+//
+// Alice's tag is static, and Relay forwards it unguarded. Both runs of Relay
+// have to start, because Bob#2 waits on Relay#2's guarded x, so the attacker
+// silences the second flight one step further upstream: Alice#2 never starts,
+// Relay#2 has nothing to forward, and Relay's own tag is handed to Bob#2. One
+// emission, two acceptances.
+//
+// Leaving a run unstarted was offered only for runs interchangeable with the
+// query's sender, which is Relay. Alice is upstream of it, and the value being
+// counted reaches Relay from her, so the causal cone of the queried slot is the
+// right set to consider rather than the sender alone.
+//
+// search_idle_upstream_guarded.vp guards the forwarded tag and holds.
+attacker[active]
+
+principal Alice[
+	knows private k
+	tag = MAC(k, nil)
+]
+
+principal Relay[
+	generates x
+]
+
+Relay -> Bob: [x]
+Alice -> Relay: [tag]
+Relay -> Bob: tag
+
+principal Bob[
+	knows private k
+	_ = ASSERT(tag, MAC(k, nil))?
+	_ = HASH(x, tag)
+]
+
+queries[
+	authentication? Relay -> Bob: tag
+]

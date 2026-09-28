@@ -330,13 +330,28 @@ fn observable(scope: &Scope, observed: &crate::hashing::TermSet, v: &Value) -> b
 		&& p.arguments.iter().all(|arg| observable(scope, observed, arg)))
 }
 
+fn projected(v: &Value) -> Value {
+	let Value::Primitive(p) = v else {
+		return v.clone();
+	};
+	let arguments: Vec<Value> = p.arguments.iter().map(projected).collect();
+	let rebuilt = std::sync::Arc::new(p.with_arguments(arguments));
+	if crate::primitive::primitive_is_projection(p.id) {
+		let (reduced, value) = crate::theory::can_rewrite(&rebuilt);
+		if reduced {
+			return value;
+		}
+	}
+	Value::Primitive(rebuilt)
+}
+
 fn shared_secret_leaves(scope: &Scope, a: usize, b: usize) -> IdSet<ValueId> {
 	let km = scope.km;
 	let of = |slot: usize| {
-		crate::value::subterms(&crate::value::resolve_trace_constant(
+		crate::value::subterms(&projected(&crate::value::resolve_trace_constant(
 			&km.slots[slot].constant,
 			km,
-		))
+		)))
 		.cloned()
 		.collect::<Vec<Value>>()
 	};

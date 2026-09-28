@@ -288,6 +288,19 @@ impl<'a> Deducer<'a> {
 		{
 			arities.push(honest.arguments.len());
 		}
+		let mut seen: Vec<usize> = self
+			.shared
+			.basis
+			.iter()
+			.filter_map(|term| match term {
+				Value::Primitive(q) if q.id == tuple => Some(q.arguments.len()),
+				_ => None,
+			})
+			.filter(|arity| *arity > p.output && !arities.contains(arity))
+			.collect();
+		seen.sort_unstable();
+		seen.dedup();
+		arities.extend(seen);
 		arities
 			.into_iter()
 			.map(|arity| {
@@ -660,6 +673,7 @@ impl<'a> Deducer<'a> {
 			if !contains_var(term) {
 				continue;
 			}
+			let before = out.len();
 			for bound in unifiers(term, goal, s) {
 				out.extend(self.require_constructible(&bound, s, false));
 			}
@@ -668,6 +682,12 @@ impl<'a> Deducer<'a> {
 			{
 				self.solve_by_oracle(p, rule, goal, s, out);
 				self.solve_by_rewrite_match(p, rule, goal, s, out);
+			}
+			if out.len() == before && projects_a_variable(term) && self.shared.basis.contains(goal)
+			{
+				for bound in self.invert(term, goal, s) {
+					out.extend(self.require_constructible(&bound, s, false));
+				}
 			}
 		}
 	}
@@ -721,9 +741,12 @@ impl<'a> Deducer<'a> {
 	}
 
 	fn solve_primitive(&self, p: &Primitive, s: &Substitution, out: &mut Vec<Substitution>) {
+		let before = out.len();
 		self.solve_primitive_arguments(p, s, out);
-		if let Some(swapped) = commutativity_swap(p) {
-			self.solve_primitive_arguments(&swapped, s, out);
+		match commutativity_swap(p) {
+			Some(swapped) => self.solve_primitive_arguments(&swapped, s, out),
+			None if out.len() == before => self.solve_by_commuting(p, s, out),
+			None => {}
 		}
 		if p.arguments.iter().any(contains_var) {
 			let term = Value::Primitive(Arc::new(p.clone()));
@@ -732,6 +755,30 @@ impl<'a> Deducer<'a> {
 				let reduced = crate::theory::reduce_once(&applied);
 				if !applied.equivalent(&reduced, true) {
 					self.solve_into(&reduced, &bound, out);
+				}
+			}
+		}
+	}
+
+	fn solve_by_commuting(&self, p: &Primitive, s: &Substitution, out: &mut Vec<Substitution>) {
+		let Some(rule) = commutativity_rule(p.id) else {
+			return;
+		};
+		let Some(wrapped) = p.arguments.get(rule.wrapped) else {
+			return;
+		};
+		if !contains_var(wrapped) {
+			return;
+		}
+		let required = Value::primitive(rule.constructor, vec![self.fresh_var()], 0);
+		let term = Value::Primitive(Arc::new(p.clone()));
+		for bound in self.invert(wrapped, &required, s) {
+			for shaped in self.require_constructible(&bound, s, false) {
+				let reduced = crate::theory::reduce_once(&apply(&term, &shaped));
+				if let Value::Primitive(q) = &reduced
+					&& let Some(swapped) = commutativity_swap(q)
+				{
+					self.solve_primitive_arguments(&swapped, &shaped, out);
 				}
 			}
 		}
@@ -795,7 +842,9 @@ impl<'a> Deducer<'a> {
 		if let Some((_, solutions)) = memo.get(&key) {
 			return solutions.clone();
 		}
-		let mut routes: Vec<_> = decomposition_targets(p)
+		let targets = decomposition_targets(p);
+		let blocked = targets.is_none();
+		let mut routes: Vec<_> = targets
 			.into_iter()
 			.map(|(revealed, given)| (revealed, given, None))
 			.collect();
@@ -820,7 +869,17 @@ impl<'a> Deducer<'a> {
 			}
 		}
 		if routes.is_empty() {
-			return Vec::new();
+			let mut out = Vec::new();
+			if blocked {
+				for (shaped, bound) in self.shape_for_decomposition(p, s) {
+					let shaped = Value::Primitive(shaped);
+					let mut memo = DecompositionMemo::default();
+					out.extend(self.solve_decomposition_from(&shaped, goal, &bound, &mut memo));
+				}
+				out = dedupe(out);
+			}
+			memo.insert(key, (Arc::clone(p), out.clone()));
+			return out;
 		}
 		let mut out = Vec::new();
 		for (revealed, given, annotated) in routes {
@@ -851,6 +910,47 @@ impl<'a> Deducer<'a> {
 		}
 		let out = dedupe(out);
 		memo.insert(key, (Arc::clone(p), out.clone()));
+		out
+	}
+
+	fn shape_for_decomposition(
+		&self,
+		p: &Primitive,
+		s: &Substitution,
+	) -> Vec<(Arc<Primitive>, Substitution)> {
+		let Some(rule) = primitive_get(p.id)
+			.ok()
+			.and_then(|spec| spec.decompose.as_ref())
+		else {
+			return Vec::new();
+		};
+		let filter = rule.filter;
+		let mut out = Vec::new();
+		for &index in &rule.given {
+			let Some(argument) = p.arguments.get(index) else {
+				continue;
+			};
+			if !contains_var(argument) || filter(p, argument, index).1 {
+				continue;
+			}
+			let Some(required) = crate::primitive::key_derivation_of(self.fresh_var()) else {
+				continue;
+			};
+			if !filter(p, &required, index).1 {
+				continue;
+			}
+			for bound in self.invert(argument, &required, s) {
+				for solved in self.require_constructible(&bound, s, false) {
+					let shaped = refine_check(p, &solved);
+					if equivalent_primitives(&shaped, p, true)
+						|| !(rule.filter)(&shaped, &shaped.arguments[index], index).1
+					{
+						continue;
+					}
+					out.push((Arc::new(shaped), solved));
+				}
+			}
+		}
 		out
 	}
 
@@ -1092,30 +1192,26 @@ impl<'a> Deducer<'a> {
 			return Vec::new();
 		};
 		let shapes = self.rewrite_shapes(p, rule);
-		if shapes.is_empty() {
-			return if may_shape {
-				self.satisfy_check_by_shaping(p, rule, base)
-			} else {
-				Vec::new()
-			};
-		}
 		let mut out = Vec::new();
 		if let Some(var_id) = as_var(from) {
 			for shape in &shapes {
 				self.bind_from_shape(shape, var_id, base, true, &mut out);
 			}
-			return dedupe(out);
-		}
-		for shape in &shapes {
-			for solved in self.solve(shape, base) {
-				let target = crate::theory::reduce_once(&apply(shape, &solved));
-				for bound in self.invert(from, &target, &solved) {
+		} else {
+			for shape in &shapes {
+				for solved in self.solve(shape, base) {
+					let target = crate::theory::reduce_once(&apply(shape, &solved));
+					for bound in self.invert(from, &target, &solved) {
+						out.extend(self.require_constructible(&bound, base, false));
+					}
+				}
+				for bound in self.invert(from, shape, base) {
 					out.extend(self.require_constructible(&bound, base, false));
 				}
 			}
-			for bound in self.invert(from, shape, base) {
-				out.extend(self.require_constructible(&bound, base, false));
-			}
+		}
+		if out.is_empty() && may_shape {
+			return self.satisfy_check_by_shaping(p, rule, base);
 		}
 		dedupe(out)
 	}
@@ -1135,13 +1231,13 @@ impl<'a> Deducer<'a> {
 			if !contains_var(outer_arg) {
 				continue;
 			}
-			if inner_idxs.iter().any(|&i| filter(p, outer_arg, i).1) {
-				continue;
-			}
 			let Some(required) = crate::primitive::key_derivation_of(self.fresh_var()) else {
 				continue;
 			};
-			if !inner_idxs.iter().any(|&i| filter(p, &required, i).1) {
+			if !inner_idxs
+				.iter()
+				.any(|&i| filter(p, &required, i).1 && !filter(p, outer_arg, i).1)
+			{
 				continue;
 			}
 			for bound in self.invert(outer_arg, &required, base) {
@@ -1286,6 +1382,19 @@ fn constraint_sets(
 		}
 	}
 	groups
+}
+
+/// A projection whose tuple is still open is the one shape plain unification
+/// cannot see through: `unifiers` matches congruently, and rewrites already
+/// have their own routes, so this is the only case worth inverting a wire term
+/// for. Without the test the fallback runs for every wire term and every goal.
+fn projects_a_variable(v: &Value) -> bool {
+	crate::value::subterms(v).any(|term| match term {
+		Value::Primitive(p) => {
+			primitive_is_projection(p.id) && p.arguments.first().is_some_and(contains_var)
+		}
+		Value::Constant(_) => false,
+	})
 }
 
 fn decomposition_targets(p: &Primitive) -> Option<(Vec<Value>, Vec<Value>)> {
@@ -2328,7 +2437,14 @@ authentication? Sender -> Bob: payload
 		let mut memo = DecompositionMemo::default();
 		let solutions =
 			deducer.solve_decomposition_from(&wire, &goal, &Substitution::default(), &mut memo);
-		assert_eq!(memo.len(), 41);
+		assert_eq!(
+			memo.len(),
+			42,
+			"the forty carriers and the ciphertext are each visited once, and the \
+			 plaintext they all share is the forty-second: a term whose rule offers no \
+			 route is recorded too, so the shaping attempt behind it is made once \
+			 rather than at every carrier that reaches it"
+		);
 		assert_eq!(solutions.len(), 1);
 		assert!(apply(&variable, &solutions[0]).equivalent(&message, true));
 	}
@@ -2504,5 +2620,44 @@ authentication? Sender -> Bob: payload
 			 signature over `inr_m`; offering a shape for a signature over something else \
 			 proposes a term the rewrite does not produce"
 		);
+	}
+
+	#[test]
+	fn a_share_opened_out_of_a_sealed_tuple_is_shaped_as_the_attackers_key() {
+		let seal = make_constant("sealed_share_seal");
+		let nonce = make_constant("sealed_share_nonce");
+		let secret = make_private("sealed_share_secret");
+		let public = Value::primitive(PRIM_PUBKEY, vec![secret.clone()], 0);
+		let ciphertext = super::super::vars::attacker_var(0, "sealed_share_hello");
+		let opened = Value::primitive(
+			PRIM_AEAD_DEC,
+			vec![seal.clone(), nonce.clone(), ciphertext.clone(), value_nil()],
+			0,
+		);
+		let share = Value::primitive(PRIM_SPLIT, vec![opened], 1);
+		let free = super::super::vars::free_var(0);
+		let km = make_trace(vec![]);
+		let sym = SymbolicState::default();
+		let attacker = make_attacker_state(vec![value_nil(), seal, nonce, public.clone()]);
+		let deducer = Deducer::new(&km, &attacker, &sym).with_fresh_range(1, 64);
+		let own = Value::primitive(PRIM_DH_KEX, vec![public.clone(), value_nil()], 0);
+		for wrapped in [share, free] {
+			let goal = Value::primitive(PRIM_DH_KEX, vec![wrapped.clone(), secret.clone()], 0);
+			let solutions = deducer.solve(&goal, &Substitution::default());
+			assert!(
+				solutions.iter().any(|s| {
+					let ground = super::super::vars::ground_free(&apply(&goal, s));
+					crate::theory::reduce_once(&ground).equivalent(&own, true)
+				}),
+				"the attacker cannot supply `sealed_share_secret`, but it holds its public \
+				 key, so DH_KEX({wrapped}, sealed_share_secret) is obtainable once {wrapped} \
+				 becomes PUBKEY of something the attacker picks: the goal commutes into \
+				 DH_KEX(PUBKEY(sealed_share_secret), nil). Only a share already written as \
+				 PUBKEY(..) was ever commuted, so a share projected out of a tuple the \
+				 attacker can seal, or left free by a tuple shape, never was: the key \
+				 substitution behind every Diffie-Hellman man-in-the-middle was missed \
+				 whenever the share travelled inside a sealed hello. Got {solutions:?}"
+			);
+		}
 	}
 }

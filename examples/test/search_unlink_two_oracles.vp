@@ -1,0 +1,56 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: u1 at one session and at two.
+//
+// Two decryption oracles, one secret each. Bob's gives x and Carol's gives y,
+// and only together do they give s = HASH(x, y), which recognises both tokens.
+// Each oracle is found on its own and each execution is kept, but the two were
+// never run together, so the attacker never held s at once.
+//
+// Executions were combined for the leaves of a confidentiality target only.
+// Unlinkability asks about the same kind of thing one level in: the secret the
+// two queried values share. Those subterms are the targets to merge on, which
+// is the same set the solver already solves for when it generates goals for an
+// unlinkability query.
+//
+// search_unlink_one_oracle.vp needs one oracle and was always found;
+// search_unlink_two_oracles_guarded.vp guards Carol's input and holds.
+attacker[active]
+
+principal Alice[
+	knows private kb, kc
+	knows public c1, c2
+	generates x, y
+	s = HASH(x, y)
+	tok1 = HASH(s, c1)
+	tok2 = HASH(s, c2)
+	ex = ENC(kb, x)
+	ey = ENC(kc, y)
+	eb = ENC(kb, nil)
+	ec = ENC(kc, nil)
+]
+
+Alice -> Dave: ex, ey, tok1, tok2
+Alice -> Bob: eb
+Alice -> Carol: ec
+
+principal Bob[
+	knows private kb
+	db = DEC(kb, eb)
+	leaks db
+]
+
+principal Carol[
+	knows private kc
+	dc = DEC(kc, ec)
+	leaks dc
+]
+
+principal Dave[
+	_ = HASH(ex, ey, tok1, tok2)
+]
+
+queries[
+	unlinkability? tok1, tok2
+]

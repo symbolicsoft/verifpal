@@ -185,7 +185,7 @@ pub(crate) fn propose(
 		let proposal = &proposals[at];
 		[
 			keyed_free(&honest, sym, proposal),
-			preserved_free(&honest, sym, proposal, attacker),
+			preserved_free(&honest, sym, proposal, attacker, &km.capabilities),
 		]
 	})
 	.into_iter()
@@ -196,6 +196,9 @@ pub(crate) fn propose(
 
 	let aligned = aligned_held_free(&honest, sym, &proposals, attacker, protocol);
 	proposals.extend(aligned);
+
+	let swapped = swapped_free(&honest, sym, &proposals, attacker, protocol);
+	proposals.extend(swapped);
 
 	if results
 		.iter()
@@ -466,14 +469,17 @@ fn preserved_free(
 	sym: &SymbolicState,
 	proposal: &Substitution,
 	attacker: &AttackerState,
+	capabilities: &CapabilityIndex,
 ) -> Option<Substitution> {
 	fill_aligned_with(honest, sym, proposal, &|honest| {
-		if crate::primitive::value_is_key_derivation(honest) {
-			return Some(crate::primitive::attacker_public_key());
-		}
 		let held = !honest.equivalent(&crate::value::value_nil(), true)
-			&& attacker.knows(honest).is_some();
-		held.then(|| honest.clone())
+			&& (attacker.knows(honest).is_some()
+				|| crate::theory::obtainable(honest, capabilities, attacker));
+		if held {
+			return Some(honest.clone());
+		}
+		crate::primitive::value_is_key_derivation(honest)
+			.then(crate::primitive::attacker_public_key)
 	})
 }
 
@@ -552,6 +558,91 @@ fn aligned_held_free(
 				}
 			}
 			out.push(filled);
+		}
+		out
+	})
+	.into_iter()
+	.flatten()
+	.collect()
+}
+
+/// Positions a reuse rule pins, as the protocol actually fills them: the pairs
+/// `(primitive, argument, constant)` where a collision between two applications
+/// is what the rule's `fixed` list is about. Offering a held constant anywhere
+/// else is what makes this family a combinatorial blow-up rather than a search.
+fn reuse_slots(protocol: &crate::hashing::TermSet) -> Vec<(PrimitiveId, usize, ValueId)> {
+	let mut out: Vec<(PrimitiveId, usize, ValueId)> = Vec::new();
+	for term in protocol.iter() {
+		for sub in crate::value::subterms(term) {
+			let Value::Primitive(p) = sub else {
+				continue;
+			};
+			let Some(rule) = crate::primitive::reuse_rule(p.id) else {
+				continue;
+			};
+			for &at in &rule.fixed {
+				if let Some(Value::Constant(c)) = p.arguments.get(at) {
+					out.push((p.id, at, c.id));
+				}
+			}
+		}
+	}
+	out.sort_unstable();
+	out.dedup();
+	out
+}
+
+fn swapped_free(
+	honest: &[Value],
+	sym: &SymbolicState,
+	proposals: &[Substitution],
+	attacker: &AttackerState,
+	protocol: &crate::hashing::TermSet,
+) -> Vec<Substitution> {
+	let slots = reuse_slots(protocol);
+	if slots.is_empty() {
+		return Vec::new();
+	}
+	let held: Vec<&Value> = attacker
+		.known
+		.iter()
+		.filter(|v| match v {
+			Value::Constant(c) => !c.is_nil() && slots.iter().any(|(_, _, id)| *id == c.id),
+			_ => false,
+		})
+		.collect();
+	if held.is_empty() {
+		return Vec::new();
+	}
+	let collides = |a: &Constant, b: &Constant| {
+		slots.iter().any(|(p, at, id)| {
+			*id == a.id
+				&& slots
+					.iter()
+					.any(|(q, other, id)| id == &b.id && q == p && other == at)
+		})
+	};
+	crate::parallel::map_ordered((0..proposals.len()).collect(), |at| {
+		let proposal = &proposals[at];
+		let mut out = Vec::new();
+		for (var, occupant) in free_positions(honest, sym, proposal) {
+			let Value::Constant(occupant) = occupant else {
+				continue;
+			};
+			if occupant.is_nil() {
+				continue;
+			}
+			for candidate in &held {
+				let Value::Constant(c) = candidate else {
+					continue;
+				};
+				if c.id == occupant.id || !collides(c, occupant) {
+					continue;
+				}
+				let mut filled = proposal.clone();
+				filled.insert(var, (*candidate).clone());
+				out.push(filled);
+			}
 		}
 		out
 	})
