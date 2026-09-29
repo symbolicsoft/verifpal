@@ -1,0 +1,38 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: c0 at one session and at two.
+//
+// scenario_corrupt_inline_key_half_leaked.vp with both m and seed leaked.
+// The attacker computes Mallory's key HASH(m, seed), so the run with her as
+// peer is corrupt and its s is not the protocol's to keep, however gm
+// reaches Alice. In the run with Bob as peer, gb is guarded and b never
+// leaks, so s stays secret.
+attacker[active]
+principal Bob[
+	knows private b
+	gb = PUBKEY(b)
+]
+principal Mallory[
+	knows private m
+	generates seed
+	gm = PUBKEY(HASH(m, seed))
+	leaks m, seed
+]
+Bob -> Alice: [gb]
+Mallory -> Alice: gm
+principal Alice[
+	knows public gpeer
+	generates s
+	e = PKE_ENC(gpeer, s)
+]
+Alice -> Bob: e
+principal Bob[
+	sb = PKE_DEC(b, e)
+]
+scenarios[
+	Alice[gpeer = gb]
+	Alice[gpeer = gm]
+]
+queries[
+	confidentiality? s
+]

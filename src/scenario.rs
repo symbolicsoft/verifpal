@@ -257,16 +257,14 @@ pub(crate) fn honesty_profile(m: &Model) -> std::collections::BTreeMap<String, i
 }
 
 struct Corruption {
-	compromised: IdMap<ValueId, i32>,
-	mentions: IdMap<ValueId, Vec<ValueId>>,
+	attacker: Disclosure,
 	keyed: IdSet<ValueId>,
 }
 
 impl Corruption {
 	fn of(m: &Model) -> Corruption {
 		Corruption {
-			compromised: compromised_constants(m),
-			mentions: assignment_mentions(m),
+			attacker: disclosure(m),
 			keyed: key_material_constants(m),
 		}
 	}
@@ -274,20 +272,41 @@ impl Corruption {
 	fn corrupt_from(&self, scenario: &Scenario) -> i32 {
 		rebindings(scenario)
 			.flat_map(|(target, value)| {
-				let keyed = |id: &ValueId| self.keyed.contains(id);
-				let value_keyed = keyed(&target.id) || keyed(&value.id);
-				value_keyed.then_some(value.id).into_iter().chain(
-					self.mentions
-						.get(&value.id)
-						.into_iter()
-						.flatten()
-						.copied()
-						.filter(keyed),
-				)
+				let keyed = self.keyed.contains(&target.id) || self.keyed.contains(&value.id);
+				let whole = keyed
+					.then(|| self.attacker.compromised.get(&value.id).copied())
+					.flatten();
+				let named = self
+					.attacker
+					.assignments
+					.get(&value.id)
+					.and_then(|term| self.named_key(term));
+				whole.into_iter().chain(named)
 			})
-			.filter_map(|id| self.compromised.get(&id).copied())
 			.min()
 			.unwrap_or(i32::MAX)
+	}
+
+	fn named_key(&self, term: &Value) -> Option<i32> {
+		match term {
+			Value::Constant(c) if self.keyed.contains(&c.id) => {
+				self.attacker.compromised.get(&c.id).copied()
+			}
+			Value::Constant(_) => None,
+			Value::Primitive(p) => {
+				let secret = crate::primitive::secret_positions(p.id);
+				p.arguments
+					.iter()
+					.enumerate()
+					.filter_map(|(at, argument)| match argument {
+						Value::Primitive(_) if secret.contains(&at) => {
+							self.attacker.computable(argument)
+						}
+						_ => self.named_key(argument),
+					})
+					.min()
+			}
+		}
 	}
 }
 
@@ -303,20 +322,6 @@ fn expressions(m: &Model) -> impl Iterator<Item = &Expression> {
 
 fn declared_ids(expr: &Expression) -> impl Iterator<Item = ValueId> + '_ {
 	expr.constants.iter().map(|c| c.id)
-}
-
-fn assignment_mentions(m: &Model) -> IdMap<ValueId, Vec<ValueId>> {
-	let mut out: IdMap<ValueId, Vec<ValueId>> = IdMap::default();
-	for expression in expressions(m) {
-		let Some(value) = &expression.assigned else {
-			continue;
-		};
-		let ids: Vec<ValueId> = value.constant_leaves().map(|c| c.id).collect();
-		for id in declared_ids(expression) {
-			out.entry(id).or_insert_with(|| ids.clone());
-		}
-	}
-	out
 }
 
 fn sanity_scenarios(m: &Model) -> VResult<()> {
@@ -534,7 +539,7 @@ fn key_material_constants(m: &Model) -> IdSet<ValueId> {
 	}
 }
 
-fn compromised_constants(m: &Model) -> IdMap<ValueId, i32> {
+fn disclosure(m: &Model) -> Disclosure {
 	let secret = secret_declarations(m);
 	let mut disclosures: Vec<(ValueId, i32)> = Vec::new();
 	let mut phase = 0i32;
@@ -614,7 +619,7 @@ fn compromised_constants(m: &Model) -> IdMap<ValueId, i32> {
 			}
 		}
 		if !changed {
-			return attacker.compromised;
+			return attacker;
 		}
 	}
 }
@@ -914,6 +919,34 @@ mod tests {
 			"leaking the public key computes nothing: {:?}",
 			e.scenarios
 		);
+	}
+
+	#[test]
+	fn an_inline_derived_private_key_needs_every_ingredient_like_a_named_one() {
+		for (key, leaks, honest) in [
+			("PUBKEY(HASH(scx_mk, scx_salt))", "scx_mk", true),
+			("PUBKEY(HASH(scx_mk, scx_salt))", "scx_salt", true),
+			("PUBKEY(HASH(scx_mk, scx_salt))", "scx_mk, scx_salt", false),
+			("PUBKEY(scx_sk)", "scx_mk", true),
+			("PUBKEY(scx_sk)", "scx_mk, scx_salt", false),
+		] {
+			let src = SRC
+				.replace(
+					"scx_gm = PUBKEY(scx_mk)",
+					&format!(
+						"generates scx_salt\n\t\tscx_sk = HASH(scx_mk, scx_salt)\n\t\tscx_gm = {key}"
+					),
+				)
+				.replace("leaks scx_mk", &format!("leaks {leaks}"));
+			let m = parse_string("scx.vp", &src).expect("parses");
+			let e = expand_scenarios(&m, 1).expect("expands");
+			assert_eq!(
+				starts_honest(&e.scenarios[1]),
+				honest,
+				"scx_gm = {key} with {leaks} leaked: {:?}",
+				e.scenarios
+			);
+		}
 	}
 
 	#[test]

@@ -4799,6 +4799,14 @@ fn test_scenario_corrupt_key_material() {
 }
 
 #[test]
+fn test_scenario_corrupt_inline_key_needs_every_ingredient() {
+	for sessions in [1, 2] {
+		run_model_sessions("scenario_corrupt_inline_key_half_leaked.vp", sessions, "c1");
+		run_model_sessions("scenario_corrupt_inline_key_both_leaked.vp", sessions, "c0");
+	}
+}
+
+#[test]
 fn test_scenario_all_corrupt_order() {
 	for sessions in [1, 2] {
 		run_model_sessions("scenario_all_corrupt_order.vp", sessions, "f1");
