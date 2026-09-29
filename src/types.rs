@@ -1205,6 +1205,26 @@ impl Expression {
 			Declaration::Assignment | Declaration::Leaks => false,
 		}
 	}
+
+	pub(crate) fn outputs(&self) -> impl Iterator<Item = (&Constant, Value)> + '_ {
+		self.assigned.iter().flat_map(move |assigned| {
+			self.constants.iter().enumerate().map(move |(output, c)| {
+				let mut value = assigned.clone();
+				if let Value::Primitive(p) = &mut value {
+					let projected = Arc::make_mut(p);
+					projected.output = output;
+					if crate::primitive::primitive_get(projected.id)
+						.is_ok_and(|spec| spec.distinct_per_assignment)
+						&& let Some(first) = self.constants.first()
+					{
+						projected.instance = crate::value::copy_index_of(first.id).1;
+					}
+					projected.hash.clear();
+				}
+				(c, value)
+			})
+		})
+	}
 }
 
 #[derive(Clone, Debug)]

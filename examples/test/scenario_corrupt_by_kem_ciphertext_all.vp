@@ -1,0 +1,53 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1 at one session and at two.
+//
+// scenario_corrupt_by_kem_ciphertext.vp without the honest ekh peer. Both
+// remaining scenarios are corrupt: dkb is leaked, and ct opens under it for
+// Mallory's ss. With no honest scenario left, every scenario is asked rather
+// than none, so the model does not hold vacuously, and the attacker reads s
+// in each: under dkb in one, under ss in the other.
+attacker[active]
+
+principal Bob[
+	knows private dkb
+	ekb = PUBKEY(dkb)
+	leaks dkb
+]
+
+principal Mallory[
+	generates coins
+]
+
+Bob -> Mallory: [ekb]
+
+principal Mallory[
+	ss, ct = KEM_ENCAP(ekb, coins)
+	gm = PUBKEY(ss)
+]
+
+Bob -> Alice: [ekb]
+Mallory -> Alice: [gm]
+Mallory -> Bob: ct
+
+principal Alice[
+	knows public gpeer
+	generates s
+	e = PKE_ENC(gpeer, s)
+]
+
+Alice -> Bob: e
+
+principal Bob[
+	_ = PKE_DEC(dkb, e)
+]
+
+scenarios[
+	Alice[gpeer = ekb]
+	Alice[gpeer = gm]
+]
+
+queries[
+	confidentiality? s
+]

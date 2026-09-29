@@ -1,0 +1,52 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a0 at one session and at two.
+//
+// closure_forged_then_leaked.vp without Alice's leak. The forgeable
+// assumption still lets the attacker produce Alice's partial, but a partial
+// it minted is not one it can open: the share is exactly the argument the
+// forgery skipped, so the attacker never learns sk, cannot sign anything
+// Sender did not, and Bob only accepts Sender's own signature.
+attacker[active]
+
+principal Sender[
+	knows private transport
+	generates pin, message
+]
+
+principal Bob[
+	knows public payload
+]
+
+principal Alice[
+	knows private transport
+	knows public nonce, payload
+	generates key
+	share, other = THRESHOLD_SPLIT[2](key)
+	commitment = PUBKEY(nonce)
+	partial = THRESHOLD_SIGN[forgeable](share, nonce, commitment, payload)
+	pk = PUBKEY(share)
+	wrapped = ENC(transport, share)
+]
+
+Sender -> Bob: [pin]
+Alice -> Sender: [wrapped]
+Alice -> Bob: [pk]
+
+principal Sender[
+	sk = DEC(transport, wrapped)
+	sig = SIGN(sk, message)
+]
+
+phase[1]
+
+Sender -> Bob: message, sig
+
+principal Bob[
+	_ = SIGNVERIF(pk, message, sig)?
+]
+
+queries[
+	authentication? Sender -> Bob: sig
+]

@@ -1,0 +1,63 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a1 at one session and at two.
+//
+// Sender signs with Alice's share, which reaches it wrapped under a transport
+// key. Alice's partial over the public payload is declared forgeable, so from
+// phase 0 the attacker holds it as a forgery, which reveals nothing about the
+// share it was forged over. In phase 1 Alice leaks her genuine partial: its
+// nonce, commitments and message are public, so the attacker opens it for the
+// share, signs nil and replaces Sender's message and signature, and Bob's
+// checked verification accepts a signature Sender never emitted. Bob's receive
+// first blocks before Alice leaks; the leak turned the attacker's forged
+// partial into a disclosed one without reopening the closure, so the retried
+// receive never learnt the share and one session reported a0. The trace must
+// hand the attacker the leaked partial before opening it, never forge it.
+// closure_forged_never_leaked.vp is the counterweight, without the leak.
+attacker[active]
+
+principal Sender[
+	knows private transport
+	generates pin, message
+]
+
+principal Bob[
+	knows public payload
+]
+
+principal Alice[
+	knows private transport
+	knows public nonce, payload
+	generates key
+	share, other = THRESHOLD_SPLIT[2](key)
+	commitment = PUBKEY(nonce)
+	partial = THRESHOLD_SIGN[forgeable](share, nonce, commitment, payload)
+	pk = PUBKEY(share)
+	wrapped = ENC(transport, share)
+]
+
+Sender -> Bob: [pin]
+Alice -> Sender: [wrapped]
+Alice -> Bob: [pk]
+
+principal Sender[
+	sk = DEC(transport, wrapped)
+	sig = SIGN(sk, message)
+]
+
+phase[1]
+
+Sender -> Bob: message, sig
+
+principal Bob[
+	_ = SIGNVERIF(pk, message, sig)?
+]
+
+principal Alice[
+	leaks partial
+]
+
+queries[
+	authentication? Sender -> Bob: sig
+]

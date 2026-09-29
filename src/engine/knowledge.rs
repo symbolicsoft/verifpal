@@ -152,6 +152,7 @@ impl Knowledge {
 				let state = Arc::make_mut(&mut self.state);
 				Arc::make_mut(&mut state.derivations)[at.get()] = origin.record();
 				state.chain = next_chain();
+				self.closed = false;
 			}
 			return false;
 		}
@@ -674,5 +675,97 @@ mod tests {
 		assert!(!share_disclosed(&model(""), false));
 		assert!(!share_disclosed(&model(""), true));
 		assert!(share_disclosed(&model("leaks kmf_na\n"), false));
+	}
+
+	#[test]
+	fn a_leak_of_a_value_held_as_a_forgery_reopens_the_closure() {
+		for (source, leaked) in [
+			(
+				include_str!("../../examples/test/closure_forged_then_leaked.vp"),
+				true,
+			),
+			(
+				include_str!("../../examples/test/closure_forged_never_leaked.vp"),
+				false,
+			),
+		] {
+			let _generation = crate::context::GenerationGuard::enter();
+			let m = crate::parser::parse_string("closure.vp", source).expect("parses");
+			let km = crate::sanity::sanity(&m).expect("sane");
+			let program = Program::of(&m, &km);
+			let cx = Context::new(&program, &km);
+			let slot = |name: &str| {
+				km.slots
+					.iter()
+					.position(|s| s.constant.name.as_ref() == name)
+					.expect("declared")
+			};
+			let run = |name: &str| {
+				program
+					.runs
+					.iter()
+					.position(|r| r.name == name)
+					.expect("run")
+			};
+			let share = crate::theory::reduce_once(&crate::value::resolve_trace_constant(
+				&km.slots[slot("share")].constant,
+				&km,
+			));
+			let nil = crate::value::value_nil();
+			let bob = run("Bob");
+			let installs: Installs = vec![
+				(bob, slot("message"), nil.clone()),
+				(
+					bob,
+					slot("sig"),
+					Value::primitive(crate::primitive::PRIM_SIGN, vec![share.clone(), nil], 0),
+				),
+			];
+			let ex = execute(&cx, &installs);
+			assert!(
+				!obtainable(&share, &km.capabilities, &ex.at(0).knowledge.state),
+				"the partial the attacker forged in phase 0 reveals nothing about the share"
+			);
+			let claims = |_| Some(km.max_phase);
+			let judged = crate::engine::query::Judge {
+				cx: &cx,
+				ex: &ex,
+				whole: &ex,
+				claims: &claims,
+			}
+			.evaluate(&m.queries[0]);
+			if !leaked {
+				assert!(!ex.stuck.is_empty());
+				assert!(judged.is_none());
+				continue;
+			}
+			assert!(
+				ex.stuck.is_empty(),
+				"once Alice leaks her genuine partial, its share is derivable at Bob's receive"
+			);
+			let position = |r: usize, event: crate::engine::program::Event| {
+				ex.order
+					.iter()
+					.position(|&(at, step, _)| {
+						at == r && program.runs[r].steps[step].event == event
+					})
+					.expect("executed")
+			};
+			let signature = program
+				.deliveries
+				.iter()
+				.position(|d| d.recipient == bob && d.slots.iter().any(|&(s, _)| s == slot("sig")))
+				.expect("delivered");
+			assert!(
+				position(
+					run("Alice"),
+					crate::engine::program::Event::Leak(slot("partial"))
+				) < position(bob, crate::engine::program::Event::Recv(signature))
+			);
+			assert!(matches!(
+				judged,
+				Some((crate::engine::query::Violation::Forged { .. }, _))
+			));
+		}
 	}
 }

@@ -553,11 +553,20 @@ fn compromised_constants(m: &Model) -> IdMap<ValueId, i32> {
 			}
 		}
 	}
+	let assignments: IdMap<ValueId, Value> = expressions(m)
+		.flat_map(Expression::outputs)
+		.map(|(c, value)| (c.id, value))
+		.collect();
+	let mut named: IdMap<u64, Vec<ValueId>> = IdMap::default();
+	let mut capabilities = CapabilityIndex::default();
+	for (&id, value) in &assignments {
+		named.entry(value.hash_value()).or_default().push(id);
+		capabilities.insert(value);
+	}
 	let mut attacker = Disclosure {
-		assignments: expressions(m)
-			.filter_map(|expression| expression.assigned.as_ref().map(|v| (expression, v)))
-			.flat_map(|(expression, value)| declared_ids(expression).map(move |id| (id, value)))
-			.collect(),
+		assignments,
+		named,
+		capabilities,
 		public: expressions(m)
 			.filter(|expr| {
 				expr.kind == Declaration::Knows && expr.qualifier == Some(Qualifier::Public)
@@ -610,45 +619,75 @@ fn compromised_constants(m: &Model) -> IdMap<ValueId, i32> {
 	}
 }
 
-struct Disclosure<'m> {
-	assignments: IdMap<ValueId, &'m Value>,
+struct Disclosure {
+	assignments: IdMap<ValueId, Value>,
+	named: IdMap<u64, Vec<ValueId>>,
+	capabilities: CapabilityIndex,
 	public: IdSet<ValueId>,
 	compromised: IdMap<ValueId, i32>,
 	observed: IdMap<ValueId, i32>,
 }
 
-impl<'m> Disclosure<'m> {
+impl Disclosure {
 	fn exposed(&self, id: ValueId, phase: i32) -> IdMap<ValueId, i32> {
 		let mut seen: IdMap<ValueId, i32> = IdMap::from_iter([(id, phase)]);
-		let mut primitives = IdSet::default();
-		let mut pending: Vec<(&'m Value, i32)> = self
+		let mut primitives: IdMap<u64, Vec<(Value, i32)>> = IdMap::default();
+		let mut pending: Vec<(Value, i32)> = self
 			.assignments
 			.get(&id)
-			.map(|v| (*v, phase))
+			.map(|v| (v.clone(), phase))
 			.into_iter()
 			.collect();
+		let expose = |id: ValueId, at: i32, seen: &mut IdMap<ValueId, i32>| {
+			let fresh = seen.get(&id).is_none_or(|&known| at < known);
+			if fresh {
+				seen.insert(id, at);
+			}
+			fresh
+		};
 		while let Some((value, at)) = pending.pop() {
-			match value {
+			match &value {
 				Value::Constant(c) => {
-					if seen.get(&c.id).is_none_or(|&known| at < known) {
-						seen.insert(c.id, at);
-						pending.extend(self.assignments.get(&c.id).map(|v| (*v, at)));
+					if expose(c.id, at, &mut seen) {
+						pending.extend(self.assignments.get(&c.id).map(|v| (v.clone(), at)));
 					}
 				}
-				Value::Primitive(p) if primitives.insert(Arc::as_ptr(p) as usize) => {
+				Value::Primitive(p) => {
+					let explored = primitives.entry(value.hash_value()).or_default();
+					match explored
+						.iter_mut()
+						.find(|(held, _)| held.equivalent(&value, true))
+					{
+						Some((_, known)) if *known <= at => continue,
+						Some((_, known)) => *known = at,
+						None => explored.push((value.clone(), at)),
+					}
+					for &named in self.named.get(&value.hash_value()).into_iter().flatten() {
+						if self.assignments[&named].equivalent(&value, true) {
+							expose(named, at, &mut seen);
+						}
+					}
 					if crate::primitive::primitive_core_reveals_args(p.id) {
-						pending.extend(p.arguments.iter().map(|a| (a, at)));
+						pending.extend(p.arguments.iter().map(|a| (a.clone(), at)));
 					} else if let Some((opened, reveals)) = self.opened(p) {
 						pending.extend(reveals.into_iter().map(|a| (a, at.max(opened))));
 					}
+					if let Some(onset) = self.capabilities.lookup(p).onset(Capability::Weak)
+						&& let Ok(spec) = crate::primitive::primitive_get(p.id)
+					{
+						pending.extend(
+							crate::theory::revealed(p, &spec.weak_reveals)
+								.into_iter()
+								.map(|a| (a, at.max(onset))),
+						);
+					}
 				}
-				_ => {}
 			}
 		}
 		seen
 	}
 
-	fn opened<'a>(&self, p: &'a Primitive) -> Option<(i32, Vec<&'a Value>)> {
+	fn opened(&self, p: &Primitive) -> Option<(i32, Vec<Value>)> {
 		let rule = crate::primitive::primitive_get(p.id)
 			.ok()?
 			.decompose
@@ -673,15 +712,7 @@ impl<'m> Disclosure<'m> {
 			}
 			at = at.max(self.computable(&key)?);
 		}
-		let reveals = rule
-			.reveals
-			.iter()
-			.filter_map(|reveal| match *reveal {
-				crate::primitive::Reveal::Argument(i) => p.arguments.get(i),
-				crate::primitive::Reveal::Output(_) => None,
-			})
-			.collect();
-		Some((at, reveals))
+		Some((at, crate::theory::revealed(p, &rule.reveals)))
 	}
 
 	fn computable(&self, v: &Value) -> Option<i32> {
@@ -997,6 +1028,49 @@ mod tests {
 			assert_eq!(profile["Alice[scl_gpeer = scl_gb]"], i32::MAX);
 			assert_eq!(profile["Alice[scl_gpeer = scl_gm]"], 1, "{disclosure}");
 		}
+	}
+
+	#[test]
+	fn an_opened_kem_ciphertext_makes_the_peer_keyed_by_its_secret_corrupt() {
+		let source = include_str!("../examples/test/scenario_corrupt_by_kem_ciphertext.vp");
+		for seed in ["coins", "HASH(coins)"] {
+			let source =
+				source.replace("KEM_ENCAP(ekb, coins)", &format!("KEM_ENCAP(ekb, {seed})"));
+			let model = parse_string("kem_opened.vp", &source).expect("parses");
+			let profile = honesty_profile(&model);
+			assert_eq!(profile["Alice[gpeer = ekh]"], i32::MAX, "{seed}");
+			assert_eq!(profile["Alice[gpeer = ekb]"], 0, "{seed}");
+			assert_eq!(profile["Alice[gpeer = gm]"], 0, "{seed}");
+		}
+		let source = source.replace("\tleaks dkb\n", "");
+		let model = parse_string("kem_sealed.vp", &source).expect("parses");
+		assert!(
+			honesty_profile(&model).values().all(|&at| at == i32::MAX),
+			"ct does not open without dkb"
+		);
+	}
+
+	#[test]
+	fn a_weak_kem_ciphertext_makes_its_peer_corrupt_from_the_assumption_onward() {
+		let source = include_str!("../examples/test/scenario_corrupt_by_weak_kem.vp");
+		let gm = |source: &str| {
+			let model = parse_string("kem_weak.vp", source).expect("parses");
+			let profile = honesty_profile(&model);
+			assert_eq!(profile["Alice[gpeer = ekb]"], i32::MAX);
+			profile["Alice[gpeer = gm]"]
+		};
+		assert_eq!(gm(source), 0);
+		assert_eq!(
+			gm(&source.replace("KEM_ENCAP[weak]", "KEM_ENCAP")),
+			i32::MAX
+		);
+		let later = source
+			.replace("KEM_ENCAP[weak]", "KEM_ENCAP[weak from phase 1]")
+			.replace(
+				"scenarios[",
+				"phase[1]\nprincipal Bob[\ngenerates late\n]\nscenarios[",
+			);
+		assert_eq!(gm(&later), 1);
 	}
 
 	#[test]

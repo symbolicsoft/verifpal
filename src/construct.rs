@@ -488,7 +488,7 @@ fn construct_trace_render_assignment(
 			)));
 		}
 	}
-	for (output_idx, c) in expr.constants.iter().enumerate() {
+	for (c, initial_value) in expr.outputs() {
 		if let Some(idx) = trace.index_of(c) {
 			if let Some(e) = builtin_nil_error(c, "assigned") {
 				return Err(e);
@@ -508,18 +508,6 @@ fn construct_trace_render_assignment(
 					)
 					.help("give this one a different name"),
 			);
-		}
-		let mut initial_value = assigned.clone();
-		if let Value::Primitive(ref mut p) = initial_value {
-			let mutable = Arc::make_mut(p);
-			mutable.output = output_idx;
-			if crate::primitive::primitive_get(mutable.id)
-				.is_ok_and(|spec| spec.distinct_per_assignment)
-				&& let Some(first) = expr.constants.first()
-			{
-				mutable.instance = crate::value::copy_index_of(first.id).1;
-			}
-			mutable.hash.clear();
 		}
 		declare_by(
 			trace,

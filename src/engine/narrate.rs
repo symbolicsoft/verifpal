@@ -131,15 +131,51 @@ impl<'a, 'b> Narrator<'a, 'b> {
 			unshaped: names.unshaped(),
 			names,
 			honest_names: Names::of(cx, honest, honest),
-			cutoff: ex.knowledge.len(),
+			cutoff: ex.order.len(),
 			gated: Vec::new(),
 			steps: Vec::new(),
 			explained: Vec::new(),
 		}
 	}
 
+	fn prefix(&self) -> usize {
+		self.ex
+			.order
+			.get(self.cutoff)
+			.map_or(self.ex.knowledge.len(), |&(_, _, known)| known)
+	}
+
+	fn disclosure(&self, v: &Value) -> Option<Origin> {
+		let program = self.cx.program;
+		self.ex.order[..self.cutoff]
+			.iter()
+			.find_map(
+				|&(run, step, _)| match program.runs[run].steps[step].event {
+					Event::Leak(slot) => self.ex.runs[run]
+						.held(slot)
+						.is_some_and(|h| h.value.equivalent(v, true))
+						.then_some(Origin::Leak { run, slot }),
+					Event::Send(d) => {
+						let sent = self.ex.sent[d].as_ref()?;
+						program.deliveries[d]
+							.slots
+							.iter()
+							.zip(sent)
+							.find(|(_, value)| value.equivalent(v, true))
+							.map(|(&(slot, _), _)| Origin::Wire { run, slot })
+					}
+					_ => None,
+				},
+			)
+	}
+
 	fn available(&self, v: &Value) -> bool {
-		if self.ex.knowledge.knows(v).is_some_and(|i| i < self.cutoff) {
+		if self
+			.ex
+			.knowledge
+			.knows(v)
+			.is_some_and(|i| i < self.prefix())
+		{
 			return true;
 		}
 		match v {
@@ -259,17 +295,18 @@ impl<'a, 'b> Narrator<'a, 'b> {
 		false
 	}
 
-	pub(crate) fn explain(&mut self, v: &Value, len: usize) {
+	pub(crate) fn explain(&mut self, v: &Value, at: usize) {
 		if self.done(v) {
 			return;
 		}
-		let outer = std::mem::replace(&mut self.cutoff, len);
+		let outer = std::mem::replace(&mut self.cutoff, at);
 		self.narrate(v);
 		self.cutoff = outer;
 	}
 
 	fn narrate(&mut self, v: &Value) {
-		let len = self.cutoff;
+		let at = self.cutoff;
+		let len = self.prefix();
 		let knowledge = &self.ex.knowledge;
 		let known = knowledge.knows(v).filter(|&i| i < len);
 		if known.is_none()
@@ -277,13 +314,13 @@ impl<'a, 'b> Narrator<'a, 'b> {
 			&& let Some(built) = self.oriented(p)
 		{
 			for argument in &built.arguments {
-				self.explain(argument, len);
+				self.explain(argument, at);
 			}
 			self.constructs(v);
 			return;
 		}
 		let Some(i) = known else {
-			let keep: Vec<bool> = (0..knowledge.len()).map(|at| at < len).collect();
+			let keep: Vec<bool> = (0..knowledge.len()).map(|k| k < len).collect();
 			let restricted = knowledge.state.retaining(&keep);
 			let state = restricted.as_deref().unwrap_or(&knowledge.state);
 			if let Value::Primitive(p) = v
@@ -291,7 +328,7 @@ impl<'a, 'b> Narrator<'a, 'b> {
 					crate::theory::can_reconstruct_primitive(p, &self.cx.km.capabilities, state)
 			{
 				for ingredient in built.ingredients() {
-					self.explain(ingredient, len);
+					self.explain(ingredient, at);
 				}
 				self.derives(&super::knowledge::reconstruction(built), v);
 				return;
@@ -299,14 +336,20 @@ impl<'a, 'b> Narrator<'a, 'b> {
 			let mut inputs = crate::theory::KnowledgeInputs::new(&self.cx.km.capabilities, state);
 			for idx in inputs.of_value(v).unwrap_or_default() {
 				let ingredient = state.known[idx.get()].clone();
-				self.explain(&ingredient, len);
+				self.explain(&ingredient, at);
 			}
 			if matches!(v, Value::Primitive(_)) {
 				self.constructs(v);
 			}
 			return;
 		};
-		match knowledge.origin(i).clone() {
+		let origin = match knowledge.origin(i) {
+			Origin::Derived(_) => self
+				.disclosure(v)
+				.unwrap_or_else(|| knowledge.origin(i).clone()),
+			origin => origin.clone(),
+		};
+		match origin {
 			Origin::Initial => {}
 			Origin::Wire { run, slot } => {
 				let name = self.cx.km.slots[slot].constant.to_string();
@@ -330,7 +373,7 @@ impl<'a, 'b> Narrator<'a, 'b> {
 			Origin::Derived(record) => {
 				for ingredient in record.ingredients() {
 					let ingredient = ingredient.clone();
-					self.explain(&ingredient, len);
+					self.explain(&ingredient, at);
 				}
 				self.derives(&record, v);
 			}
@@ -509,7 +552,7 @@ impl<'a, 'b> Narrator<'a, 'b> {
 				self.steps.push(step);
 			}
 		}
-		for &(run, step, before) in &self.ex.order {
+		for (at, &(run, step, _)) in self.ex.order.iter().enumerate() {
 			let d = match program.runs[run].steps[step].event {
 				Event::Recv(d) => d,
 				Event::Assign(slot) => {
@@ -567,7 +610,7 @@ impl<'a, 'b> Narrator<'a, 'b> {
 				let value = h.value.clone();
 				let constant = km.slots[slot].constant.to_string();
 				let own: [&str; 1] = [&constant];
-				self.explain(&value, before);
+				self.explain(&value, at);
 				let previous = self.honest.runs[run].held(slot).map(|honest| &honest.value);
 				let displaced = previous.map(|honest| self.spell(&self.honest_names, honest, &own));
 				let mut shown = self.delivered(&value, &own);

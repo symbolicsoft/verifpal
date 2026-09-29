@@ -5080,3 +5080,56 @@ fn test_solver_type_flaw_nested_pair() {
 		run_model_sessions("search_chain_through_server_labelled.vp", sessions, "c0");
 	}
 }
+
+#[test]
+fn test_closure_forged_then_leaked() {
+	for sessions in [1, 2] {
+		run_model_sessions("closure_forged_then_leaked.vp", sessions, "a1");
+		run_model_sessions("closure_forged_never_leaked.vp", sessions, "a0");
+		run_model_sessions("narrate_derived_before_leak.vp", sessions, "a1");
+	}
+}
+
+#[test]
+fn a_trace_narrates_a_disclosure_only_once_it_has_happened() {
+	let trace = |model: &str, sessions: u8| {
+		let (results, _) =
+			crate::verify::verify_with_sessions(&format!("examples/test/{model}"), sessions)
+				.expect("verify");
+		results[0].summary.clone()
+	};
+	for sessions in [1, 2] {
+		let leaked = trace("closure_forged_then_leaked.vp", sessions);
+		let line = |text: &str| leaked.lines().position(|line| line.contains(text));
+		let (Some(handed), Some(opened)) = (
+			line("Attacker is handed partial by a leaks declaration in Alice."),
+			line("Attacker opens partial with"),
+		) else {
+			panic!(
+				"the share comes out of the partial Alice leaked, so the trace must hand it \
+				 over before opening it. Narrated: {leaked}"
+			);
+		};
+		assert!(
+			handed < opened && !leaked.contains("forges partial"),
+			"a partial the attacker forged cannot be opened for its share; only Alice's \
+			 leak lets it. Narrated: {leaked}"
+		);
+		let derived = trace("narrate_derived_before_leak.vp", sessions);
+		assert!(
+			derived.contains("Attacker opens w with p, obtaining k.")
+				&& !derived.contains("is handed k"),
+			"Alice leaks k only after Bob accepted the forged tag, so the tag was built from \
+			 k as opened out of w. Narrated: {derived}"
+		);
+	}
+}
+
+#[test]
+fn test_scenario_corrupt_by_kem_ciphertext() {
+	for sessions in [1, 2] {
+		run_model_sessions("scenario_corrupt_by_kem_ciphertext.vp", sessions, "c0");
+		run_model_sessions("scenario_corrupt_by_kem_ciphertext_all.vp", sessions, "c1");
+		run_model_sessions("scenario_corrupt_by_weak_kem.vp", sessions, "c0");
+	}
+}

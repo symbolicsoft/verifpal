@@ -1,0 +1,60 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0 at one session and at two.
+//
+// Mallory's key gm is PUBKEY(ss), where ss comes out of a KEM encapsulated to
+// Bob's ekb. Bob leaks dkb and ct crosses the wire, so the attacker opens ct
+// for ss and its seed: the gpeer = gm scenario is a corrupt peer, like
+// gpeer = ekb, and only gpeer = ekh, whose dkh never leaves Bob, is honest.
+// Encrypting s to ekh keeps it confidential. The corruption inference once
+// read every output of an assignment as its first, so ct looked like the
+// shared secret, the KEM's opening rule for ct never applied, gm was labelled
+// honest and its scenario reported s as disclosed.
+// scenario_corrupt_by_kem_ciphertext_all.vp is the counterweight, without the
+// honest ekh peer, where every scenario is corrupt and all are asked.
+attacker[active]
+
+principal Bob[
+	knows private dkb, dkh
+	ekb = PUBKEY(dkb)
+	ekh = PUBKEY(dkh)
+	leaks dkb
+]
+
+principal Mallory[
+	generates coins
+]
+
+Bob -> Mallory: [ekb]
+
+principal Mallory[
+	ss, ct = KEM_ENCAP(ekb, coins)
+	gm = PUBKEY(ss)
+]
+
+Bob -> Alice: [ekb], [ekh]
+Mallory -> Alice: [gm]
+Mallory -> Bob: ct
+
+principal Alice[
+	knows public gpeer
+	generates s
+	e = PKE_ENC(gpeer, s)
+]
+
+Alice -> Bob: e
+
+principal Bob[
+	_ = PKE_DEC(dkb, e)
+]
+
+scenarios[
+	Alice[gpeer = ekh]
+	Alice[gpeer = ekb]
+	Alice[gpeer = gm]
+]
+
+queries[
+	confidentiality? s
+]

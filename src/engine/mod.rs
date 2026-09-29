@@ -180,7 +180,7 @@ fn report(
 	let conclusion = match v {
 		Violation::Disclosed { run, slot, value } => {
 			narrator.public(value);
-			narrator.explain(value, ex.knowledge.len());
+			narrator.explain(value, ex.order.len());
 			let constant = &km.slots[*slot].constant;
 			let value_shown = shown(&narrator, *slot, value);
 			let honest_value =

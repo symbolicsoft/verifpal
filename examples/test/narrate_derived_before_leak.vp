@@ -1,0 +1,40 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a1 at one session and at two.
+//
+// Alice wraps her MAC key under a public value, so the attacker opens w for k
+// and replaces m, t with nil, MAC(k, nil), which Bob's check accepts. Alice
+// leaks k too, but only once Bob's acknowledgement reaches her, after the
+// forged tag was delivered. The trace must derive k from w: the leak is the
+// way the attacker holds k by the end of the execution, not the way it held
+// k when it built the tag. closure_forged_then_leaked.vp is the counterweight,
+// where the leak precedes the receive and the trace narrates it.
+attacker[active]
+
+principal Alice[
+	knows public p
+	knows private k
+	generates m
+	w = ENC(p, k)
+	t = MAC(k, m)
+]
+
+Alice -> Bob: w
+Alice -> Bob: m, t
+
+principal Bob[
+	knows private k
+	_ = ASSERT(MAC(k, m), t)?
+	generates ack
+]
+
+Bob -> Alice: ack
+
+principal Alice[
+	leaks k
+]
+
+queries[
+	authentication? Alice -> Bob: t
+]
