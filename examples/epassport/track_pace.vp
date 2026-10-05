@@ -1,0 +1,147 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// track_bac.vp with PACE (ICAO Doc 9303 Part 11 §4.4, modelled as in
+// pace.vp) in place of Basic Access Control: one passport seen at a hotel
+// desk and at an airport gate, and an eavesdropper at both readers who
+// holds the MRZ from the hotel's leaked copy of the data page.
+//
+// The queried values are the encrypted nonces z from the two sightings, the
+// only values the MRZ enters, and the chip's two authentication tokens.
+//
+// Expected: u0u0, at one session and at two. Each token is a MAC under
+// session keys derived from ephemeral Diffie-Hellman secrets the
+// eavesdropper never sees. Each z it can decrypt with the MRZ, but the
+// encryption is unauthenticated and s is a fresh uniform block: decrypting z
+// under the right password and under a wrong one both give a plausible
+// nonce, and nothing else it recorded confirms either. Until Verifpal tied
+// an opened ciphertext to its contents rather than to the key that opened
+// it (unlink_opened_fresh_content.vp), the decrypt-and-re-encrypt test this
+// paragraph rules out was reported as a link via kpi. Hirschi, Baelde and
+// Delaune point out the same dependence in their ProVerif analysis of PACE:
+// a reader whose decryption of z could fail observably would let an
+// attacker test a replayed z against the passport in front of it.
+//
+// What this does not cover: an active attacker with the MRZ can run PACE
+// with any passport within reach and see whether it completes, which tells
+// it whether that passport is the one whose MRZ it holds. Verifpal has no
+// observable for whether a run completed, so the model asks about a
+// passive eavesdropper only.
+
+attacker[passive]
+
+principal Hotel[
+	knows private mrz
+	leaks mrz
+]
+
+principal Passport[
+	knows private mrz
+	kPi = HKDF(nil, mrz, nil)
+	generates s_a, mapSkP_a, skP_a
+	z_a = ENC(kPi, s_a)
+	mapPkP_a = PUBKEY(mapSkP_a)
+]
+
+Passport -> HotelDesk: z_a
+
+principal HotelDesk[
+	knows private mrz
+	kPi_a = HKDF(nil, mrz, nil)
+	s_ta = DEC(kPi_a, z_a)
+	generates mapSkT_a, skT_a
+	mapPkT_a = PUBKEY(mapSkT_a)
+]
+
+HotelDesk -> Passport: mapPkT_a
+Passport -> HotelDesk: mapPkP_a
+
+principal HotelDesk[
+	gHat_ta = HASH(s_ta, DH_KEX(mapPkP_a, mapSkT_a))
+	pkT_a = PUBKEY(skT_a)
+]
+
+HotelDesk -> Passport: pkT_a
+
+principal Passport[
+	gHat_a = HASH(s_a, DH_KEX(mapPkT_a, mapSkP_a))
+	pkP_a = PUBKEY(skP_a)
+]
+
+Passport -> HotelDesk: pkP_a
+
+principal HotelDesk[
+	ksEnc_ta, ksMac_ta = HKDF(gHat_ta, DH_KEX(pkP_a, skT_a), nil)
+	tokT_a = MAC(ksMac_ta, pkP_a)
+]
+
+HotelDesk -> Passport: tokT_a
+
+principal Passport[
+	ksEnc_a, ksMac_a = HKDF(gHat_a, DH_KEX(pkT_a, skP_a), nil)
+	_ = ASSERT(MAC(ksMac_a, pkP_a), tokT_a)?
+	tokP_a = MAC(ksMac_a, pkT_a)
+]
+
+Passport -> HotelDesk: tokP_a
+
+principal HotelDesk[
+	_ = ASSERT(MAC(ksMac_ta, pkT_a), tokP_a)?
+]
+
+principal Passport[
+	generates s_b, mapSkP_b, skP_b
+	z_b = ENC(kPi, s_b)
+	mapPkP_b = PUBKEY(mapSkP_b)
+]
+
+Passport -> Gate: z_b
+
+principal Gate[
+	knows private mrz
+	kPi_b = HKDF(nil, mrz, nil)
+	s_tb = DEC(kPi_b, z_b)
+	generates mapSkT_b, skT_b
+	mapPkT_b = PUBKEY(mapSkT_b)
+]
+
+Gate -> Passport: mapPkT_b
+Passport -> Gate: mapPkP_b
+
+principal Gate[
+	gHat_tb = HASH(s_tb, DH_KEX(mapPkP_b, mapSkT_b))
+	pkT_b = PUBKEY(skT_b)
+]
+
+Gate -> Passport: pkT_b
+
+principal Passport[
+	gHat_b = HASH(s_b, DH_KEX(mapPkT_b, mapSkP_b))
+	pkP_b = PUBKEY(skP_b)
+]
+
+Passport -> Gate: pkP_b
+
+principal Gate[
+	ksEnc_tb, ksMac_tb = HKDF(gHat_tb, DH_KEX(pkP_b, skT_b), nil)
+	tokT_b = MAC(ksMac_tb, pkP_b)
+]
+
+Gate -> Passport: tokT_b
+
+principal Passport[
+	ksEnc_b, ksMac_b = HKDF(gHat_b, DH_KEX(pkT_b, skP_b), nil)
+	_ = ASSERT(MAC(ksMac_b, pkP_b), tokT_b)?
+	tokP_b = MAC(ksMac_b, pkT_b)
+]
+
+Passport -> Gate: tokP_b
+
+principal Gate[
+	_ = ASSERT(MAC(ksMac_tb, pkT_b), tokP_b)?
+]
+
+queries[
+	unlinkability? z_a, z_b
+	unlinkability? tokP_a, tokP_b
+]

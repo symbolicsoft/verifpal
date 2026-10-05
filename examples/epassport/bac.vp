@@ -1,0 +1,111 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// ICAO Doc 9303 Part 11 §4.3: Basic Access Control, followed by Secure
+// Messaging reads of the Document Security Object and two data groups, and
+// Passive Authentication (Part 11 §5.1, Part 10 for EF.SOD) at the terminal.
+//
+// `mrz` stands for the three MRZ fields BAC is keyed from: the document
+// number, date of birth and date of expiry, with their check digits. The
+// terminal reads them optically from the data page; the chip stores them.
+// `dg1` stands for the rest of the data page (name, nationality, ...) and
+// `dg2` for the facial image. Personalisation is a protected channel from
+// the issuer, so that EF.SOD is never on the wire in clear.
+//
+// Abstractions: K_seed = SHA-1(MRZ_information) and the two KDF counters are
+// one HKDF call with two outputs; K_seed for the session keys is
+// K.IFD XOR K.IC, written HASH(kIFD, kIC) since Verifpal has no XOR. Each
+// Secure Messaging response is ENC then MAC under the session keys, with the
+// MAC over the send sequence counter and the ciphertext; the counter is a
+// public label per response, and the APDU framing is left out. Without the
+// counter in the MAC, the attacker swaps the two responses and the terminal's
+// MAC check on the data groups passes on the EF.SOD response.
+//
+// The inspection runs in phase 0. In phase 1 the MRZ becomes known to the
+// attacker: guessed offline from a recorded exchange, read from a hotel's
+// copy of the data page, or seen over the holder's shoulder.
+//
+// Expected: c1c1a0, at one session and at two. Both data groups were only
+// ever protected by keys that the MRZ and the recorded transcript determine,
+// so they fall the moment the MRZ does; nothing in the transcript is a
+// secret the MRZ cannot open. Authentication holds within phase 0, where the
+// attacker does not hold the MRZ, and a later leak cannot reach back into a
+// check that already ran. pace.vp is the counterweight: the same leak, the
+// same queries, c0c0a0.
+
+attacker[active]
+
+principal Issuer[
+	knows private cscaKey, dsKey, persoKey
+	knows private dg1, dg2
+	cscaPub = PUBKEY(cscaKey)
+	dsPub = PUBKEY(dsKey)
+	dsCert = SIGN(cscaKey, dsPub)
+	sodSig = SIGN(dsKey, HASH(dg1, dg2))
+	perso = ENC(persoKey, CONCAT(dsPub, dsCert, sodSig))
+]
+
+Issuer -> Terminal: [cscaPub]
+Issuer -> Passport: [perso]
+
+principal Passport[
+	knows private mrz, persoKey, dg1, dg2
+	knows public sscSod, sscDg
+	dsPub_p, dsCert_p, sodSig_p = SPLIT(DEC(persoKey, perso))
+	generates rndIC
+]
+
+Passport -> Terminal: rndIC
+
+principal Terminal[
+	knows private mrz
+	knows public sscSod, sscDg
+	generates rndIFD, kIFD
+	kEnc_t, kMac_t = HKDF(nil, mrz, nil)
+	eIFD = ENC(kEnc_t, CONCAT(rndIFD, rndIC, kIFD))
+	mIFD = MAC(kMac_t, eIFD)
+]
+
+Terminal -> Passport: eIFD, mIFD
+
+principal Passport[
+	kEnc, kMac = HKDF(nil, mrz, nil)
+	_ = ASSERT(MAC(kMac, eIFD), mIFD)?
+	rndIFD_p, rndIC_p, kIFD_p = SPLIT(DEC(kEnc, eIFD))
+	_ = ASSERT(rndIC_p, rndIC)?
+	generates kIC
+	eIC = ENC(kEnc, CONCAT(rndIC, rndIFD_p, kIC))
+	mIC = MAC(kMac, eIC)
+	ksEnc, ksMac = HKDF(nil, HASH(kIFD_p, kIC), nil)
+	smSod = ENC(ksEnc, CONCAT(dsPub_p, dsCert_p, sodSig_p))
+	tagSod = MAC(ksMac, CONCAT(sscSod, smSod))
+	smDg = ENC(ksEnc, CONCAT(dg1, dg2))
+	tagDg = MAC(ksMac, CONCAT(sscDg, smDg))
+]
+
+Passport -> Terminal: eIC, mIC, smSod, tagSod, smDg, tagDg
+
+principal Terminal[
+	_ = ASSERT(MAC(kMac_t, eIC), mIC)?
+	rndIC_t, rndIFD_t, kIC_t = SPLIT(DEC(kEnc_t, eIC))
+	_ = ASSERT(rndIFD_t, rndIFD)?
+	ksEnc_t, ksMac_t = HKDF(nil, HASH(kIFD, kIC_t), nil)
+	_ = ASSERT(MAC(ksMac_t, CONCAT(sscSod, smSod)), tagSod)?
+	dsPub_t, dsCert_t, sodSig_t = SPLIT(DEC(ksEnc_t, smSod))
+	_ = ASSERT(MAC(ksMac_t, CONCAT(sscDg, smDg)), tagDg)?
+	dg1_t, dg2_t = SPLIT(DEC(ksEnc_t, smDg))
+	_ = SIGNVERIF(cscaPub, dsPub_t, dsCert_t)?
+	_ = SIGNVERIF(dsPub_t, HASH(dg1_t, dg2_t), sodSig_t)?
+]
+
+phase[1]
+
+principal Passport[
+	leaks mrz
+]
+
+queries[
+	confidentiality? dg1
+	confidentiality? dg2
+	authentication? Passport -> Terminal: smDg
+]

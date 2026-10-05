@@ -1,0 +1,180 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Terminal Authentication version 1 (BSI TR-03110 version 2.05 §4.4, ICAO
+// Doc 9303 Part 11 §7) guarding DG3, the fingerprints, against the attacker
+// of inspect_pa.vp, who knows the MRZ. The passport and an authorised
+// inspection system run PACE and Chip Authentication as in inspect_ca.vp;
+// then, under the Chip Authentication keys, the chip sends a challenge, the
+// terminal answers with its certificate and a signature, and the chip
+// releases DG3 only if both verify.
+//
+// The terminal signs ID_PICC, the challenge, and the ephemeral public key it
+// used in Chip Authentication. With PACE, ID_PICC is the chip's ephemeral
+// PACE public key. The chip checks the certificate against the CVCA public
+// key it was personalised with, and the signature against its own ID_PICC
+// and the ephemeral key it received in Chip Authentication. Each chip
+// accepts one Terminal Authentication per session, which a run of this
+// model does.
+//
+// The honest terminal's Passive Authentication is left out. It protects the
+// terminal from talking to a substituted chip; for the chip's question here,
+// whether DG3 can reach anyone but an authorised terminal, it only limits
+// what the attacker can make the honest terminal do, so leaving it out
+// gives the attacker more, not less. inspect_ca.vp checks Passive
+// Authentication.
+//
+// Abstractions as in pace.vp and inspect_ca.vp. Comp() of a public key is
+// the key itself. The Document Verifier level of the terminal PKI is
+// collapsed into the CVCA signing the terminal's key, and certificate
+// validity dates, which a chip without a clock can only approximate, are
+// out of scope.
+//
+// Expected: c1c0, at one session and at two. DG2 is the control: anyone
+// with the MRZ reads it. For DG3 the attacker can run PACE and Chip
+// Authentication with the passport itself, and can make the honest
+// terminal run them with the attacker too, since without Passive
+// Authentication the terminal takes any DG14. It can carry the chip's
+// challenge to the terminal and the terminal's signature back. But the
+// terminal signs its own view of ID_PICC and of its CA key, and both differ
+// from the chip's: the attacker's PACE key stood in for the chip's, and its
+// CA key for the terminal's. eac_bac.vp and eac_bac_unbound.vp ask what the
+// CA key in the signature is for, on a passport that uses Basic Access
+// Control, where ID_PICC is the document number and binds nothing.
+
+attacker[active]
+
+principal Hotel[
+	knows private mrz
+	leaks mrz
+]
+
+principal Terminal[
+	knows private termKey
+	termPub = PUBKEY(termKey)
+]
+
+Terminal -> Cvca: [termPub]
+
+principal Cvca[
+	knows private cvcaKey
+	cvcaPub = PUBKEY(cvcaKey)
+	termCert = SIGN(cvcaKey, termPub)
+]
+
+Cvca -> Terminal: [termCert]
+Cvca -> Passport: [cvcaPub]
+
+principal Passport[
+	knows private mrz, caKey, dg2, dg3
+	knows public sscDg14, sscDg2, sscR, sscTa, sscDg3
+	dg14 = PUBKEY(caKey)
+	kPi = HKDF(nil, mrz, nil)
+	generates s, mapSkP, skP
+	z = ENC(kPi, s)
+	mapPkP = PUBKEY(mapSkP)
+]
+
+Passport -> Terminal: z
+
+principal Terminal[
+	knows private mrz
+	knows public sscDg14, sscDg2, sscR, sscTa, sscDg3
+	kPi_t = HKDF(nil, mrz, nil)
+	s_t = DEC(kPi_t, z)
+	generates mapSkT, skT
+	mapPkT = PUBKEY(mapSkT)
+]
+
+Terminal -> Passport: mapPkT
+Passport -> Terminal: mapPkP
+
+principal Terminal[
+	h_t = DH_KEX(mapPkP, mapSkT)
+	gHat_t = HASH(s_t, h_t)
+	pkT = PUBKEY(skT)
+]
+
+Terminal -> Passport: pkT
+
+principal Passport[
+	h = DH_KEX(mapPkT, mapSkP)
+	gHat = HASH(s, h)
+	pkP = PUBKEY(skP)
+]
+
+Passport -> Terminal: pkP
+
+principal Terminal[
+	k_t = DH_KEX(pkP, skT)
+	ksEnc_t, ksMac_t = HKDF(gHat_t, k_t, nil)
+	tokT = MAC(ksMac_t, pkP)
+]
+
+Terminal -> Passport: tokT
+
+principal Passport[
+	k = DH_KEX(pkT, skP)
+	ksEnc, ksMac = HKDF(gHat, k, nil)
+	_ = ASSERT(MAC(ksMac, pkP), tokT)?
+	tokP = MAC(ksMac, pkT)
+	smDg14 = ENC(ksEnc, dg14)
+	tagDg14 = MAC(ksMac, CONCAT(sscDg14, smDg14))
+]
+
+Passport -> Terminal: tokP, smDg14, tagDg14
+
+principal Terminal[
+	_ = ASSERT(MAC(ksMac_t, pkT), tokP)?
+	_ = ASSERT(MAC(ksMac_t, CONCAT(sscDg14, smDg14)), tagDg14)?
+	dg14_t = DEC(ksEnc_t, smDg14)
+	generates caSkT
+	caPkT = PUBKEY(caSkT)
+	caEnc_t, caMac_t = HKDF(nil, DH_KEX(dg14_t, caSkT), nil)
+]
+
+Terminal -> Passport: caPkT
+
+principal Passport[
+	caEnc, caMac = HKDF(nil, DH_KEX(caPkT, caKey), nil)
+	smDg2 = ENC(caEnc, dg2)
+	tagDg2 = MAC(caMac, CONCAT(sscDg2, smDg2))
+	generates rPicc
+	smR = ENC(caEnc, rPicc)
+	tagR = MAC(caMac, CONCAT(sscR, smR))
+]
+
+Passport -> Terminal: smDg2, tagDg2, smR, tagR
+
+principal Terminal[
+	_ = ASSERT(MAC(caMac_t, CONCAT(sscDg2, smDg2)), tagDg2)?
+	dg2_t = DEC(caEnc_t, smDg2)
+	_ = ASSERT(MAC(caMac_t, CONCAT(sscR, smR)), tagR)?
+	rPicc_t = DEC(caEnc_t, smR)
+	taSig = SIGN(termKey, CONCAT(pkP, rPicc_t, caPkT))
+	smTa = ENC(caEnc_t, CONCAT(termPub, termCert, taSig))
+	tagTa = MAC(caMac_t, CONCAT(sscTa, smTa))
+]
+
+Terminal -> Passport: smTa, tagTa
+
+principal Passport[
+	_ = ASSERT(MAC(caMac, CONCAT(sscTa, smTa)), tagTa)?
+	termPub_p, termCert_p, taSig_p = SPLIT(DEC(caEnc, smTa))
+	_ = SIGNVERIF(cvcaPub, termPub_p, termCert_p)?
+	_ = SIGNVERIF(termPub_p, CONCAT(pkP, rPicc, caPkT), taSig_p)?
+	smDg3 = ENC(caEnc, dg3)
+	tagDg3 = MAC(caMac, CONCAT(sscDg3, smDg3))
+]
+
+Passport -> Terminal: smDg3, tagDg3
+
+principal Terminal[
+	_ = ASSERT(MAC(caMac_t, CONCAT(sscDg3, smDg3)), tagDg3)?
+	dg3_t = DEC(caEnc_t, smDg3)
+]
+
+queries[
+	confidentiality? dg2
+	confidentiality? dg3
+]

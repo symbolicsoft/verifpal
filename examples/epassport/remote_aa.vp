@@ -1,0 +1,121 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Remote identity verification with an electronic passport, as done by apps
+// that read the chip over NFC and present the result to an online service,
+// including those that wrap it in a zero-knowledge proof. The service sends
+// a fresh challenge; the holder's phone has the chip sign it with Active
+// Authentication (ICAO Doc 9303 Part 11 §6.1) and returns the signature,
+// with the Passive Authentication data that certifies the chip's key (DG15
+// under EF.SOD).
+//
+// The phone reaches the service the way a browser reaches a server: it
+// sends a fresh channel key encrypted to the service's public key, which it
+// knows authentically, and both directions then travel under that key. The
+// service does not authenticate the phone. NFC between phone and chip is
+// guarded: the attacker is somewhere on the internet, not near the passport.
+// The bank opens the answer and checks the chip's signature in one step, so
+// that the first use of the answer is the bank's decision.
+//
+// The holder may also be asked to prove their identity to a dishonest
+// service. The scenarios[] block gives the phone two configurations: the
+// bank's key, or the key of a verifier the attacker runs, which leaks.
+//
+// Abstractions: the zero-knowledge proof, when there is one, is a function
+// of the same data and is left out; it carries no more freshness or binding
+// than the signature it contains. The CSCA level of Passive Authentication
+// is collapsed into the bank trusting the document signer's key, and the
+// record nonces are public labels under a fresh channel key.
+//
+// Expected: a1, at one session and at two. The chip signs whatever bytes
+// the phone hands it, and the phone hands it the challenge as received. The
+// dishonest verifier opens its own channel to the bank, receives the bank's
+// challenge, and passes it on as its own to the holder's phone, which asks
+// the chip to sign it and returns the signature to the verifier. The
+// verifier hands the signature to the bank on its own channel, and the bank
+// accepts an identification the holder's phone never sent it.
+// remote_aa_bound.vp is the counterweight.
+
+attacker[active]
+
+principal Passport[
+	knows private aaKey
+	dg15 = PUBKEY(aaKey)
+]
+
+Passport -> Issuer: [dg15]
+
+principal Issuer[
+	knows private dsKey, persoKey, dg1
+	dsPub = PUBKEY(dsKey)
+	sodSig = SIGN(dsKey, HASH(dg1, dg15))
+	perso = ENC(persoKey, sodSig)
+]
+
+Issuer -> Bank: [dsPub]
+Issuer -> Passport: [perso]
+
+principal Evil[
+	knows private evilKey
+	evilPub = PUBKEY(evilKey)
+	leaks evilKey
+]
+
+principal Bank[
+	knows private bankKey
+	bankPub = PUBKEY(bankKey)
+]
+
+Bank -> Phone: [bankPub]
+Evil -> Phone: [evilPub]
+
+principal Phone[
+	knows public rpPub, nChal, nResp
+	generates ck
+	ckMsg = PKE_ENC(rpPub, ck)
+]
+
+Phone -> Bank: ckMsg
+
+principal Bank[
+	knows public nChal, nResp
+	ck_b = PKE_DEC(bankKey, ckMsg)
+	generates chal
+	chalMsg = AEAD_ENC(ck_b, nChal, chal, nil)
+]
+
+Bank -> Phone: chalMsg
+
+principal Phone[
+	chal_p = AEAD_DEC(ck, nChal, chalMsg, nil)?
+]
+
+Phone -> Passport: [chal_p]
+
+principal Passport[
+	knows private persoKey, dg1
+	sodSig_p = DEC(persoKey, perso)
+	aaSig = SIGN(aaKey, chal_p)
+]
+
+Passport -> Phone: [dg1], [dg15], [sodSig_p], [aaSig]
+
+principal Phone[
+	resp = AEAD_ENC(ck, nResp, aaSig, nil)
+]
+
+Phone -> Bank: dg1, dg15, sodSig_p, resp
+
+principal Bank[
+	_ = SIGNVERIF(dsPub, HASH(dg1, dg15), sodSig_p)?
+	_ = SIGNVERIF(dg15, chal, AEAD_DEC(ck_b, nResp, resp, nil))?
+]
+
+scenarios[
+	Phone[rpPub = bankPub]
+	Phone[rpPub = evilPub]
+]
+
+queries[
+	authentication? Phone -> Bank: resp
+]

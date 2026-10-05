@@ -1,0 +1,172 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// inspect_pa.vp with Chip Authentication version 1 added, in the order of
+// the Advanced Inspection Procedure of BSI TR-03110 (version 2.05, Figure
+// 3.1): PACE, then Chip Authentication, then Passive Authentication, against
+// the same attacker, who knows the MRZ. inspect_ta.vp continues the
+// procedure with Terminal Authentication and DG3.
+//
+// The chip's static Diffie-Hellman public key is DG14, exported to the
+// issuer at personalisation and covered by EF.SOD. The terminal reads DG14
+// under PACE, sends an ephemeral public key, and both sides restart Secure
+// Messaging under keys derived from the static-ephemeral shared secret.
+// Version 1 authenticates the chip only implicitly, by the chip's ability
+// to produce Secure Messaging under those keys. EF.SOD and the data groups
+// are then read over the new channel, and EF.SOD signs the list of
+// data-group hashes, so the terminal checks each data group against its
+// hash. TR-03110 §4.3.2: only after Passive Authentication succeeds may the
+// chip be considered genuine. The terminal records that decision by sending
+// `accepted` to the officer at the desk.
+//
+// Abstractions as in pace.vp. The CA ephemeral key travels outside Secure
+// Messaging, which this attacker opens anyway.
+//
+// Expected: c1a0, at one session and at two.
+// c1: Chip Authentication authenticates the chip to the terminal, not the
+// terminal to the chip. With the MRZ, the attacker runs PACE and Chip
+// Authentication with the passport itself and reads DG2 like any terminal.
+// a0: the data groups the terminal accepts came from the chip whose key
+// EF.SOD names. The attacker can send its own key as DG14, since the
+// terminal runs Chip Authentication before Passive Authentication, and then
+// holds the terminal's new keys and can seal data groups the terminal's MAC
+// check passes. But Passive Authentication rejects the substituted DG14
+// before the terminal checks the data groups against their hashes, and a
+// halted run that never reaches a later use of what it received has not
+// accepted it, so the query is asked about inspections that end in
+// `accepted` and both readings agree.
+
+attacker[active]
+
+principal Hotel[
+	knows private mrz
+	leaks mrz
+]
+
+principal Passport[
+	knows private caKey
+	dg14 = PUBKEY(caKey)
+]
+
+Passport -> Issuer: [dg14]
+
+principal Issuer[
+	knows private cscaKey, dsKey, persoKey
+	knows private dg1, dg2
+	cscaPub = PUBKEY(cscaKey)
+	dsPub = PUBKEY(dsKey)
+	dsCert = SIGN(cscaKey, dsPub)
+	sodHashes = CONCAT(HASH(dg1), HASH(dg2), HASH(dg14))
+	sodSig = SIGN(dsKey, sodHashes)
+	perso = ENC(persoKey, CONCAT(dsPub, dsCert, sodHashes, sodSig))
+]
+
+Issuer -> Terminal: [cscaPub]
+Issuer -> Passport: [perso]
+
+principal Passport[
+	knows private mrz, persoKey, dg1, dg2
+	knows public sscDg14, sscSod, sscDg
+	dsPub_p, dsCert_p, sodHashes_p, sodSig_p = SPLIT(DEC(persoKey, perso))
+	kPi = HKDF(nil, mrz, nil)
+	generates s, mapSkP, skP
+	z = ENC(kPi, s)
+	mapPkP = PUBKEY(mapSkP)
+]
+
+Passport -> Terminal: z
+
+principal Terminal[
+	knows private mrz
+	knows public sscDg14, sscSod, sscDg
+	kPi_t = HKDF(nil, mrz, nil)
+	s_t = DEC(kPi_t, z)
+	generates mapSkT, skT
+	mapPkT = PUBKEY(mapSkT)
+]
+
+Terminal -> Passport: mapPkT
+Passport -> Terminal: mapPkP
+
+principal Terminal[
+	h_t = DH_KEX(mapPkP, mapSkT)
+	gHat_t = HASH(s_t, h_t)
+	pkT = PUBKEY(skT)
+]
+
+Terminal -> Passport: pkT
+
+principal Passport[
+	h = DH_KEX(mapPkT, mapSkP)
+	gHat = HASH(s, h)
+	pkP = PUBKEY(skP)
+]
+
+Passport -> Terminal: pkP
+
+principal Terminal[
+	k_t = DH_KEX(pkP, skT)
+	ksEnc_t, ksMac_t = HKDF(gHat_t, k_t, nil)
+	tokT = MAC(ksMac_t, pkP)
+]
+
+Terminal -> Passport: tokT
+
+principal Passport[
+	k = DH_KEX(pkT, skP)
+	ksEnc, ksMac = HKDF(gHat, k, nil)
+	_ = ASSERT(MAC(ksMac, pkP), tokT)?
+	tokP = MAC(ksMac, pkT)
+	smDg14 = ENC(ksEnc, dg14)
+	tagDg14 = MAC(ksMac, CONCAT(sscDg14, smDg14))
+]
+
+Passport -> Terminal: tokP, smDg14, tagDg14
+
+principal Terminal[
+	_ = ASSERT(MAC(ksMac_t, pkT), tokP)?
+	_ = ASSERT(MAC(ksMac_t, CONCAT(sscDg14, smDg14)), tagDg14)?
+	dg14_t = DEC(ksEnc_t, smDg14)
+	generates caSkT
+	caPkT = PUBKEY(caSkT)
+	caEnc_t, caMac_t = HKDF(nil, DH_KEX(dg14_t, caSkT), nil)
+]
+
+Terminal -> Passport: caPkT
+
+principal Passport[
+	caEnc, caMac = HKDF(nil, DH_KEX(caPkT, caKey), nil)
+	smSod = ENC(caEnc, CONCAT(dsPub_p, dsCert_p, sodHashes_p, sodSig_p))
+	tagSod = MAC(caMac, CONCAT(sscSod, smSod))
+	smDg = ENC(caEnc, CONCAT(dg1, dg2))
+	tagDg = MAC(caMac, CONCAT(sscDg, smDg))
+]
+
+Passport -> Terminal: smSod, tagSod, smDg, tagDg
+
+principal Terminal[
+	_ = ASSERT(MAC(caMac_t, CONCAT(sscSod, smSod)), tagSod)?
+	dsPub_t, dsCert_t, sodHashes_t, sodSig_t = SPLIT(DEC(caEnc_t, smSod))
+	_ = ASSERT(MAC(caMac_t, CONCAT(sscDg, smDg)), tagDg)?
+	dg1_t, dg2_t = SPLIT(DEC(caEnc_t, smDg))
+	_ = SIGNVERIF(cscaPub, dsPub_t, dsCert_t)?
+	_ = SIGNVERIF(dsPub_t, sodHashes_t, sodSig_t)?
+	h1_t, h2_t, h14_t = SPLIT(sodHashes_t)
+	_ = ASSERT(HASH(dg14_t), h14_t)?
+	_ = ASSERT(HASH(dg1_t), h1_t)?
+	_ = ASSERT(HASH(dg2_t), h2_t)?
+	generates accepted
+]
+
+Terminal -> Officer: [accepted]
+
+principal Officer[
+	_ = HASH(accepted)
+]
+
+queries[
+	confidentiality? dg2
+	authentication? Passport -> Terminal: smDg[
+		precondition[Terminal -> Officer: accepted]
+	]
+]

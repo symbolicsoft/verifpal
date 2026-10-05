@@ -1,0 +1,128 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// ICAO Doc 9303 Part 11 §4.4: PACE with the Generic Mapping, keyed from the
+// MRZ, followed by the same Secure Messaging reads and Passive
+// Authentication as bac.vp.
+//
+// The chip encrypts a fresh nonce s under K_pi, the password key derived
+// from the MRZ, and both sides decrypt or keep it. A first ephemeral
+// Diffie-Hellman exchange gives H, and the mapped generator is
+// G' = s*G + H. A second ephemeral exchange over G' gives K, from which the
+// session keys are derived, and each side sends a token MACing the other's
+// second public key under the new MAC key.
+//
+// Abstractions: Verifpal has no point addition and its PUBKEY has one fixed
+// generator, so G' is written HASH(s, H) and enters the session key
+// derivation beside the second shared secret K: deriving the session keys
+// takes both s, which only the MRZ opens, and an ephemeral private key from
+// each exchange. K_pi's encryption is unauthenticated ENC, as in the
+// standard, so a wrong password decrypts z to an unrelated value rather than
+// failing. Tokens cover the peer's public key without the domain parameters.
+//
+// The inspection runs in phase 0. In phase 1 the MRZ becomes known to the
+// attacker, exactly as in bac.vp.
+//
+// Expected: c0c0a0, at one session and at two. In phase 1 the attacker can
+// open z and recover s, and can recompute G' only with H, which needs one of
+// the mapping private keys; the session keys need one of the second
+// exchange's private keys as well. Neither was ever disclosed, so the
+// recorded inspection stays closed. bac.vp is the counterweight.
+
+attacker[active]
+
+principal Issuer[
+	knows private cscaKey, dsKey, persoKey
+	knows private dg1, dg2
+	cscaPub = PUBKEY(cscaKey)
+	dsPub = PUBKEY(dsKey)
+	dsCert = SIGN(cscaKey, dsPub)
+	sodSig = SIGN(dsKey, HASH(dg1, dg2))
+	perso = ENC(persoKey, CONCAT(dsPub, dsCert, sodSig))
+]
+
+Issuer -> Terminal: [cscaPub]
+Issuer -> Passport: [perso]
+
+principal Passport[
+	knows private mrz, persoKey, dg1, dg2
+	knows public sscSod, sscDg
+	dsPub_p, dsCert_p, sodSig_p = SPLIT(DEC(persoKey, perso))
+	kPi = HKDF(nil, mrz, nil)
+	generates s, mapSkP, skP
+	z = ENC(kPi, s)
+	mapPkP = PUBKEY(mapSkP)
+]
+
+Passport -> Terminal: z
+
+principal Terminal[
+	knows private mrz
+	knows public sscSod, sscDg
+	kPi_t = HKDF(nil, mrz, nil)
+	s_t = DEC(kPi_t, z)
+	generates mapSkT, skT
+	mapPkT = PUBKEY(mapSkT)
+]
+
+Terminal -> Passport: mapPkT
+Passport -> Terminal: mapPkP
+
+principal Terminal[
+	h_t = DH_KEX(mapPkP, mapSkT)
+	gHat_t = HASH(s_t, h_t)
+	pkT = PUBKEY(skT)
+]
+
+Terminal -> Passport: pkT
+
+principal Passport[
+	h = DH_KEX(mapPkT, mapSkP)
+	gHat = HASH(s, h)
+	pkP = PUBKEY(skP)
+]
+
+Passport -> Terminal: pkP
+
+principal Terminal[
+	k_t = DH_KEX(pkP, skT)
+	ksEnc_t, ksMac_t = HKDF(gHat_t, k_t, nil)
+	tokT = MAC(ksMac_t, pkP)
+]
+
+Terminal -> Passport: tokT
+
+principal Passport[
+	k = DH_KEX(pkT, skP)
+	ksEnc, ksMac = HKDF(gHat, k, nil)
+	_ = ASSERT(MAC(ksMac, pkP), tokT)?
+	tokP = MAC(ksMac, pkT)
+	smSod = ENC(ksEnc, CONCAT(dsPub_p, dsCert_p, sodSig_p))
+	tagSod = MAC(ksMac, CONCAT(sscSod, smSod))
+	smDg = ENC(ksEnc, CONCAT(dg1, dg2))
+	tagDg = MAC(ksMac, CONCAT(sscDg, smDg))
+]
+
+Passport -> Terminal: tokP, smSod, tagSod, smDg, tagDg
+
+principal Terminal[
+	_ = ASSERT(MAC(ksMac_t, pkT), tokP)?
+	_ = ASSERT(MAC(ksMac_t, CONCAT(sscSod, smSod)), tagSod)?
+	dsPub_t, dsCert_t, sodSig_t = SPLIT(DEC(ksEnc_t, smSod))
+	_ = ASSERT(MAC(ksMac_t, CONCAT(sscDg, smDg)), tagDg)?
+	dg1_t, dg2_t = SPLIT(DEC(ksEnc_t, smDg))
+	_ = SIGNVERIF(cscaPub, dsPub_t, dsCert_t)?
+	_ = SIGNVERIF(dsPub_t, HASH(dg1_t, dg2_t), sodSig_t)?
+]
+
+phase[1]
+
+principal Passport[
+	leaks mrz
+]
+
+queries[
+	confidentiality? dg1
+	confidentiality? dg2
+	authentication? Passport -> Terminal: smDg
+]

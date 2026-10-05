@@ -1,0 +1,99 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// eac_bac.vp without the terminal's Chip Authentication ephemeral key in
+// the Terminal Authentication signature: the terminal signs ID_PICC and the
+// chip's challenge. This is not a version of the standard; it asks what that
+// key is doing there.
+//
+// Expected: c1, at one session and at two. The attacker runs Chip
+// Authentication with the passport using its own ephemeral key, and offers
+// the honest terminal its own key as DG14, so it holds both channels. It
+// carries the chip's challenge into the terminal's channel and the
+// terminal's signature into the chip's. ID_PICC does not help: with Basic
+// Access Control it is the document number, the same on both sides and
+// known to anyone with the MRZ. The chip finds a valid certificate and a
+// valid signature over its own challenge, and releases DG3 on a channel
+// the attacker holds. The terminal's Passive Authentication of DG14, run
+// before Terminal Authentication as in the Advanced Inspection Procedure,
+// would also have stopped this, by rejecting the attacker's key.
+
+attacker[active]
+
+principal Hotel[
+	knows public docNumber
+	knows private mrz
+	leaks mrz
+]
+
+principal Terminal[
+	knows private termKey
+	termPub = PUBKEY(termKey)
+]
+
+Terminal -> Cvca: [termPub]
+
+principal Cvca[
+	knows private cvcaKey
+	cvcaPub = PUBKEY(cvcaKey)
+	termCert = SIGN(cvcaKey, termPub)
+]
+
+Cvca -> Terminal: [termCert]
+Cvca -> Passport: [cvcaPub]
+
+principal Passport[
+	knows private caKey, dg3
+	knows public docNumber, sscR, sscTa, sscDg3
+	dg14 = PUBKEY(caKey)
+]
+
+Passport -> Terminal: dg14
+
+principal Terminal[
+	knows public docNumber, sscR, sscTa, sscDg3
+	generates caSkT
+	caPkT = PUBKEY(caSkT)
+	caEnc_t, caMac_t = HKDF(nil, DH_KEX(dg14, caSkT), nil)
+]
+
+Terminal -> Passport: caPkT
+
+principal Passport[
+	caEnc, caMac = HKDF(nil, DH_KEX(caPkT, caKey), nil)
+	generates rPicc
+	smR = ENC(caEnc, rPicc)
+	tagR = MAC(caMac, CONCAT(sscR, smR))
+]
+
+Passport -> Terminal: smR, tagR
+
+principal Terminal[
+	_ = ASSERT(MAC(caMac_t, CONCAT(sscR, smR)), tagR)?
+	rPicc_t = DEC(caEnc_t, smR)
+	taSig = SIGN(termKey, CONCAT(docNumber, rPicc_t))
+	smTa = ENC(caEnc_t, CONCAT(termPub, termCert, taSig))
+	tagTa = MAC(caMac_t, CONCAT(sscTa, smTa))
+]
+
+Terminal -> Passport: smTa, tagTa
+
+principal Passport[
+	_ = ASSERT(MAC(caMac, CONCAT(sscTa, smTa)), tagTa)?
+	termPub_p, termCert_p, taSig_p = SPLIT(DEC(caEnc, smTa))
+	_ = SIGNVERIF(cvcaPub, termPub_p, termCert_p)?
+	_ = SIGNVERIF(termPub_p, CONCAT(docNumber, rPicc), taSig_p)?
+	smDg3 = ENC(caEnc, dg3)
+	tagDg3 = MAC(caMac, CONCAT(sscDg3, smDg3))
+]
+
+Passport -> Terminal: smDg3, tagDg3
+
+principal Terminal[
+	_ = ASSERT(MAC(caMac_t, CONCAT(sscDg3, smDg3)), tagDg3)?
+	dg3_t = DEC(caEnc_t, smDg3)
+]
+
+queries[
+	confidentiality? dg3
+]

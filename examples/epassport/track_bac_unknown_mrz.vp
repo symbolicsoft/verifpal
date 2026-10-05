@@ -1,0 +1,88 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// track_bac.vp without the hotel's leak: the eavesdropper records the same
+// two Basic Access Control runs of one passport, at a hotel desk and at an
+// airport gate, but does not hold the MRZ.
+//
+// Expected: u0, at one session and at two. Both MACs are under the same
+// K_MAC, but the eavesdropper cannot recompute either, and no other value it
+// recorded is tied to that key.
+//
+// What this does not cover: the traceability attack of Chothia and Smirnov
+// (Financial Cryptography 2010) needs no MRZ. The attacker replays the
+// terminal's eIFD and mIFD from a recorded run to a passport it meets later.
+// The passport that recorded run belonged to passes the MAC check and fails
+// the nonce check; any other passport fails the MAC check; and some
+// passports report the two failures with different status words, or after
+// different delays. Verifpal judges values, and a failed check halts a run
+// without a value to observe, so the difference between two ways of
+// failing is outside what it can see here. Arapinis, Chothia, Ritter and
+// Ryan (CSF 2010) checked exactly this distinction as an observational
+// equivalence in ProVerif.
+
+attacker[passive]
+
+principal Passport[
+	knows private mrz
+	kEnc, kMac = HKDF(nil, mrz, nil)
+	generates rndIC_a, rndIC_b
+]
+
+Passport -> HotelDesk: rndIC_a
+
+principal HotelDesk[
+	knows private mrz
+	generates rndIFD_a, kIFD_a
+	kEnc_a, kMac_a = HKDF(nil, mrz, nil)
+	eIFD_a = ENC(kEnc_a, CONCAT(rndIFD_a, rndIC_a, kIFD_a))
+	mIFD_a = MAC(kMac_a, eIFD_a)
+]
+
+HotelDesk -> Passport: eIFD_a, mIFD_a
+
+principal Passport[
+	_ = ASSERT(MAC(kMac, eIFD_a), mIFD_a)?
+	rndIFD_pa, rndIC_pa, kIFD_pa = SPLIT(DEC(kEnc, eIFD_a))
+	_ = ASSERT(rndIC_pa, rndIC_a)?
+	generates kIC_a
+	eIC_a = ENC(kEnc, CONCAT(rndIC_a, rndIFD_pa, kIC_a))
+	mIC_a = MAC(kMac, eIC_a)
+]
+
+Passport -> HotelDesk: eIC_a, mIC_a
+
+principal HotelDesk[
+	_ = ASSERT(MAC(kMac_a, eIC_a), mIC_a)?
+]
+
+Passport -> Gate: rndIC_b
+
+principal Gate[
+	knows private mrz
+	generates rndIFD_b, kIFD_b
+	kEnc_b, kMac_b = HKDF(nil, mrz, nil)
+	eIFD_b = ENC(kEnc_b, CONCAT(rndIFD_b, rndIC_b, kIFD_b))
+	mIFD_b = MAC(kMac_b, eIFD_b)
+]
+
+Gate -> Passport: eIFD_b, mIFD_b
+
+principal Passport[
+	_ = ASSERT(MAC(kMac, eIFD_b), mIFD_b)?
+	rndIFD_pb, rndIC_pb, kIFD_pb = SPLIT(DEC(kEnc, eIFD_b))
+	_ = ASSERT(rndIC_pb, rndIC_b)?
+	generates kIC_b
+	eIC_b = ENC(kEnc, CONCAT(rndIC_b, rndIFD_pb, kIC_b))
+	mIC_b = MAC(kMac, eIC_b)
+]
+
+Passport -> Gate: eIC_b, mIC_b
+
+principal Gate[
+	_ = ASSERT(MAC(kMac_b, eIC_b), mIC_b)?
+]
+
+queries[
+	unlinkability? mIC_a, mIC_b
+]

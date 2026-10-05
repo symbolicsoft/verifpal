@@ -1,0 +1,152 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// inspect_pa.vp with Active Authentication (ICAO Doc 9303 Part 11 §6.1)
+// added. The chip holds a static signing key whose public half is DG15,
+// exported to the issuer at personalisation and covered by EF.SOD. After
+// Passive Authentication the terminal sends a fresh challenge and verifies
+// the chip's signature over it under the key from DG15.
+//
+// Abstractions: the challenge and the signature travel outside Secure
+// Messaging, so that the query can name the signature itself. Against this
+// attacker that costs nothing: it knows the MRZ, so it holds the keys of
+// every PACE channel it sits in and can open and reseal anything sent over
+// them. The signature is SIGN over the challenge alone, as with ECDSA; the
+// chip's own message part of ISO/IEC 9796-2 is left out.
+//
+// Expected: c1a0a1, at one session and at two. The attacker cannot produce
+// a signature under the chip's key, and each terminal run signs off a fresh
+// challenge, so the signature the terminal accepts was made by the passport
+// for that run: a0. Nothing ties that signature to the PACE channel the data
+// groups arrive on. The attacker still opens one channel to the passport and
+// another to the terminal, carries the challenge across, carries the
+// signature back, and reseals the data groups itself: the terminal accepts a
+// data-group response the passport never sent it, a1, after a successful
+// Active Authentication. The same relay reads DG2: c1. inspect_ca.vp is the
+// counterweight.
+
+attacker[active]
+
+principal Hotel[
+	knows private mrz
+	leaks mrz
+]
+
+principal Passport[
+	knows private aaKey
+	dg15 = PUBKEY(aaKey)
+]
+
+Passport -> Issuer: [dg15]
+
+principal Issuer[
+	knows private cscaKey, dsKey, persoKey
+	knows private dg1, dg2
+	cscaPub = PUBKEY(cscaKey)
+	dsPub = PUBKEY(dsKey)
+	dsCert = SIGN(cscaKey, dsPub)
+	sodSig = SIGN(dsKey, HASH(dg1, dg2, dg15))
+	perso = ENC(persoKey, CONCAT(dsPub, dsCert, sodSig))
+]
+
+Issuer -> Terminal: [cscaPub]
+Issuer -> Passport: [perso]
+
+principal Passport[
+	knows private mrz, persoKey, dg1, dg2
+	knows public sscSod, sscDg
+	dsPub_p, dsCert_p, sodSig_p = SPLIT(DEC(persoKey, perso))
+	kPi = HKDF(nil, mrz, nil)
+	generates s, mapSkP, skP
+	z = ENC(kPi, s)
+	mapPkP = PUBKEY(mapSkP)
+]
+
+Passport -> Terminal: z
+
+principal Terminal[
+	knows private mrz
+	knows public sscSod, sscDg
+	kPi_t = HKDF(nil, mrz, nil)
+	s_t = DEC(kPi_t, z)
+	generates mapSkT, skT
+	mapPkT = PUBKEY(mapSkT)
+]
+
+Terminal -> Passport: mapPkT
+Passport -> Terminal: mapPkP
+
+principal Terminal[
+	h_t = DH_KEX(mapPkP, mapSkT)
+	gHat_t = HASH(s_t, h_t)
+	pkT = PUBKEY(skT)
+]
+
+Terminal -> Passport: pkT
+
+principal Passport[
+	h = DH_KEX(mapPkT, mapSkP)
+	gHat = HASH(s, h)
+	pkP = PUBKEY(skP)
+]
+
+Passport -> Terminal: pkP
+
+principal Terminal[
+	k_t = DH_KEX(pkP, skT)
+	ksEnc_t, ksMac_t = HKDF(gHat_t, k_t, nil)
+	tokT = MAC(ksMac_t, pkP)
+]
+
+Terminal -> Passport: tokT
+
+principal Passport[
+	k = DH_KEX(pkT, skP)
+	ksEnc, ksMac = HKDF(gHat, k, nil)
+	_ = ASSERT(MAC(ksMac, pkP), tokT)?
+	tokP = MAC(ksMac, pkT)
+	smSod = ENC(ksEnc, CONCAT(dsPub_p, dsCert_p, sodSig_p))
+	tagSod = MAC(ksMac, CONCAT(sscSod, smSod))
+	smDg = ENC(ksEnc, CONCAT(dg1, dg2, dg15))
+	tagDg = MAC(ksMac, CONCAT(sscDg, smDg))
+]
+
+Passport -> Terminal: tokP, smSod, tagSod, smDg, tagDg
+
+principal Terminal[
+	_ = ASSERT(MAC(ksMac_t, pkT), tokP)?
+	_ = ASSERT(MAC(ksMac_t, CONCAT(sscSod, smSod)), tagSod)?
+	dsPub_t, dsCert_t, sodSig_t = SPLIT(DEC(ksEnc_t, smSod))
+	_ = ASSERT(MAC(ksMac_t, CONCAT(sscDg, smDg)), tagDg)?
+	dg1_t, dg2_t, dg15_t = SPLIT(DEC(ksEnc_t, smDg))
+	_ = SIGNVERIF(cscaPub, dsPub_t, dsCert_t)?
+	_ = SIGNVERIF(dsPub_t, HASH(dg1_t, dg2_t, dg15_t), sodSig_t)?
+	generates chal
+]
+
+Terminal -> Passport: chal
+
+principal Passport[
+	aaSig = SIGN(aaKey, chal)
+]
+
+Passport -> Terminal: aaSig
+
+principal Terminal[
+	_ = SIGNVERIF(dg15_t, chal, aaSig)?
+	generates accepted
+]
+
+Terminal -> Officer: [accepted]
+
+principal Officer[
+	_ = HASH(accepted)
+]
+
+queries[
+	confidentiality? dg2
+	authentication? Passport -> Terminal: aaSig
+	authentication? Passport -> Terminal: smDg[
+		precondition[Terminal -> Officer: accepted]
+	]
+]

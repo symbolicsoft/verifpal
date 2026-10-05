@@ -1,0 +1,124 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// An inspection system that runs PACE and Passive Authentication and nothing
+// else, against an attacker who already knows the MRZ: a hotel kept a scan
+// of the data page, and the scan leaked. PACE and the reads are as in
+// pace.vp; there is no phase boundary here, so the MRZ is known before the
+// passport is ever presented.
+//
+// Expected: c1a1, at one session and at two. PACE authenticates whoever
+// knows the password, and the attacker does: it runs one PACE with the
+// passport as a terminal and another with the terminal as a passport, opens
+// the data groups on the first and seals them again on the second. Passive
+// Authentication still passes, because the data groups and EF.SOD are the
+// genuine ones; it says the data was issued, not that the chip on the other
+// end of the channel holds it. The terminal accepts a data-group response
+// the passport never sent it, and the same copied data would serve with the
+// passport absent. inspect_aa.vp adds Active Authentication and
+// inspect_ca.vp adds Chip Authentication to this same inspection.
+
+attacker[active]
+
+principal Hotel[
+	knows private mrz
+	leaks mrz
+]
+
+principal Issuer[
+	knows private cscaKey, dsKey, persoKey
+	knows private dg1, dg2
+	cscaPub = PUBKEY(cscaKey)
+	dsPub = PUBKEY(dsKey)
+	dsCert = SIGN(cscaKey, dsPub)
+	sodSig = SIGN(dsKey, HASH(dg1, dg2))
+	perso = ENC(persoKey, CONCAT(dsPub, dsCert, sodSig))
+]
+
+Issuer -> Terminal: [cscaPub]
+Issuer -> Passport: [perso]
+
+principal Passport[
+	knows private mrz, persoKey, dg1, dg2
+	knows public sscSod, sscDg
+	dsPub_p, dsCert_p, sodSig_p = SPLIT(DEC(persoKey, perso))
+	kPi = HKDF(nil, mrz, nil)
+	generates s, mapSkP, skP
+	z = ENC(kPi, s)
+	mapPkP = PUBKEY(mapSkP)
+]
+
+Passport -> Terminal: z
+
+principal Terminal[
+	knows private mrz
+	knows public sscSod, sscDg
+	kPi_t = HKDF(nil, mrz, nil)
+	s_t = DEC(kPi_t, z)
+	generates mapSkT, skT
+	mapPkT = PUBKEY(mapSkT)
+]
+
+Terminal -> Passport: mapPkT
+Passport -> Terminal: mapPkP
+
+principal Terminal[
+	h_t = DH_KEX(mapPkP, mapSkT)
+	gHat_t = HASH(s_t, h_t)
+	pkT = PUBKEY(skT)
+]
+
+Terminal -> Passport: pkT
+
+principal Passport[
+	h = DH_KEX(mapPkT, mapSkP)
+	gHat = HASH(s, h)
+	pkP = PUBKEY(skP)
+]
+
+Passport -> Terminal: pkP
+
+principal Terminal[
+	k_t = DH_KEX(pkP, skT)
+	ksEnc_t, ksMac_t = HKDF(gHat_t, k_t, nil)
+	tokT = MAC(ksMac_t, pkP)
+]
+
+Terminal -> Passport: tokT
+
+principal Passport[
+	k = DH_KEX(pkT, skP)
+	ksEnc, ksMac = HKDF(gHat, k, nil)
+	_ = ASSERT(MAC(ksMac, pkP), tokT)?
+	tokP = MAC(ksMac, pkT)
+	smSod = ENC(ksEnc, CONCAT(dsPub_p, dsCert_p, sodSig_p))
+	tagSod = MAC(ksMac, CONCAT(sscSod, smSod))
+	smDg = ENC(ksEnc, CONCAT(dg1, dg2))
+	tagDg = MAC(ksMac, CONCAT(sscDg, smDg))
+]
+
+Passport -> Terminal: tokP, smSod, tagSod, smDg, tagDg
+
+principal Terminal[
+	_ = ASSERT(MAC(ksMac_t, pkT), tokP)?
+	_ = ASSERT(MAC(ksMac_t, CONCAT(sscSod, smSod)), tagSod)?
+	dsPub_t, dsCert_t, sodSig_t = SPLIT(DEC(ksEnc_t, smSod))
+	_ = ASSERT(MAC(ksMac_t, CONCAT(sscDg, smDg)), tagDg)?
+	dg1_t, dg2_t = SPLIT(DEC(ksEnc_t, smDg))
+	_ = SIGNVERIF(cscaPub, dsPub_t, dsCert_t)?
+	_ = SIGNVERIF(dsPub_t, HASH(dg1_t, dg2_t), sodSig_t)?
+	generates accepted
+]
+
+Terminal -> Officer: [accepted]
+
+principal Officer[
+	_ = HASH(accepted)
+]
+
+queries[
+	confidentiality? dg2
+	authentication? Passport -> Terminal: smDg[
+		precondition[Terminal -> Officer: accepted]
+	]
+]
