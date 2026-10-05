@@ -1,0 +1,90 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1 at one session and at two.
+//
+// solver_oracle_sealed_relay.vp, but Bob's verification key reaches Alice
+// inside his answer, certified by a CA she trusts, as an inspection system's
+// key reaches a passport in Terminal Authentication. The attacker replaces
+// both Diffie-Hellman shares, reseals Alice's challenge for Bob, and
+// reseals Bob's key, certificate and genuine signature for Alice; both of
+// her checks pass and she releases `secret` on a channel the attacker holds.
+//
+// Alice's check verifies the signature under a key she split out of the
+// sealed answer, not under a PUBKEY application, so the rewrite rule's key
+// filter has no exponent to peel and no oracle shape was built for the
+// check at all. The attacker does not need the key; it needs the signature
+// from the one principal who makes it, so the shape keeps its message and
+// leaves the rejected position free for Bob's emission to fill.
+//
+// solver_oracle_wire_verification_key_bound.vp has Bob sign his own share
+// with the challenge, and holds.
+attacker[active]
+
+principal Ca[
+	knows private cak
+	cap = PUBKEY(cak)
+]
+
+principal Bob[
+	knows private skb
+	pkb = PUBKEY(skb)
+]
+
+Bob -> Ca: [pkb]
+
+principal Ca[
+	certb = SIGN(cak, pkb)
+]
+
+Ca -> Bob: [certb]
+Ca -> Alice: [cap]
+
+principal Alice[
+	knows private a
+	ga = PUBKEY(a)
+]
+
+Alice -> Bob: ga
+
+principal Bob[
+	generates e
+	ge = PUBKEY(e)
+	kb = HASH(DH_KEX(ga, e))
+]
+
+Bob -> Alice: ge
+
+principal Alice[
+	ka = HASH(DH_KEX(ge, a))
+	generates r
+	cr = ENC(ka, r)
+]
+
+Alice -> Bob: cr
+
+principal Bob[
+	rb = DEC(kb, cr)
+	sig = SIGN(skb, rb)
+	cs = ENC(kb, CONCAT(pkb, certb, sig))
+]
+
+Bob -> Alice: cs
+
+principal Alice[
+	pkb_a, certb_a, sig_a = SPLIT(DEC(ka, cs))
+	_ = SIGNVERIF(cap, pkb_a, certb_a)?
+	_ = SIGNVERIF(pkb_a, r, sig_a)?
+	generates secret
+	csec = ENC(ka, secret)
+]
+
+Alice -> Bob: csec
+
+principal Bob[
+	sb = DEC(kb, csec)
+]
+
+queries[
+	confidentiality? secret
+]

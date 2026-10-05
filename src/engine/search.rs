@@ -47,6 +47,7 @@ struct Stuck {
 	installs: Installs,
 	slots: Vec<(usize, usize)>,
 	tried_with: Vec<usize>,
+	supply: Vec<(usize, usize)>,
 }
 
 #[derive(Clone, Copy)]
@@ -1102,6 +1103,7 @@ impl<'a, 'b> Search<'a, 'b> {
 			installs,
 			slots,
 			tried_with,
+			mut supply,
 		} = self.stuck[at].clone();
 		let mut sources: Vec<Source> = Vec::new();
 		for (run, slot, value) in &installs {
@@ -1119,9 +1121,59 @@ impl<'a, 'b> Search<'a, 'b> {
 				}
 			}
 		}
-		self.stuck[at]
-			.tried_with
-			.extend(sources.iter().map(|s| s.node));
+		let mut suppliers: Vec<usize> = Vec::new();
+		let context: Vec<&(usize, usize, Value)> = installs
+			.iter()
+			.filter(|(run, slot, _)| !slots.contains(&(*run, *slot)))
+			.collect();
+		for (install, next) in supply.iter_mut() {
+			let (run, slot, value) = &installs[*install];
+			let program = &self.cx.program.runs[*run];
+			let phase = program
+				.step_of_slot
+				.get(slot)
+				.map_or(0, |&step| program.steps[step].phase);
+			while *next < self.nodes.len() {
+				let n = *next;
+				*next += 1;
+				if sources.iter().any(|s| s.node == n)
+					|| suppliers.contains(&n)
+					|| tried_with.contains(&n)
+				{
+					continue;
+				}
+				let within = context.iter().all(|(run, slot, held)| {
+					install_at(&self.nodes[n].installs, *run, *slot)
+						.is_some_and(|v| v.equivalent(held, true))
+				});
+				if within
+					&& self.compatible(&installs, n)
+					&& obtainable(
+						value,
+						&self.cx.km.capabilities,
+						&self.nodes[n].ex.at(phase).knowledge.state,
+					) {
+					suppliers.push(n);
+					break;
+				}
+			}
+		}
+		self.stuck[at].supply = supply;
+		self.stuck[at].tried_with.extend(
+			sources
+				.iter()
+				.map(|s| s.node)
+				.chain(suppliers.iter().copied()),
+		);
+		for n in suppliers {
+			if self.done() {
+				return;
+			}
+			let plan = normalize(self.merged(&[n], installs.clone()));
+			if !same_installs(&plan, &installs) {
+				self.as_family("stuck", |search| search.consider_derived(plan));
+			}
+		}
 		for source in sources {
 			if self.done() {
 				return;
@@ -1497,10 +1549,21 @@ impl<'a, 'b> Search<'a, 'b> {
 				.cloned()
 				.collect();
 			let unchanged = admitted.len() == installs.len();
+			let supply = installs
+				.iter()
+				.enumerate()
+				.filter(|(_, (run, slot, value))| {
+					!admitted.is_empty()
+						&& ex.stuck.contains(&(*run, *slot))
+						&& self.derivable_in(0, value)
+				})
+				.map(|(install, _)| (install, 1))
+				.collect();
 			self.stuck.push(Stuck {
 				installs,
 				slots: ex.stuck,
 				tried_with: Vec::new(),
+				supply,
 			});
 			self.retry_stuck(self.stuck.len() - 1);
 			if admitted.is_empty() || unchanged {

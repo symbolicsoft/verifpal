@@ -1,0 +1,81 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1 at one session and at two.
+//
+// Alice and Bob agree a channel key by unauthenticated Diffie-Hellman. Alice
+// sends a challenge under her key, Bob signs whatever his key opens and
+// returns the signature under his key, and Alice releases `secret` only
+// once Bob's signature over her challenge verifies. The attacker replaces
+// both shares with PUBKEY(nil), so it holds both channel keys; it reseals
+// the challenge for Bob, reseals Bob's genuine signature for Alice, and
+// Alice's check passes on a channel the attacker holds.
+//
+// Bob is the oracle, and Alice's check names the value he must produce:
+// SIGN(skb, r). That shape has no variable left in it, and the oracle goals
+// kept only shapes with one, as if a concrete term were already settled; a
+// concrete term the attacker cannot build is exactly the one it needs an
+// oracle for. Bob's emission also wraps the signature in his channel
+// encryption, and only whole emissions were unified with the wanted shape,
+// so the signature was never seen; the shape is now inverted against what
+// decrypting the emission reveals. The inversion leaves Bob's own share free
+// inside the challenge it builds, and a share the attacker must supply for
+// the oracle to answer is the attacker's own. Each half alone was not
+// enough: relay_min, as this model was first written, stayed c0.
+//
+// solver_oracle_sealed_relay_guarded.vp guards both shares and holds.
+attacker[active]
+
+principal Bob[
+	knows private skb
+	pkb = PUBKEY(skb)
+]
+
+Bob -> Alice: [pkb]
+
+principal Alice[
+	knows private a
+	ga = PUBKEY(a)
+]
+
+Alice -> Bob: ga
+
+principal Bob[
+	generates e
+	ge = PUBKEY(e)
+	kb = HASH(DH_KEX(ga, e))
+]
+
+Bob -> Alice: ge
+
+principal Alice[
+	ka = HASH(DH_KEX(ge, a))
+	generates r
+	cr = ENC(ka, r)
+]
+
+Alice -> Bob: cr
+
+principal Bob[
+	rb = DEC(kb, cr)
+	sig = SIGN(skb, rb)
+	cs = ENC(kb, sig)
+]
+
+Bob -> Alice: cs
+
+principal Alice[
+	_ = SIGNVERIF(pkb, r, DEC(ka, cs))?
+	generates secret
+	csec = ENC(ka, secret)
+]
+
+Alice -> Bob: csec
+
+principal Bob[
+	sb = DEC(kb, csec)
+]
+
+queries[
+	confidentiality? secret
+]

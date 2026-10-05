@@ -1139,6 +1139,36 @@ impl<'a> Deducer<'a> {
 		solutions
 	}
 
+	pub(crate) fn invert_into_revealed(
+		&self,
+		emission: &Value,
+		shape: &Value,
+	) -> Vec<Substitution> {
+		let empty = Substitution::default();
+		let mut out = Vec::new();
+		let mut pending = vec![emission.clone()];
+		let mut seen = TermSet::default();
+		while let Some(term) = pending.pop() {
+			let Value::Primitive(p) = &term else {
+				continue;
+			};
+			let Some((revealed, _)) = decomposition_targets(p) else {
+				continue;
+			};
+			for inner in revealed {
+				if seen.contains(&inner) {
+					continue;
+				}
+				seen.insert(inner.clone());
+				if contains_var(&inner) {
+					out.extend(self.invert(&inner, shape, &empty));
+				}
+				pending.push(inner);
+			}
+		}
+		super::vars::dedupe(out)
+	}
+
 	pub(crate) fn equality_shapes(&self, p: &Primitive) -> Vec<Substitution> {
 		if !(primitive_is_equality(p.id) && p.arguments.len() == 2) {
 			return Vec::new();
@@ -1485,7 +1515,24 @@ fn check_passes(p: &Primitive) -> bool {
 pub(crate) fn build_rewrite_shapes_with(
 	outer: &Primitive,
 	rule: &RewriteRule,
+	fill: impl FnMut(usize) -> Value,
+) -> Vec<Value> {
+	rewrite_shapes_from(outer, rule, fill, false)
+}
+
+pub(crate) fn build_rewrite_shapes_leaving_free(
+	outer: &Primitive,
+	rule: &RewriteRule,
+	fill: impl FnMut(usize) -> Value,
+) -> Vec<Value> {
+	rewrite_shapes_from(outer, rule, fill, true)
+}
+
+fn rewrite_shapes_from(
+	outer: &Primitive,
+	rule: &RewriteRule,
 	mut fill: impl FnMut(usize) -> Value,
+	leave_free: bool,
 ) -> Vec<Value> {
 	let Ok(inner_spec) = primitive_get(rule.id) else {
 		return Vec::new();
@@ -1520,6 +1567,9 @@ pub(crate) fn build_rewrite_shapes_with(
 			}
 		}
 		if next.is_empty() {
+			if leave_free {
+				continue;
+			}
 			return Vec::new();
 		}
 		partials = next;

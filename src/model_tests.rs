@@ -2498,6 +2498,13 @@ fn test_unlink_identical_values() {
 	run_model("unlink_identical_values.vp", "u1");
 }
 #[test]
+fn test_unlink_opened_content() {
+	for sessions in [1, 2] {
+		run_model_sessions("unlink_opened_fresh_content.vp", sessions, "u0");
+		run_model_sessions("unlink_opened_known_content.vp", sessions, "u1");
+	}
+}
+#[test]
 fn test_unlink_independent_origins() {
 	run_model("unlink_independent_origins.vp", "u0");
 }
@@ -5016,6 +5023,26 @@ fn test_solver_oracle_through_projection() {
 	for sessions in [1, 2] {
 		run_model_sessions("solver_oracle_through_projection.vp", sessions, "c1");
 		run_model_sessions("solver_oracle_through_projection_domain.vp", sessions, "c0");
+	}
+}
+
+#[test]
+fn test_solver_oracle_sealed_relay() {
+	for sessions in [1, 2] {
+		run_model_sessions("solver_oracle_sealed_relay.vp", sessions, "c1");
+		run_model_sessions("solver_oracle_sealed_relay_guarded.vp", sessions, "c0");
+	}
+}
+
+#[test]
+fn test_solver_oracle_wire_verification_key() {
+	for sessions in [1, 2] {
+		run_model_sessions("solver_oracle_wire_verification_key.vp", sessions, "c1");
+		run_model_sessions(
+			"solver_oracle_wire_verification_key_bound.vp",
+			sessions,
+			"c0",
+		);
 	}
 }
 

@@ -7,8 +7,8 @@ use super::exec::{Context, Execution, Held};
 use super::program::Event;
 use crate::context::Generational;
 use crate::primitive::{
-	PrimitiveSpec, RewriteRule, primitive_check_undoing, primitive_core_reveals_args,
-	primitive_name,
+	PrimitiveSpec, Reveal, RewriteRule, primitive_check_undoing, primitive_core_reveals_args,
+	primitive_get, primitive_name,
 };
 use crate::theory::{can_recompose, can_reconstruct_primitive, obtainable};
 use crate::types::*;
@@ -395,8 +395,7 @@ fn parts(scope: &Scope, v: &Value) -> Vec<Value> {
 	out
 }
 
-fn held_without(scope: &Scope, w: &Value, of: &Value) -> bool {
-	let attacker = scope.attacker;
+fn withholding(attacker: &AttackerState, of: &Value) -> Vec<bool> {
 	let mut dropped = vec![false; attacker.known.len()];
 	if let Some(idx) = attacker.knows(of) {
 		dropped[idx.get()] = true;
@@ -412,7 +411,12 @@ fn held_without(scope: &Scope, w: &Value, of: &Value) -> bool {
 			});
 		}
 	}
-	let keep: Vec<bool> = dropped.iter().map(|d| !d).collect();
+	dropped.iter().map(|d| !d).collect()
+}
+
+fn held_without(scope: &Scope, w: &Value, of: &Value) -> bool {
+	let attacker = scope.attacker;
+	let keep = withholding(attacker, of);
 	let restricted = attacker.retaining(&keep);
 	let restricted = restricted.as_deref().unwrap_or(attacker);
 	restricted.knows(w).is_some()
@@ -534,15 +538,27 @@ fn origin_leaves(scope: &Scope, v: &Value) -> Option<Vec<Value>> {
 		.collect();
 	let without = scope.attacker.retaining(&keep);
 	let without = without.as_deref().unwrap_or(scope.attacker);
+	let capabilities = &scope.km.capabilities;
 	let mut out = Vec::new();
-	let leaves = collect_leaves(
-		v,
-		&scope.km.capabilities,
-		without,
-		&mut Vec::new(),
-		&mut out,
-	)
-	.then_some(out);
+	let leaves = collect_leaves(v, capabilities, without, &mut Vec::new(), &mut out)
+		.then_some(out)
+		.map(|leaves| {
+			let sealed = scope.attacker.retaining(&withholding(scope.attacker, v));
+			let sealed = sealed.as_deref().unwrap_or(scope.attacker);
+			if collect_leaves(v, capabilities, sealed, &mut Vec::new(), &mut Vec::new()) {
+				return leaves;
+			}
+			let Some(inside) = contents(v, capabilities, without) else {
+				return leaves;
+			};
+			if inside
+				.iter()
+				.any(|w| sealed.knows(w).is_some() || obtainable(w, capabilities, sealed))
+			{
+				return leaves;
+			}
+			inside
+		});
 	LEAVES.with(|memo| {
 		memo.borrow_mut()
 			.fresh()
@@ -552,6 +568,29 @@ fn origin_leaves(scope: &Scope, v: &Value) -> Option<Vec<Value>> {
 			.push((v.clone(), leaves.clone()));
 	});
 	leaves
+}
+
+fn contents(
+	v: &Value,
+	capabilities: &CapabilityIndex,
+	attacker: &AttackerState,
+) -> Option<Vec<Value>> {
+	let Value::Primitive(p) = v else {
+		return None;
+	};
+	let rule = primitive_get(p.id).ok()?.decompose.as_ref()?;
+	if rule.output.is_some_and(|output| p.output != output) {
+		return None;
+	}
+	let mut out = Vec::new();
+	for reveal in &rule.reveals {
+		if let Reveal::Argument(at) = *reveal
+			&& let Some(argument) = p.arguments.get(at)
+		{
+			collect_leaves(argument, capabilities, attacker, &mut Vec::new(), &mut out);
+		}
+	}
+	Some(out)
 }
 
 fn collect_leaves(

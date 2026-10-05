@@ -1,0 +1,39 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: u0 at one session and at two.
+//
+// Alice encrypts two fresh nonces under one key and the key leaks, as PACE
+// encrypts its nonce under a password key the attacker may hold. ENC is
+// unauthenticated: decrypting a ciphertext under the wrong key yields a value
+// as plausible as the right one, and re-encrypting it under that key gives the
+// ciphertext back. Holding the key and both ciphertexts tells the attacker
+// nothing that ties either to the key, since nothing inside them is known in
+// advance.
+//
+// The link was reported via the key. The attacker opened each ciphertext,
+// then rebuilt it from the key and the nonce it had just opened, and the
+// rebuild counted as evidence. A value the attacker can rebuild only from its
+// own contents is tied to those contents, not to the key that opened it.
+//
+// unlink_opened_known_content.vp puts a public tag inside each ciphertext, so
+// opening confirms the key, and links.
+attacker[passive]
+
+principal Alice[
+	knows private uofc_k
+	generates uofc_n1, uofc_n2
+	uofc_c1 = ENC(uofc_k, uofc_n1)
+	uofc_c2 = ENC(uofc_k, uofc_n2)
+	leaks uofc_k
+]
+
+Alice -> Bob: uofc_c1, uofc_c2
+
+principal Bob[
+	_ = HASH(uofc_c1, uofc_c2)
+]
+
+queries[
+	unlinkability? uofc_c1, uofc_c2
+]

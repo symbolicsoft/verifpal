@@ -134,7 +134,7 @@ pub(crate) fn propose(
 		};
 		proposals.extend(goals.into_iter().flatten());
 		proposals.extend(deducer.constraint_goals(ctx, km, sym));
-		proposals.extend(oracle_input_goals(km, principal, sym, attacker));
+		proposals.extend(oracle_input_goals(km, principal, sym, attacker, &deducer));
 	}
 
 	let blanket = blanket_substitution(sym);
@@ -243,6 +243,7 @@ fn oracle_input_goals(
 	principal: PrincipalId,
 	sym: &SymbolicState,
 	attacker: &AttackerState,
+	deducer: &Deducer,
 ) -> Vec<Substitution> {
 	let emissions: Vec<&Value> = (0..km.slots.len())
 		.filter(|&e| {
@@ -311,7 +312,7 @@ fn oracle_input_goals(
 				match crate::primitive::rewrite_rule(prim.id) {
 					Some(rule) => {
 						let target = prim.arguments.get(rule.from).and_then(slot_var);
-						deduce::build_rewrite_shapes_with(prim, rule, |_| {
+						deduce::build_rewrite_shapes_leaving_free(prim, rule, |_| {
 							let v = vars::free_var(fresh);
 							fresh += 1;
 							v
@@ -331,10 +332,9 @@ fn oracle_input_goals(
 					None => Vec::new(),
 				};
 			for (shape, target) in shapes {
-				if vars::contains_var(&shape)
-					&& !wanted
-						.iter()
-						.any(|(w, t)| *t == target && w.equivalent(&shape, true))
+				if !wanted
+					.iter()
+					.any(|(w, t)| *t == target && w.equivalent(&shape, true))
 				{
 					wanted.push((shape, target));
 				}
@@ -379,14 +379,29 @@ fn oracle_input_goals(
 	let mut out: Vec<Substitution> = Vec::new();
 	for emission in emissions {
 		for (shape, target) in &wanted {
-			for bound in unifiers(emission, shape, &empty) {
+			let mut bounds: Vec<Substitution> = unifiers(emission, shape, &empty).collect();
+			if bounds.is_empty() {
+				bounds = deducer.invert_into_revealed(emission, shape);
+			}
+			for bound in bounds {
+				let mut local: Substitution = Substitution::default();
+				for &slot in &sym.var_slots {
+					let id = vars::attacker_var_id(slot);
+					if bound.contains_key(&id) {
+						continue;
+					}
+					if bound.values().any(|value| vars::occurs(id, value, &empty)) {
+						local.insert(id, crate::value::value_nil());
+					}
+				}
 				let mut proposal = Substitution::default();
 				for &slot in &sym.var_slots {
 					let id = vars::attacker_var_id(slot);
-					if !bound.contains_key(&id) {
+					if !bound.contains_key(&id) && !local.contains_key(&id) {
 						continue;
 					}
 					let value = vars::apply(&vars::attacker_var(slot, ""), &bound);
+					let value = vars::apply(&value, &local);
 					if vars::as_var(&value) == Some(id) || vars::occurs(id, &value, &empty) {
 						continue;
 					}

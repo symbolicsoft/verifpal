@@ -1,0 +1,79 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0 at one session and at two.
+//
+// solver_oracle_wire_verification_key.vp with Bob signing his own
+// Diffie-Hellman share beside the challenge, and Alice checking the
+// signature against the share she received, as Terminal Authentication
+// binds the terminal's Chip Authentication key. In the relay Bob signs his
+// genuine share while Alice holds the attacker's, so her check fails.
+attacker[active]
+
+principal Ca[
+	knows private cak
+	cap = PUBKEY(cak)
+]
+
+principal Bob[
+	knows private skb
+	pkb = PUBKEY(skb)
+]
+
+Bob -> Ca: [pkb]
+
+principal Ca[
+	certb = SIGN(cak, pkb)
+]
+
+Ca -> Bob: [certb]
+Ca -> Alice: [cap]
+
+principal Alice[
+	knows private a
+	ga = PUBKEY(a)
+]
+
+Alice -> Bob: ga
+
+principal Bob[
+	generates e
+	ge = PUBKEY(e)
+	kb = HASH(DH_KEX(ga, e))
+]
+
+Bob -> Alice: ge
+
+principal Alice[
+	ka = HASH(DH_KEX(ge, a))
+	generates r
+	cr = ENC(ka, r)
+]
+
+Alice -> Bob: cr
+
+principal Bob[
+	rb = DEC(kb, cr)
+	sig = SIGN(skb, CONCAT(rb, ge))
+	cs = ENC(kb, CONCAT(pkb, certb, sig))
+]
+
+Bob -> Alice: cs
+
+principal Alice[
+	pkb_a, certb_a, sig_a = SPLIT(DEC(ka, cs))
+	_ = SIGNVERIF(cap, pkb_a, certb_a)?
+	_ = SIGNVERIF(pkb_a, CONCAT(r, ge), sig_a)?
+	generates secret
+	csec = ENC(ka, secret)
+]
+
+Alice -> Bob: csec
+
+principal Bob[
+	sb = DEC(kb, csec)
+]
+
+queries[
+	confidentiality? secret
+]

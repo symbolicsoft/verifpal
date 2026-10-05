@@ -1,0 +1,31 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: u1 at one session and at two.
+//
+// unlink_opened_fresh_content.vp with a public tag beside each nonce. Opening
+// a ciphertext under the leaked key now reveals the tag, which a wrong key
+// would not, so the key is confirmed and both ciphertexts are linked to it.
+// Content known without the ciphertext is what lets an opened ciphertext
+// count against its key.
+attacker[passive]
+
+principal Alice[
+	knows private uokc_k
+	knows public uokc_tag
+	generates uokc_n1, uokc_n2
+	uokc_c1 = ENC(uokc_k, CONCAT(uokc_tag, uokc_n1))
+	uokc_c2 = ENC(uokc_k, CONCAT(uokc_tag, uokc_n2))
+	leaks uokc_k
+]
+
+Alice -> Bob: uokc_c1, uokc_c2
+
+principal Bob[
+	knows public uokc_tag
+	_ = HASH(uokc_c1, uokc_c2, uokc_tag)
+]
+
+queries[
+	unlinkability? uokc_c1, uokc_c2
+]
