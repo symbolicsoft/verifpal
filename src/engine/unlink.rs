@@ -6,6 +6,7 @@ use std::sync::Arc;
 use super::exec::{Context, Execution, Held};
 use super::program::Event;
 use crate::context::Generational;
+use crate::hashing::TermSet;
 use crate::primitive::{
 	PrimitiveSpec, Reveal, RewriteRule, primitive_check_undoing, primitive_core_reveals_args,
 	primitive_get, primitive_name,
@@ -43,47 +44,80 @@ impl Scope<'_> {
 	}
 }
 
-pub(crate) fn link(
-	cx: &Context,
-	ex: &Execution,
+pub(crate) struct Linker<'a> {
+	cx: &'a Context<'a>,
+	ex: &'a Execution,
+	observed: std::cell::OnceCell<TermSet>,
+	supplied: std::cell::OnceCell<TermSet>,
+}
+
+impl<'a> Linker<'a> {
+	pub(crate) fn new(cx: &'a Context<'a>, ex: &'a Execution) -> Self {
+		Linker {
+			cx,
+			ex,
+			observed: std::cell::OnceCell::new(),
+			supplied: std::cell::OnceCell::new(),
+		}
+	}
+
+	pub(crate) fn link(&self, pair: [(usize, &Held); 2]) -> Option<Link> {
+		let scope = Scope {
+			km: self.cx.km,
+			attacker: &self.ex.knowledge.state,
+		};
+		link(
+			&scope,
+			|| {
+				self.observed
+					.get_or_init(|| observed(&scope, self.cx, self.ex))
+			},
+			|| self.supplied.get_or_init(|| supplied(self.ex)),
+			pair,
+		)
+	}
+}
+
+pub(crate) fn honest_reduct(km: &ProtocolTrace, slot: usize) -> Value {
+	crate::theory::reduce_once(&crate::value::resolve_trace_constant(
+		&km.slots[slot].constant,
+		km,
+	))
+}
+
+fn link<'s>(
+	scope: &Scope,
+	observed: impl FnOnce() -> &'s TermSet,
+	supplied: impl FnOnce() -> &'s TermSet,
 	[(a, ha), (b, hb)]: [(usize, &Held); 2],
 ) -> Option<Link> {
 	if ha.authored || hb.authored {
 		return None;
 	}
-	let km = cx.km;
-	let scope = Scope {
-		km,
-		attacker: &ex.knowledge.state,
-	};
+	let km = scope.km;
 	let (av, bv) = (&ha.value, &hb.value);
-	let observed = observed(&scope, cx, ex);
-	if !observable(&scope, &observed, av) || !observable(&scope, &observed, bv) {
+	let observed = observed();
+	if !observable(scope, observed, av) || !observable(scope, observed, bv) {
 		return None;
 	}
-	let honest = |slot: usize| {
-		crate::theory::reduce_once(&crate::value::resolve_trace_constant(
-			&km.slots[slot].constant,
-			km,
-		))
-	};
-	let same = honest(a).equivalent(&honest(b), true);
-	let shared = shared_secret_leaves(&scope, a, b);
+	let same = honest_reduct(km, a).equivalent(&honest_reduct(km, b), true);
+	let shared = shared_secret_leaves(scope, a, b);
 	if !same && shared.is_empty() {
 		return None;
 	}
+	let supplied = supplied();
 	let valid = |w: &Value, kind: LinkKind| {
 		scope.secret(w)
-			&& !supplied(ex, w)
+			&& !supplied.contains(w)
 			&& (matches!(kind, LinkKind::ObservedEquality)
 				|| w.constant_leaves().any(|c| shared.contains(&c.id)))
 	};
-	let (ta, tb) = (ties(&scope, av, None), ties(&scope, bv, None));
-	if let Some(link) = strongest(&scope, [av, bv], [&ta, &tb], same, &valid) {
+	let (ta, tb) = (ties(scope, av, None), ties(scope, bv, None));
+	if let Some(link) = strongest(scope, [av, bv], [&ta, &tb], same, &valid) {
 		return Some(link);
 	}
-	let (pa, pb) = (with_parts(&scope, av, ta), with_parts(&scope, bv, tb));
-	strongest(&scope, [av, bv], [&pa, &pb], same, &valid)
+	let (pa, pb) = (with_parts(scope, av, ta), with_parts(scope, bv, tb));
+	strongest(scope, [av, bv], [&pa, &pb], same, &valid)
 }
 
 #[derive(Clone, Copy)]
@@ -266,12 +300,14 @@ pub(crate) fn depends_on_secret(v: &Value, km: &ProtocolTrace) -> bool {
 }
 
 fn secret_constant(c: &Constant, km: &ProtocolTrace) -> bool {
-	c.fresh
-		|| c.qualifier == Some(Qualifier::Private)
-		|| km.index_of(c).is_some_and(|i| {
-			let declared = &km.slots[i].constant;
-			declared.fresh || declared.qualifier == Some(Qualifier::Private)
-		})
+	c.fresh || c.qualifier == Some(Qualifier::Private) || declared_secret(c, km)
+}
+
+pub(crate) fn declared_secret(c: &Constant, km: &ProtocolTrace) -> bool {
+	km.index_of(c).is_some_and(|i| {
+		let declared = &km.slots[i].constant;
+		declared.fresh || declared.qualifier == Some(Qualifier::Private)
+	})
 }
 
 fn public(v: &Value, km: &ProtocolTrace) -> bool {
@@ -280,7 +316,7 @@ fn public(v: &Value, km: &ProtocolTrace) -> bool {
 		.is_some_and(|i| km.slots[i].constant.qualifier == Some(Qualifier::Public)))
 }
 
-fn observed(scope: &Scope, cx: &Context, ex: &Execution) -> crate::hashing::TermSet {
+fn observed(scope: &Scope, cx: &Context, ex: &Execution) -> TermSet {
 	let mut pending: Vec<Value> = ex.sent.iter().flatten().flatten().cloned().collect();
 	for &(run, step, _) in &ex.order {
 		if let Event::Leak(slot) = cx.program.runs[run].steps[step].event
@@ -290,12 +326,11 @@ fn observed(scope: &Scope, cx: &Context, ex: &Execution) -> crate::hashing::Term
 		}
 	}
 	let attacker = scope.attacker;
-	let mut seen = crate::hashing::TermSet::default();
+	let mut seen = TermSet::default();
 	while let Some(value) = pending.pop() {
-		if seen.contains(&value) {
+		if !seen.insert(value.clone()) {
 			continue;
 		}
-		seen.insert(value.clone());
 		let Value::Primitive(p) = &value else {
 			continue;
 		};
@@ -319,7 +354,7 @@ fn observed(scope: &Scope, cx: &Context, ex: &Execution) -> crate::hashing::Term
 	seen
 }
 
-fn observable(scope: &Scope, observed: &crate::hashing::TermSet, v: &Value) -> bool {
+fn observable(scope: &Scope, observed: &TermSet, v: &Value) -> bool {
 	if scope.attacker.knows(v).is_none() {
 		return false;
 	}
@@ -369,22 +404,23 @@ fn shared_secret_leaves(scope: &Scope, a: usize, b: usize) -> IdSet<ValueId> {
 		.collect()
 }
 
-fn supplied(ex: &Execution, v: &Value) -> bool {
+fn supplied(ex: &Execution) -> TermSet {
 	ex.runs
 		.iter()
 		.flat_map(|run| run.env.iter().flatten())
-		.any(|h| h.authored && h.pre.equivalent(v, true))
+		.filter_map(|held| held.installed.as_ref())
+		.flat_map(|components| components.iter().cloned())
+		.collect()
 }
 
 fn parts(scope: &Scope, v: &Value) -> Vec<Value> {
 	let mut out = origin_leaves(scope, v).unwrap_or_default();
 	let mut pending = vec![v.clone()];
-	let mut seen = crate::hashing::TermSet::default();
+	let mut seen = TermSet::default();
 	while let Some(value) = pending.pop() {
-		if seen.contains(&value) {
+		if !seen.insert(value.clone()) {
 			continue;
 		}
-		seen.insert(value.clone());
 		if let Value::Primitive(p) = &value
 			&& primitive_core_reveals_args(p.id)
 		{
@@ -418,7 +454,7 @@ fn held_without(scope: &Scope, w: &Value, of: &Value) -> bool {
 	let attacker = scope.attacker;
 	let keep = withholding(attacker, of);
 	let restricted = attacker.retaining(&keep);
-	let restricted = restricted.as_deref().unwrap_or(attacker);
+	let restricted: &AttackerState = &restricted;
 	restricted.knows(w).is_some()
 		|| obtainable(w, &scope.km.capabilities, restricted)
 		|| restricted.known.iter().any(|known| match known {
@@ -503,9 +539,7 @@ fn runnable(scope: &Scope, check: &PrimitiveSpec, rule: &RewriteRule, p: &Primit
 	})
 }
 
-type Leaves = Generational<
-	crate::context::Recent<crate::context::KnowledgeKey, u64, Vec<(Value, Option<Vec<Value>>)>>,
->;
+type Leaves = Generational<crate::context::Recent<u64, u64, Vec<(Value, Option<Vec<Value>>)>>>;
 
 thread_local! {
 	static LEAVES: std::cell::RefCell<Leaves> =
@@ -514,7 +548,7 @@ thread_local! {
 
 fn origin_leaves(scope: &Scope, v: &Value) -> Option<Vec<Value>> {
 	let key = v.hash_value();
-	let group = crate::context::KnowledgeKey::of(scope.attacker);
+	let group = scope.attacker.chain;
 	let remembered = LEAVES.with(|memo| {
 		memo.borrow_mut()
 			.fresh()
@@ -537,14 +571,14 @@ fn origin_leaves(scope: &Scope, v: &Value) -> Option<Vec<Value>> {
 		.map(|known| known.hash_value() != key || !known.equivalent(v, true))
 		.collect();
 	let without = scope.attacker.retaining(&keep);
-	let without = without.as_deref().unwrap_or(scope.attacker);
+	let without: &AttackerState = &without;
 	let capabilities = &scope.km.capabilities;
 	let mut out = Vec::new();
 	let leaves = collect_leaves(v, capabilities, without, &mut Vec::new(), &mut out)
 		.then_some(out)
 		.map(|leaves| {
 			let sealed = scope.attacker.retaining(&withholding(scope.attacker, v));
-			let sealed = sealed.as_deref().unwrap_or(scope.attacker);
+			let sealed: &AttackerState = &sealed;
 			if collect_leaves(v, capabilities, sealed, &mut Vec::new(), &mut Vec::new()) {
 				return leaves;
 			}
@@ -634,6 +668,54 @@ mod tests {
 	use super::*;
 	use crate::engine::exec::{Installs, execute};
 	use crate::engine::program::Program;
+	use crate::primitive::PRIM_HASH;
+
+	#[test]
+	fn supplied_components_use_the_knowledge_at_the_receive() {
+		let _generation = crate::context::GenerationGuard::enter();
+		let model = crate::parser::parse_string(
+			"supplied.vp",
+			include_str!("../../examples/test/unlink_supplied_wrapper_late_key.vp"),
+		)
+		.expect("parses");
+		let km = crate::sanity::sanity(&model).expect("sane");
+		let program = Program::of(&model, &km);
+		let cx = Context::new(&program, &km);
+		let bob = program.runs.iter().position(|r| r.name == "Bob").unwrap();
+		let slot = |name: &str| {
+			km.slots
+				.iter()
+				.position(|s| s.constant.name.as_ref() == name)
+				.unwrap()
+		};
+		let honest = execute(&cx, &vec![]);
+		let y = honest.runs[bob].held(slot("y")).unwrap().value.clone();
+		let s = crate::testutil::trace_constant(&km, "s");
+		let wrap = |v: Value| Value::primitive(PRIM_HASH, vec![v, crate::value::value_nil()], 0);
+		let inner = wrap(y.clone());
+		for value in [y.clone(), wrap(inner.clone())] {
+			let ex = execute(&cx, &vec![(bob, slot("x"), value.clone())]);
+			assert!(ex.runs[bob].held(slot("x")).unwrap().installed.is_some());
+			assert!(ex.knowledge.state.knows(&s).is_some());
+			let supplied = supplied(&ex);
+			assert!(supplied.contains(&value));
+			assert!(supplied.contains(&y));
+			assert!(!supplied.contains(&s));
+			assert_eq!(supplied.contains(&inner), !value.equivalent(&y, true));
+			let (_, _, known) = ex
+				.order
+				.iter()
+				.find(|&&(run, step, _)| {
+					run == bob && matches!(program.runs[run].steps[step].event, Event::Recv(_))
+				})
+				.unwrap();
+			assert!(
+				ex.knowledge.state.known[..*known]
+					.iter()
+					.all(|v| !v.equivalent(&s, true) && !v.equivalent(&inner, true))
+			);
+		}
+	}
 
 	fn observed_in(src: &str, install: Option<(&str, &str)>, phase: i32, target: &str) -> bool {
 		let _generation = crate::context::GenerationGuard::enter();

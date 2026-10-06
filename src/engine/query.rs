@@ -3,7 +3,7 @@
 
 use super::exec::{Context, Execution, Held, RunState};
 use super::program::Event;
-use super::unlink::{Link, link};
+use super::unlink::{Link, Linker};
 use crate::resolution::mentions_across_principals;
 use crate::theory::{can_rewrite, obtainable, reduce_once};
 use crate::types::*;
@@ -43,8 +43,6 @@ pub(crate) enum Violation {
 		repeated: Option<usize>,
 	},
 	Linked {
-		a: Constant,
-		b: Constant,
 		link: Link,
 		resolved: Vec<(Constant, Value)>,
 	},
@@ -69,7 +67,21 @@ pub(crate) struct Judge<'a, 'b> {
 	pub(crate) claims: &'a dyn Fn(PrincipalId) -> Option<i32>,
 }
 
-impl Judge<'_, '_> {
+impl<'a, 'b> Judge<'a, 'b> {
+	pub(crate) fn at(
+		cx: &'a Context<'b>,
+		whole: &'a Execution,
+		phase: i32,
+		claims: &'a dyn Fn(PrincipalId) -> Option<i32>,
+	) -> Self {
+		Judge {
+			cx,
+			ex: whole.at(phase),
+			whole,
+			claims,
+		}
+	}
+
 	fn km(&self) -> &ProtocolTrace {
 		self.cx.km
 	}
@@ -143,7 +155,7 @@ impl Judge<'_, '_> {
 		})
 	}
 
-	fn uses(&self, now: &RunState, run: usize, target: ValueId) -> Option<Vec<usize>> {
+	fn first_use(&self, now: &RunState, run: usize, target: ValueId) -> Option<usize> {
 		let km = self.km();
 		let program = &self.cx.program.runs[run];
 		let sites = |mentioned: &dyn Fn(&Value) -> bool| -> Vec<(usize, usize)> {
@@ -167,7 +179,7 @@ impl Judge<'_, '_> {
 			mentioning = sites(&|v| mentions_across_principals(v, km, program.id, target));
 		}
 		let eventually = &self.whole.runs[run];
-		let mut uses = Vec::new();
+		let mut first = None;
 		for (i, slot) in mentioning {
 			if !now.reached(i) {
 				if eventually.reached(i) {
@@ -176,10 +188,10 @@ impl Judge<'_, '_> {
 				return None;
 			}
 			if now.halted != Some(slot) {
-				uses.push(slot);
+				first.get_or_insert(slot);
 			}
 		}
-		Some(uses)
+		first
 	}
 
 	fn authentication(&self, q: &Query) -> Option<Violation> {
@@ -191,7 +203,7 @@ impl Judge<'_, '_> {
 		let state = self.state(b)?;
 		let h = state.held(slot)?;
 		let sender = h.sender?;
-		let used = *self.uses(state, b, c.id)?.first()?;
+		let used = self.first_use(state, b, c.id)?;
 		if !h.authored && program.runs[sender].id == q.message.sender {
 			return None;
 		}
@@ -231,18 +243,8 @@ impl Judge<'_, '_> {
 		let km = self.km();
 		let program = self.cx.program;
 		let sends = program
-			.deliveries
-			.iter()
-			.zip(&self.ex.sent)
-			.enumerate()
-			.filter_map(|(d, (delivery, sent))| Some((d, delivery, sent.as_ref()?)))
-			.flat_map(|(d, delivery, sent)| {
-				delivery
-					.slots
-					.iter()
-					.zip(sent)
-					.map(move |(&(s, _), v)| (d, delivery.sender, s, v))
-			})
+			.sends(&self.ex.sent)
+			.map(|(d, delivery, s, v)| (d, delivery.sender, s, v))
 			.filter(|&(_, _, s, v)| {
 				siblings.contains(&s) && reduce_once(v).equivalent(reduct, true)
 			});
@@ -301,8 +303,8 @@ impl Judge<'_, '_> {
 				self.ex.runs[r].held(s).is_some_and(|held| {
 					held.sender.is_some() && reduce_once(&held.value).equivalent(reduct, true)
 				}) && self
-					.uses(&self.ex.runs[r], r, km.slots[s].constant.id)
-					.is_some_and(|uses| !uses.is_empty())
+					.first_use(&self.ex.runs[r], r, km.slots[s].constant.id)
+					.is_some()
 			})
 			.map(|(r, _)| r)
 	}
@@ -328,7 +330,7 @@ impl Judge<'_, '_> {
 						.find(|&other| other != r)?,
 				),
 			};
-			let used = *self.uses(state, r, c.id)?.first()?;
+			let used = self.first_use(state, r, c.id)?;
 			Some(Violation::Stale {
 				run: r,
 				slot,
@@ -369,6 +371,7 @@ impl Judge<'_, '_> {
 
 	fn unlinkability(&self, q: &Query) -> Option<Violation> {
 		let km = self.km();
+		let linker = Linker::new(self.cx, self.ex);
 		for r in self.claimed_runs() {
 			let claimed: Vec<(&Constant, usize, &Held)> = q
 				.constants
@@ -380,10 +383,8 @@ impl Judge<'_, '_> {
 				.collect();
 			for (i, &(a, sa, ha)) in claimed.iter().enumerate() {
 				for &(b, sb, hb) in &claimed[i + 1..] {
-					if let Some(link) = link(self.cx, self.ex, [(sa, ha), (sb, hb)]) {
+					if let Some(link) = linker.link([(sa, ha), (sb, hb)]) {
 						return Some(Violation::Linked {
-							a: a.clone(),
-							b: b.clone(),
 							link,
 							resolved: vec![
 								(a.clone(), ha.value.clone()),
@@ -402,6 +403,7 @@ fn check_failed(v: &Value) -> bool {
 	match v {
 		Value::Primitive(p) => p.instance_check && !can_rewrite(p).0,
 		Value::Constant(_) => false,
+		Value::Variable(_) => true,
 	}
 }
 

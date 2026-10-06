@@ -20,7 +20,7 @@ pub(crate) struct Narrator<'a, 'b> {
 	cutoff: usize,
 	gated: Vec<(usize, usize)>,
 	pub(crate) steps: Vec<TraceStep>,
-	explained: Vec<Value>,
+	explained: crate::hashing::TermSet,
 }
 
 struct Names {
@@ -100,17 +100,12 @@ impl Names {
 	}
 
 	fn lookup(&self, v: &Value, exclude: &[&str]) -> Option<&str> {
-		let candidates: Vec<&str> = self
-			.entries
+		self.entries
 			.get(&v.hash_value())?
 			.iter()
 			.filter(|(known, name)| !excluded(exclude, name) && known.equivalent(v, true))
 			.map(|(_, name)| name.as_str())
-			.collect();
-		candidates
-			.iter()
-			.min_by_key(|name| (self.shaped(name), copy_base_name(name) != **name))
-			.copied()
+			.min_by_key(|name| (self.shaped(name), copy_base_name(name) != *name))
 	}
 }
 
@@ -134,7 +129,7 @@ impl<'a, 'b> Narrator<'a, 'b> {
 			cutoff: ex.order.len(),
 			gated: Vec::new(),
 			steps: Vec::new(),
-			explained: Vec::new(),
+			explained: crate::hashing::TermSet::default(),
 		}
 	}
 
@@ -180,7 +175,7 @@ impl<'a, 'b> Narrator<'a, 'b> {
 		}
 		match v {
 			Value::Primitive(p) => self.oriented(p).is_some(),
-			Value::Constant(_) => false,
+			Value::Constant(_) | Value::Variable(_) => false,
 		}
 	}
 
@@ -219,7 +214,7 @@ impl<'a, 'b> Narrator<'a, 'b> {
 
 	fn spell(&self, names: &Names, v: &Value, exclude: &[&str]) -> String {
 		match v {
-			Value::Constant(c) => c.to_string(),
+			Value::Constant(_) | Value::Variable(_) => v.to_string(),
 			Value::Primitive(p) => self.render(names, p, exclude),
 		}
 	}
@@ -287,25 +282,19 @@ impl<'a, 'b> Narrator<'a, 'b> {
 		self.steps.push(step);
 	}
 
-	fn done(&mut self, v: &Value) -> bool {
-		if self.explained.iter().any(|seen| seen.equivalent(v, true)) {
-			return true;
-		}
-		self.explained.push(v.clone());
-		false
-	}
-
 	pub(crate) fn explain(&mut self, v: &Value, at: usize) {
-		if self.done(v) {
-			return;
-		}
 		let outer = std::mem::replace(&mut self.cutoff, at);
-		self.narrate(v);
+		self.visit(v);
 		self.cutoff = outer;
 	}
 
+	fn visit(&mut self, v: &Value) {
+		if self.explained.insert(v.clone()) {
+			self.narrate(v);
+		}
+	}
+
 	fn narrate(&mut self, v: &Value) {
-		let at = self.cutoff;
 		let len = self.prefix();
 		let knowledge = &self.ex.knowledge;
 		let known = knowledge.knows(v).filter(|&i| i < len);
@@ -314,7 +303,7 @@ impl<'a, 'b> Narrator<'a, 'b> {
 			&& let Some(built) = self.oriented(p)
 		{
 			for argument in &built.arguments {
-				self.explain(argument, at);
+				self.visit(argument);
 			}
 			self.constructs(v);
 			return;
@@ -322,13 +311,13 @@ impl<'a, 'b> Narrator<'a, 'b> {
 		let Some(i) = known else {
 			let keep: Vec<bool> = (0..knowledge.len()).map(|k| k < len).collect();
 			let restricted = knowledge.state.retaining(&keep);
-			let state = restricted.as_deref().unwrap_or(&knowledge.state);
+			let state: &AttackerState = &restricted;
 			if let Value::Primitive(p) = v
 				&& let Some(built) =
 					crate::theory::can_reconstruct_primitive(p, &self.cx.km.capabilities, state)
 			{
 				for ingredient in built.ingredients() {
-					self.explain(ingredient, at);
+					self.visit(ingredient);
 				}
 				self.derives(&super::knowledge::reconstruction(built), v);
 				return;
@@ -336,7 +325,7 @@ impl<'a, 'b> Narrator<'a, 'b> {
 			let mut inputs = crate::theory::KnowledgeInputs::new(&self.cx.km.capabilities, state);
 			for idx in inputs.of_value(v).unwrap_or_default() {
 				let ingredient = state.known[idx.get()].clone();
-				self.explain(&ingredient, at);
+				self.visit(&ingredient);
 			}
 			if matches!(v, Value::Primitive(_)) {
 				self.constructs(v);
@@ -373,7 +362,7 @@ impl<'a, 'b> Narrator<'a, 'b> {
 			Origin::Derived(record) => {
 				for ingredient in record.ingredients() {
 					let ingredient = ingredient.clone();
-					self.explain(&ingredient, at);
+					self.visit(&ingredient);
 				}
 				self.derives(&record, v);
 			}
@@ -412,7 +401,7 @@ impl<'a, 'b> Narrator<'a, 'b> {
 			DerivationRecord::Rewritten { of, using, .. } => {
 				let name = match of {
 					Value::Primitive(p) => primitive_name(p.id),
-					Value::Constant(_) => "a rewrite",
+					Value::Constant(_) | Value::Variable(_) => "a rewrite",
 				};
 				format!(
 					"Attacker applies {name} to {}, obtaining {}.",
@@ -511,28 +500,20 @@ impl<'a, 'b> Narrator<'a, 'b> {
 			})
 		};
 		program
-			.deliveries
-			.iter()
-			.enumerate()
-			.find_map(|(d, delivery)| {
-				if delivery.recipient == run || !self.sent_before(d, at) {
-					return None;
+			.sends(&self.ex.sent)
+			.filter(|&(d, delivery, _, v)| {
+				delivery.recipient != run && self.sent_before(d, at) && v.equivalent(value, true)
+			})
+			.find_map(|(_, delivery, s, _)| {
+				if s == slot {
+					copy_of_sender(delivery.sender).then_some("run")
+				} else if within(&km.session_siblings, s) {
+					Some("session")
+				} else if within(&km.copy_siblings, s) {
+					Some("scenario")
+				} else {
+					None
 				}
-				let sent = self.ex.sent[d].as_ref()?;
-				delivery.slots.iter().zip(sent).find_map(|(&(s, _), v)| {
-					if !v.equivalent(value, true) {
-						return None;
-					}
-					if s == slot {
-						copy_of_sender(delivery.sender).then_some("run")
-					} else if within(&km.session_siblings, s) {
-						Some("session")
-					} else if within(&km.copy_siblings, s) {
-						Some("scenario")
-					} else {
-						None
-					}
-				})
 			})
 	}
 
@@ -575,7 +556,7 @@ impl<'a, 'b> Narrator<'a, 'b> {
 				let Some(h) = self.ex.runs[run].held(slot) else {
 					continue;
 				};
-				if !h.installed {
+				if h.installed.is_none() {
 					continue;
 				}
 				let Some(axis) = self.replayed_from(run, slot, &h.value) else {
@@ -584,7 +565,7 @@ impl<'a, 'b> Narrator<'a, 'b> {
 				let value = h.value.clone();
 				let name = km.slots[slot].constant.to_string();
 				let shown = self.spelled(&value, &[&name]);
-				self.done(&value);
+				self.explained.insert(value.clone());
 				replayed.push(slot);
 				self.say_routed(
 					(delivery.sender, delivery.recipient),
@@ -604,7 +585,7 @@ impl<'a, 'b> Narrator<'a, 'b> {
 				let Some(h) = self.ex.runs[run].held(slot) else {
 					continue;
 				};
-				if !h.installed || replayed.contains(&slot) {
+				if h.installed.is_none() || replayed.contains(&slot) {
 					continue;
 				}
 				let value = h.value.clone();
@@ -685,7 +666,7 @@ impl<'a, 'b> Narrator<'a, 'b> {
 	pub(crate) fn public(&mut self, v: &Value) {
 		if let Some(i) = self.ex.knowledge.knows(v)
 			&& matches!(self.ex.knowledge.origin(i), Origin::Initial)
-			&& !self.done(v)
+			&& self.explained.insert(v.clone())
 		{
 			let shown = self.term(v, &[]);
 			self.say(format!("Attacker knows {shown}: it is public."));
@@ -792,7 +773,7 @@ impl<'a, 'b> Narrator<'a, 'b> {
 			.env
 			.iter()
 			.enumerate()
-			.filter(|(_, held)| held.as_ref().is_some_and(|h| h.installed))
+			.filter(|(_, held)| held.as_ref().is_some_and(|h| h.installed.is_some()))
 			.map(|(s, _)| self.cx.km.slots[s].constant.to_string())
 			.chain(std::iter::once(self.cx.km.slots[slot].constant.to_string()))
 			.collect();

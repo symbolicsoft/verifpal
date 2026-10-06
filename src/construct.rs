@@ -167,6 +167,7 @@ fn collect_mentions(
 	out: &mut IdSet<ValueId>,
 ) {
 	match value {
+		Value::Variable(_) => {}
 		Value::Constant(c) => out.extend(mentions_of_constant(c, trace, memo).iter().copied()),
 		Value::Primitive(p) => {
 			for argument in &p.arguments {
@@ -189,6 +190,7 @@ fn mentions_of_constant(
 	memo.insert(c.id, Arc::new(out.clone()));
 	if let Some(idx) = trace.index_of(c) {
 		match &trace.slots[idx].initial_value {
+			Value::Variable(_) => {}
 			Value::Constant(resolved) => {
 				out.insert(resolved.id);
 			}

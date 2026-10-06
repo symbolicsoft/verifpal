@@ -1,96 +1,11 @@
 /* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
  * SPDX-License-Identifier: GPL-3.0-only */
 
-use std::cell::RefCell;
-use std::collections::VecDeque;
-use std::hash::Hasher;
 use std::sync::Arc;
 
 use crate::types::*;
 
 type TraceMemo = IdMap<usize, Option<Value>>;
-
-#[derive(Default)]
-struct ResolvedTerms {
-	entries: IdMap<u64, Vec<Arc<Primitive>>>,
-	order: VecDeque<(u64, usize)>,
-}
-
-thread_local! {
-	static RESOLVED: RefCell<crate::context::Generational<ResolvedTerms>> = RefCell::new(crate::context::Generational::default());
-}
-
-fn same_resolved_argument(left: &Value, right: &Value) -> bool {
-	match (left, right) {
-		(Value::Primitive(left), Value::Primitive(right)) => Arc::ptr_eq(left, right),
-		(Value::Constant(left), Value::Constant(right)) => {
-			left.id == right.id
-				&& left.name == right.name
-				&& left.guard == right.guard
-				&& left.fresh == right.fresh
-				&& left.leaked == right.leaked
-				&& left.declaration == right.declaration
-				&& left.qualifier == right.qualifier
-		}
-		_ => false,
-	}
-}
-
-fn resolved_primitive(mapped: Primitive) -> Value {
-	let mut hash = IdHasher::default();
-	hash.write_u8(mapped.id);
-	hash.write_usize(mapped.output);
-	hash.write_usize(mapped.threshold);
-	hash.write_u32(mapped.instance);
-	hash.write_u8(u8::from(mapped.instance_check));
-	for argument in &mapped.arguments {
-		match argument {
-			Value::Constant(c) => {
-				hash.write_u8(0);
-				hash.write_u32(c.id);
-			}
-			Value::Primitive(p) => {
-				hash.write_u8(1);
-				hash.write_usize(Arc::as_ptr(p) as usize);
-			}
-		}
-	}
-	let key = hash.finish();
-	RESOLVED.with(|cell| {
-		let mut cache = cell.borrow_mut();
-		let cache = cache.fresh();
-		let bucket = cache.entries.entry(key).or_default();
-		if let Some(entry) = bucket.iter().find(|entry| {
-			entry.id == mapped.id
-				&& entry.output == mapped.output
-				&& entry.threshold == mapped.threshold
-				&& entry.instance == mapped.instance
-				&& entry.instance_check == mapped.instance_check
-				&& entry.capabilities == mapped.capabilities
-				&& entry.arguments.len() == mapped.arguments.len()
-				&& entry
-					.arguments
-					.iter()
-					.zip(&mapped.arguments)
-					.all(|(left, right)| same_resolved_argument(left, right))
-		}) {
-			return Value::Primitive(entry.clone());
-		}
-		let value = Arc::new(mapped);
-		bucket.push(value.clone());
-		cache.order.push_back((key, Arc::as_ptr(&value) as usize));
-		if cache.order.len() > 8192
-			&& let Some((hash, pointer)) = cache.order.pop_front()
-		{
-			let bucket = cache.entries.get_mut(&hash).unwrap();
-			bucket.retain(|entry| Arc::as_ptr(entry) as usize != pointer);
-			if bucket.is_empty() {
-				cache.entries.remove(&hash);
-			}
-		}
-		Value::Primitive(value)
-	})
-}
 
 pub(crate) fn resolve_trace_constant(c: &Constant, trace: &ProtocolTrace) -> Value {
 	let value = Value::Constant(c.clone());
@@ -115,6 +30,7 @@ fn resolve_trace_value(
 	}
 	let resolved = &trace.slots[idx].initial_value;
 	let out = match resolved {
+		Value::Variable(_) => Some(resolved.clone()),
 		Value::Constant(rc) => (rc.id != c.id).then(|| resolved.clone()),
 		Value::Primitive(_) => {
 			Some(resolve_trace_primitive(resolved, trace, memo).unwrap_or_else(|| resolved.clone()))
@@ -133,7 +49,23 @@ fn resolve_trace_primitive(
 		return None;
 	};
 	prim.map_arguments(|arg| resolve_trace_value(arg, trace, memo))
-		.map(resolved_primitive)
+		.map(|mapped| crate::hashing::hashcons(&Value::Primitive(Arc::new(mapped))))
+}
+
+impl ProtocolTrace {
+	pub(crate) fn session_sibling_values(&self, c: &Constant) -> Vec<Value> {
+		let Some(group) = self.session_siblings.get(&c.id) else {
+			return Vec::new();
+		};
+		group
+			.iter()
+			.filter(|&&sid| sid != c.id)
+			.filter_map(|&sid| {
+				let &slot = self.index.get(&sid)?;
+				Some(resolve_trace_constant(&self.slots[slot].constant, self))
+			})
+			.collect()
+	}
 }
 
 pub(crate) fn mentions_across_principals(
@@ -146,6 +78,7 @@ pub(crate) fn mentions_across_principals(
 	let mut seen = IdSet::default();
 	while let Some((value, owner)) = pending.pop() {
 		match value {
+			Value::Variable(_) => {}
 			Value::Constant(c) => {
 				if c.id == target {
 					if trace.index_of(c).is_some_and(|idx| {
@@ -215,6 +148,10 @@ mod tests {
 		assert!(!first.equivalent(&changed, true));
 	}
 
+	fn resolved_primitive(mapped: Primitive) -> Value {
+		crate::hashing::hashcons(&Value::Primitive(Arc::new(mapped)))
+	}
+
 	#[test]
 	fn resolved_terms_preserve_annotations_checks_and_constant_metadata() {
 		let input = make_constant("resolution_metadata_input");
@@ -272,18 +209,6 @@ mod tests {
 				.unwrap()
 				.fresh
 		);
-	}
-
-	#[test]
-	fn evicting_resolved_terms_only_recomputes_the_same_value() {
-		let input = make_constant("resolution_eviction_input");
-		let source = Arc::new(Primitive::new(crate::primitive::PRIM_HASH, vec![input], 0));
-		let output = make_constant("resolution_eviction_output");
-		let before = resolved_primitive(source.with_arguments(vec![output.clone()]));
-		RESOLVED.with(|cell| *cell.borrow_mut().fresh() = ResolvedTerms::default());
-		let after = resolved_primitive(source.with_arguments(vec![output]));
-		assert!(!before.same_term(&after));
-		assert!(crate::theory::structurally_identical(&before, &after));
 	}
 
 	#[test]

@@ -1,0 +1,29 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: u0 at one and two sessions. Replacing x with carrier makes
+// both tokens depend on y, but the attacker chose that known ciphertext as
+// an ingredient of its replacement. A wrapper cannot turn a supplied
+// witness into evidence of the original ciphertexts' shared secret key.
+
+attacker[active]
+principal Alice[
+	knows private s
+	knows public c1, c2
+	generates m1, m2
+	x = ENC(s, m1)
+	y = ENC(s, m2)
+	carrier = HASH(y, c2)
+]
+Alice -> Bob: x, y, [carrier]
+principal Bob[
+	a = HASH(x, c1)
+	b = HASH(y, c2)
+]
+Bob -> Dave: a, b
+principal Dave[
+	_ = HASH(a, b)
+]
+queries[
+	unlinkability? a, b
+]

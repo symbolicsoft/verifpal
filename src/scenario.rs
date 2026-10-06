@@ -292,7 +292,7 @@ impl Corruption {
 			Value::Constant(c) if self.keyed.contains(&c.id) => {
 				self.attacker.compromised.get(&c.id).copied()
 			}
-			Value::Constant(_) => None,
+			Value::Constant(_) | Value::Variable(_) => None,
 			Value::Primitive(p) => {
 				let secret = crate::primitive::secret_positions(p.id);
 				p.arguments
@@ -517,7 +517,7 @@ fn key_material_constants(m: &Model) -> IdSet<ValueId> {
 						out.insert(c.id);
 					}
 					Some(Value::Primitive(_)) => out.extend(declared_ids(expr)),
-					None => {}
+					None | Some(Value::Variable(_)) => {}
 				}
 			}
 		}
@@ -652,6 +652,7 @@ impl Disclosure {
 		};
 		while let Some((value, at)) = pending.pop() {
 			match &value {
+				Value::Variable(_) => {}
 				Value::Constant(c) => {
 					if expose(c.id, at, &mut seen) {
 						pending.extend(self.assignments.get(&c.id).map(|v| (v.clone(), at)));

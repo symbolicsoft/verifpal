@@ -152,6 +152,11 @@ pub(crate) fn sanity_assignment_constants(
 ) -> VResult<Vec<Constant>> {
 	let mut constants: Vec<Constant> = existing.to_vec();
 	match right {
+		Value::Variable(_) => {
+			return Err(VerifpalError::sanity(
+				"A solver variable cannot occur in a model".into(),
+			));
+		}
 		Value::Constant(c) => {
 			if !constants.iter().any(|existing| c.equivalent(existing)) {
 				constants.push(c.clone());

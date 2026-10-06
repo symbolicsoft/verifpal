@@ -8,7 +8,7 @@ use crate::types::*;
 use crate::value::{resolve_trace_constant, resolve_trace_term};
 
 thread_local! {
-	static HONEST_REDUCTS: std::cell::RefCell<crate::context::Generational<IdMap<(usize, ValueId), Value>>> =
+	static HONEST_REDUCTS: std::cell::RefCell<crate::context::Generational<IdMap<usize, Value>>> =
 		std::cell::RefCell::new(crate::context::Generational::default());
 }
 
@@ -47,7 +47,7 @@ impl Controllable {
 
 pub(crate) struct TermBound {
 	max_depth: usize,
-	deep: std::sync::OnceLock<Deep>,
+	deep: Deep,
 }
 
 struct Deep {
@@ -66,21 +66,15 @@ impl TermBound {
 			.map(|slot| term_depth(&resolve_trace_constant(&slot.constant, km)))
 			.max()
 			.unwrap_or(0);
+		let mut protocol = crate::hashing::TermSet::default();
+		for slot in &km.slots {
+			let term = resolve_trace_constant(&slot.constant, km);
+			protocol.extend(crate::value::subterms(&term).cloned());
+			protocol.extend(crate::value::subterms(&reduce_once(&term)).cloned());
+		}
 		TermBound {
 			max_depth,
-			deep: std::sync::OnceLock::new(),
-		}
-	}
-
-	fn deep(&self, km: &ProtocolTrace) -> &Deep {
-		self.deep.get_or_init(|| {
-			let mut protocol = crate::hashing::TermSet::default();
-			for slot in &km.slots {
-				let term = resolve_trace_constant(&slot.constant, km);
-				crate::hashing::collect_subterms(&term, &mut protocol);
-				crate::hashing::collect_subterms(&reduce_once(&term), &mut protocol);
-			}
-			Deep {
+			deep: Deep {
 				protocol,
 				ids: km.slots.iter().map(|slot| slot.constant.id).collect(),
 				creators: km.slots.iter().map(|slot| slot.creator).collect(),
@@ -90,33 +84,85 @@ impl TermBound {
 					.map(|slot| unwrapped_by(&slot.initial_value))
 					.collect(),
 				peel: std::sync::RwLock::new(IdMap::default()),
-			}
-		})
+			},
+		}
 	}
 
-	pub(crate) fn admits_at(
-		&self,
-		km: &ProtocolTrace,
-		principal: PrincipalId,
-		slot: usize,
-		v: &Value,
-	) -> bool {
+	pub(crate) fn admits_at(&self, principal: PrincipalId, slot: usize, v: &Value) -> bool {
 		let depth = term_depth(v);
 		if depth <= self.max_depth {
 			return true;
 		}
-		let deep = self.deep(km);
+		let deep = &self.deep;
 		depth <= self.max_depth + deep.peel_depth(principal, slot)
 			&& deep.depth_over_protocol(v) <= self.max_depth
 	}
 
-	pub(crate) fn protocol(&self, km: &ProtocolTrace) -> &crate::hashing::TermSet {
-		&self.deep(km).protocol
+	pub(crate) fn protocol(&self) -> &crate::hashing::TermSet {
+		&self.deep.protocol
 	}
 
 	pub(crate) fn depth(&self) -> usize {
 		self.max_depth
 	}
+
+	pub(crate) fn maximum_depth(&self, km: &ProtocolTrace, slot: usize) -> usize {
+		self.max_depth
+			+ km.principal_ids
+				.iter()
+				.map(|&principal| self.deep.peel_depth(principal, slot))
+				.max()
+				.unwrap_or(0)
+	}
+}
+
+pub(crate) fn minimum_term_depth(v: &Value, s: &super::vars::Substitution) -> usize {
+	fn depth(
+		v: &Value,
+		s: &super::vars::Substitution,
+		memo: &mut super::vars::PointerMemo<usize>,
+		variables: &mut Vec<VariableId>,
+	) -> usize {
+		match v {
+			Value::Constant(_) => 0,
+			Value::Variable(id) => match s.get(id) {
+				Some(value) if !variables.contains(id) => {
+					variables.push(id.clone());
+					let out = depth(value, s, memo, variables);
+					variables.pop();
+					out
+				}
+				_ => 0,
+			},
+			Value::Primitive(p) => {
+				let key = Arc::as_ptr(p) as usize;
+				if let Some(out) = memo.get(key) {
+					return out;
+				}
+				let rewrites = if crate::primitive::primitive_is_core(p.id) {
+					crate::primitive::primitive_core_get(p.id)
+						.is_ok_and(|spec| spec.core_rule.is_some())
+				} else {
+					crate::primitive::primitive_get(p.id).is_ok_and(|spec| {
+						spec.rewrite.is_some() || spec.rebuild.is_some() || !spec.combine.is_empty()
+					})
+				};
+				let out = if rewrites {
+					0
+				} else {
+					1 + p
+						.arguments
+						.iter()
+						.map(|a| depth(a, s, memo, variables))
+						.max()
+						.unwrap_or(0)
+				};
+				memo.insert(key, out);
+				out
+			}
+		}
+	}
+	depth(v, s, &mut super::vars::PointerMemo::new(), &mut Vec::new())
 }
 
 impl Deep {
@@ -185,7 +231,7 @@ fn term_depth_outside(
 	memo: &mut IdMap<usize, usize>,
 ) -> usize {
 	match v {
-		Value::Constant(_) => 0,
+		Value::Constant(_) | Value::Variable(_) => 0,
 		Value::Primitive(p) => {
 			if !basis.is_empty() && basis.contains(v) {
 				return 0;
@@ -241,26 +287,51 @@ fn attacker_controllable(
 }
 
 pub(crate) fn attacker_authored(ground: &Value, slot: usize, km: &ProtocolTrace) -> bool {
-	let honest = &km.slots[slot].initial_value;
-	let trace_reduct = match honest {
-		Value::Constant(c) => HONEST_REDUCTS.with(|cache| {
-			cache
-				.borrow_mut()
-				.fresh()
-				.entry((slot, c.id))
-				.or_insert_with(|| reduce_once(&resolve_trace_term(honest, km)))
-				.clone()
-		}),
-		Value::Primitive(_) => reduce_once(&resolve_trace_term(honest, km)),
-	};
-	let ground_reduct = reduce_once(ground);
-	!ground_reduct.equivalent(&trace_reduct, true)
+	let trace_reduct = HONEST_REDUCTS.with(|cache| {
+		cache
+			.borrow_mut()
+			.fresh()
+			.entry(slot)
+			.or_insert_with(|| reduce_once(&resolve_trace_term(&km.slots[slot].initial_value, km)))
+			.clone()
+	});
+	!reduce_once(ground).equivalent(&trace_reduct, true)
 }
 
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::primitive::{PRIM_CONCAT, PRIM_DEC, PRIM_ENC, PRIM_HASH, PRIM_SPLIT};
+	use crate::solve::vars::{Substitution, apply, attacker_var, attacker_var_id};
 	use crate::testutil::*;
+
+	#[test]
+	fn a_partial_depth_bound_preserves_later_reductions() {
+		let x = attacker_var(0);
+		let y = attacker_var(1);
+		let nil = crate::value::value_nil();
+		let hash = |v: Value| Value::primitive(PRIM_HASH, vec![v], 0);
+		let cipher = Value::primitive(PRIM_ENC, vec![x.clone(), y.clone()], 0);
+		let opened = Value::primitive(PRIM_DEC, vec![x.clone(), cipher], 0);
+		let tuple = Value::primitive(PRIM_CONCAT, vec![opened.clone(), x.clone()], 0);
+		let projected = Value::primitive(PRIM_SPLIT, vec![tuple.clone()], 0);
+		let terms = [x, y, opened, tuple, projected, hash(hash(attacker_var(0)))];
+		let choices = [nil.clone(), hash(nil.clone()), hash(hash(nil))];
+		for a in &choices {
+			let partial: Substitution = [(attacker_var_id(0), a.clone())].into_iter().collect();
+			for b in &choices {
+				let mut ground = partial.clone();
+				ground.insert(attacker_var_id(1), b.clone());
+				for term in &terms {
+					let lower = minimum_term_depth(term, &partial);
+					let actual = term_depth(&reduce_once(&apply(term, &ground)));
+					assert!(lower <= actual, "{term}: {lower} > {actual}");
+				}
+			}
+		}
+		assert_eq!(minimum_term_depth(&terms[5], &Substitution::default()), 2);
+		assert_eq!(minimum_term_depth(&terms[2], &Substitution::default()), 0);
+	}
 
 	#[test]
 	fn term_depth_visits_each_shared_node_once() {

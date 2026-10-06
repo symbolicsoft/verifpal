@@ -1,0 +1,40 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a1 at one and two sessions. Signer signs a chosen HASH(nil)
+// inside an opaque box, and Opener opens that box on its separate input.
+// Their joint answer authenticates a replacement message at Bob although
+// Alice never emitted that signature. The constructed signature is absent
+// from the honest protocol terms.
+
+attacker[active]
+principal Alice[
+	knows private sk, seal_key
+	generates message, request
+	pk = PUBKEY(sk)
+	signature = SIGN(sk, HASH(message))
+	sealed = ENC(seal_key, HASH(HASH(nil)))
+]
+Alice -> Bob: [pk], message, signature
+Alice -> Signer: request
+Alice -> Opener: sealed
+principal Signer[
+	knows private sk, seal_key
+	signed = SIGN(sk, request)
+	signed_box = ENC(seal_key, signed)
+]
+Signer -> Observer: signed_box
+principal Opener[
+	knows private seal_key
+	opened = DEC(seal_key, sealed)
+]
+Opener -> Observer: opened
+principal Observer[
+	_ = HASH(signed_box, opened)
+]
+principal Bob[
+	_ = SIGNVERIF(pk, HASH(message), signature)?
+]
+queries[
+	authentication? Alice -> Bob: signature
+]

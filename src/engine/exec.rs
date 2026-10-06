@@ -17,7 +17,7 @@ pub(crate) struct Held {
 	pub(crate) value: Value,
 	pub(crate) pre: Value,
 	pub(crate) sender: Option<usize>,
-	pub(crate) installed: bool,
+	pub(crate) installed: Option<Arc<[Value]>>,
 	pub(crate) authored: bool,
 }
 
@@ -91,6 +91,7 @@ fn resolve(
 	memo: &mut IdMap<usize, Value>,
 ) -> Value {
 	match v {
+		Value::Variable(_) => v.clone(),
 		Value::Constant(c) => match km.index_of(c).and_then(|i| env.get(i)?.as_ref()) {
 			Some(h) => h.value.clone(),
 			None => v.clone(),
@@ -120,6 +121,30 @@ fn deliverable(v: &Value) -> bool {
 				&& crate::primitive::rewrite_rule(p.id).is_some()
 				&& !can_rewrite(p).0)
 		})
+}
+
+fn installed_components(
+	value: &Value,
+	knowledge: &Knowledge,
+	capabilities: &CapabilityIndex,
+) -> Arc<[Value]> {
+	let _memo = crate::theory::DeductionMemo::scoped(capabilities, &knowledge.state);
+	let mut seen = crate::hashing::TermSet::default();
+	let mut pending = vec![value.clone()];
+	let mut out = Vec::new();
+	while let Some(value) = pending.pop() {
+		if !seen.insert(value.clone()) {
+			continue;
+		}
+		if let Value::Primitive(p) = &value
+			&& let Some(recipe) =
+				crate::theory::can_reconstruct_primitive(p, capabilities, &knowledge.state)
+		{
+			pending.extend(recipe.from);
+		}
+		out.push(value);
+	}
+	out.into()
 }
 
 pub(crate) fn install_at(installs: &Installs, run: usize, slot: usize) -> Option<&Value> {
@@ -243,12 +268,12 @@ fn step_run(
 	let km = cx.km;
 	match event {
 		Event::Hold(slot) => {
-			let value = km.slots[slot].initial_value.clone();
+			let value = crate::hashing::hashcons(&km.slots[slot].initial_value);
 			ex.runs[r].env[slot] = Some(Held {
 				pre: value.clone(),
 				value,
 				sender: None,
-				installed: false,
+				installed: None,
 				authored: false,
 			});
 		}
@@ -260,12 +285,14 @@ fn step_run(
 				km,
 				&mut memo,
 			);
+			let pre = crate::hashing::hashcons(&pre);
 			let (value, failed) = match &pre {
 				Value::Primitive(p) => {
 					let (ok, reduced) = can_rewrite(p);
-					(reduced, !ok && p.instance_check)
+					(crate::hashing::hashcons(&reduced), !ok && p.instance_check)
 				}
 				Value::Constant(_) => (pre.clone(), false),
+				Value::Variable(_) => (pre.clone(), true),
 			};
 			ex.knowledge.note_protocol(&value, &pre, true);
 			ex.knowledge
@@ -274,7 +301,7 @@ fn step_run(
 				value,
 				pre,
 				sender: None,
-				installed: false,
+				installed: None,
 				authored: false,
 			});
 			if failed {
@@ -325,6 +352,8 @@ fn step_run(
 				}
 			}
 			for (slot, value, installed) in received {
+				let components = installed
+					.then(|| installed_components(&value, &ex.knowledge, &cx.km.capabilities));
 				ex.knowledge.note_protocol(&value, &value, false);
 				let relayed = !installed
 					&& ex.runs[delivery.sender]
@@ -334,7 +363,7 @@ fn step_run(
 					pre: value.clone(),
 					value,
 					sender: Some(delivery.sender),
-					installed,
+					installed: components,
 					authored: installed || relayed,
 				});
 			}

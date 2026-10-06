@@ -4,7 +4,6 @@
 use crate::context::VerifyContext;
 use crate::engine::query::Verdict;
 use crate::types::*;
-use crate::value::resolve_trace_constant;
 
 pub(crate) fn record_verdict(ctx: &VerifyContext, result: &VerifyResult, verdict: &Verdict) {
 	if ctx.results_put(result, verdict) {
@@ -37,28 +36,6 @@ fn note_origin_only(query: &Query) {
 		),
 		InfoLevel::Info,
 	);
-}
-
-fn sibling_values_in(
-	groups: &IdMap<ValueId, std::sync::Arc<Vec<ValueId>>>,
-	c: &Constant,
-	km: &ProtocolTrace,
-) -> Vec<Value> {
-	let Some(group) = groups.get(&c.id) else {
-		return Vec::new();
-	};
-	group
-		.iter()
-		.filter(|&&sid| sid != c.id)
-		.filter_map(|&sid| {
-			let &slot = km.index.get(&sid)?;
-			Some(resolve_trace_constant(&km.slots[slot].constant, km))
-		})
-		.collect()
-}
-
-pub(crate) fn session_sibling_values(c: &Constant, km: &ProtocolTrace) -> Vec<Value> {
-	sibling_values_in(&km.session_siblings, c, km)
 }
 
 #[cfg(test)]

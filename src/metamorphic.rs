@@ -324,7 +324,7 @@ fn worker_cap() -> usize {
 		.unwrap_or(4)
 }
 
-fn spread<T, R>(items: &[T], work: impl Fn(&T) -> R + Sync) -> Vec<R>
+pub(crate) fn spread<T, R>(items: &[T], work: impl Fn(&T) -> R + Sync) -> Vec<R>
 where
 	T: Sync,
 	R: Send,
@@ -615,23 +615,48 @@ fn check_variants<V: IntoIterator<Item = Model>>(
 	floor: usize,
 	sweep: Sweep,
 ) {
-	check(property, floor, sweep, |name, model, report| {
-		let Outcome::Code(before) = code_of(model, SESSIONS) else {
-			return;
-		};
-		if matches!(change, Change::Stronger) && !before.contains('1') {
-			return;
+	let models = corpus();
+	let originals = spread(&models, |(name, model)| {
+		if sweep.skips(name) {
+			return None;
 		}
-		let outcomes = variants(model)
-			.into_iter()
-			.filter(|variant| asks_the_same_question(model, variant))
-			.map(|variant| code_of(&variant, SESSIONS));
-		report.tally(name, outcomes, |after| {
+		let Outcome::Code(before) = code_of(model, SESSIONS) else {
+			return None;
+		};
+		(!matches!(change, Change::Stronger) || before.contains('1')).then_some(before)
+	});
+	let mut jobs: Vec<(usize, Model)> = Vec::new();
+	for (at, ((_, model), before)) in models.iter().zip(&originals).enumerate() {
+		if before.is_none() {
+			continue;
+		}
+		jobs.extend(
+			variants(model)
+				.into_iter()
+				.filter(|variant| asks_the_same_question(model, variant))
+				.map(|variant| (at, variant)),
+		);
+	}
+	let mut outcomes = spread(&jobs, |(_, variant)| code_of(variant, SESSIONS)).into_iter();
+	let mut report = Report::default();
+	let mut next = 0;
+	for (at, ((name, _), before)) in models.iter().zip(&originals).enumerate() {
+		let mine: Vec<Outcome> = std::iter::from_fn(|| {
+			(next < jobs.len() && jobs[next].0 == at).then(|| {
+				next += 1;
+				outcomes.next().expect("one outcome per variant")
+			})
+		})
+		.collect();
+		let Some(before) = before else {
+			continue;
+		};
+		report.tally(name, mine, |after| {
 			let lost = match change {
-				Change::Stronger => lost_attacks(&before, after),
-				Change::Weaker => lost_attacks(after, &before),
+				Change::Stronger => lost_attacks(before, after),
+				Change::Weaker => lost_attacks(after, before),
 				Change::Invariant(expected) => {
-					let want = expected(&before);
+					let want = expected(before);
 					return if after == want {
 						Vec::new()
 					} else {
@@ -645,7 +670,10 @@ fn check_variants<V: IntoIterator<Item = Model>>(
 				.map(|q| format!("{name}: before={before} after={after}, query {q} lost"))
 				.collect()
 		});
-	});
+	}
+	report.panicked.sort();
+	report.panicked.dedup();
+	settle(property, report, floor, sweep);
 }
 
 fn settle(property: &str, report: Report, floor: usize, sweep: Sweep) {

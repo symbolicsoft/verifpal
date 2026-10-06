@@ -443,7 +443,7 @@ pub(crate) fn normalise_arguments(id: PrimitiveId, mut arguments: Vec<Value>) ->
 pub(crate) fn admissible(v: &Value) -> bool {
 	crate::value::subterms(v).all(|term| {
 		let Value::Primitive(p) = term else {
-			return true;
+			return matches!(term, Value::Constant(_));
 		};
 		for restriction in argument_restrictions(p.id) {
 			if let Some(Value::Primitive(inner)) = p.arguments.get(restriction.position)
@@ -591,6 +591,21 @@ pub(crate) fn primitive_extract_check_key(prim: &Primitive) -> Option<Value> {
 #[cfg(test)]
 mod tests {
 	use super::*;
+
+	#[test]
+	fn solver_variables_are_not_admissible_messages() {
+		for variable in [
+			crate::solve::vars::attacker_var(0),
+			crate::solve::vars::free_var(0),
+		] {
+			assert!(!admissible(&variable));
+			let term = Value::primitive(PRIM_HASH, vec![variable], 0);
+			assert!(!admissible(&term));
+			assert!(admissible(&crate::solve::vars::ground_free(
+				&Value::primitive(PRIM_HASH, vec![crate::solve::vars::free_var(0)], 0)
+			)));
+		}
+	}
 
 	#[test]
 	fn admissibility_visits_shared_terms_once() {

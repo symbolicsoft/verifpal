@@ -39,6 +39,7 @@ struct Candidates {
 	recon: Vec<Value>,
 	forward: Vec<(Value, Value)>,
 	splits: Vec<Value>,
+	walked: IdMap<usize, Arc<Primitive>>,
 	seen: TermSet,
 	seen_forward: TermSet,
 }
@@ -58,11 +59,18 @@ impl Candidates {
 		let Value::Primitive(p) = value else {
 			return;
 		};
-		if !self.seen.insert(value.clone()) {
+		if self
+			.walked
+			.insert(Arc::as_ptr(p) as usize, Arc::clone(p))
+			.is_some()
+		{
 			return;
 		}
 		for arg in &p.arguments {
 			self.walk(arg);
+		}
+		if !self.seen.insert(value.clone()) {
+			return;
 		}
 		if p.threshold > 0
 			&& recompose_rule(p.id).is_some()
@@ -105,8 +113,16 @@ pub(crate) struct Knowledge {
 	pub(crate) protocol: Arc<Vec<(Value, Value, bool)>>,
 	pub(crate) built: Arc<TermSet>,
 	candidates: Arc<Candidates>,
+	pools: Arc<IdMap<(usize, usize), usize>>,
+	settled: Arc<Vec<u8>>,
 	closed: bool,
 }
+
+const DECOMPOSED: u8 = 1;
+const BROKEN: u8 = 2;
+const FRAGMENTED: u8 = 4;
+const UNREWRITTEN: u8 = 8;
+const SETTLED: u8 = DECOMPOSED | BROKEN | FRAGMENTED | UNREWRITTEN;
 
 impl Knowledge {
 	pub(crate) fn new(phase: i32) -> Knowledge {
@@ -119,6 +135,8 @@ impl Knowledge {
 			protocol: Arc::new(Vec::new()),
 			built: Arc::new(TermSet::default()),
 			candidates: Arc::new(Candidates::default()),
+			pools: Arc::new(IdMap::default()),
+			settled: Arc::new(Vec::new()),
 			closed: true,
 		}
 	}
@@ -198,10 +216,7 @@ impl Knowledge {
 		let mut built = Vec::new();
 		applied(declared, pre, &mut built);
 		if !value.same_term(pre) {
-			let mut inputs: IdMap<u64, Vec<&Value>> = IdMap::default();
-			for term in crate::value::subterms(pre) {
-				inputs.entry(term.hash_value()).or_default().push(term);
-			}
+			let inputs: TermSet = crate::value::subterms(pre).cloned().collect();
 			reassembled(value, &inputs, &mut IdSet::default(), &mut built);
 		}
 		for term in &built {
@@ -226,13 +241,30 @@ impl Knowledge {
 			return;
 		}
 		loop {
-			let snapshot = Arc::clone(&self.state);
-			let candidates = Arc::clone(&self.candidates);
-			let built = Arc::clone(&self.built);
-			let learned = {
+			let (learned, pools, settled) = {
+				let snapshot = Arc::clone(&self.state);
 				let _memo = crate::theory::DeductionMemo::scoped(capabilities, &snapshot);
-				pass(capabilities, &snapshot, &candidates, &built)
+				pass(
+					capabilities,
+					&snapshot,
+					&self.candidates,
+					&self.built,
+					&self.pools,
+					&self.settled,
+				)
 			};
+			if !pools.is_empty() {
+				Arc::make_mut(&mut self.pools).extend(pools);
+			}
+			if !settled.is_empty() {
+				let flags = Arc::make_mut(&mut self.settled);
+				for (at, bits) in settled {
+					if flags.len() <= at {
+						flags.resize(at + 1, 0);
+					}
+					flags[at] |= bits;
+				}
+			}
 			let mut progress = false;
 			for (v, record) in learned {
 				progress |= self.learn(&v, Origin::Derived(record));
@@ -264,15 +296,24 @@ impl Knowledge {
 	}
 }
 
+type Pools = Vec<((usize, usize), usize)>;
+
+type Pass = (Vec<(Value, DerivationRecord)>, Pools, Vec<(usize, u8)>);
+
 fn pass(
 	capabilities: &CapabilityIndex,
 	attacker: &AttackerState,
 	candidates: &Candidates,
 	built: &TermSet,
-) -> Vec<(Value, DerivationRecord)> {
+	pools: &IdMap<(usize, usize), usize>,
+	settled: &[u8],
+) -> Pass {
 	let mut out: Vec<(Value, DerivationRecord)> = Vec::new();
-	let push = |out: &mut Vec<(Value, DerivationRecord)>, v: Value, d: DerivationRecord| {
-		if attacker.knows(&v).is_none() && !out.iter().any(|(held, _)| held.equivalent(&v, true)) {
+	let mut grown: Pools = Vec::new();
+	let mut settling: Vec<(usize, u8)> = Vec::new();
+	let mut seen = TermSet::default();
+	let mut push = |out: &mut Vec<(Value, DerivationRecord)>, v: Value, d: DerivationRecord| {
+		if attacker.knows(&v).is_none() && seen.insert(v.clone()) {
 			out.push((v, d));
 		}
 	};
@@ -280,7 +321,36 @@ fn pass(
 		let Value::Primitive(p) = known else {
 			continue;
 		};
-		if let Some(result) = can_decompose(p, capabilities, attacker)
+		let flags = settled.get(at).copied().unwrap_or(0);
+		if flags == SETTLED {
+			continue;
+		}
+		let held = |values: &[Value]| values.iter().all(|v| attacker.knows(v).is_some());
+		let mut now = 0;
+		let reveals = crate::theory::decomposition_reveals(p);
+		if reveals.as_deref().is_none_or(held) {
+			now |= DECOMPOSED;
+		}
+		if crate::primitive::primitive_get(p.id).map_or(true, |spec| {
+			held(&crate::theory::revealed(p, &spec.weak_reveals))
+		}) {
+			now |= BROKEN;
+		}
+		if !primitive_core_reveals_args(p.id) || held(&p.arguments) {
+			now |= FRAGMENTED;
+		}
+		if crate::primitive::primitives_rewriting(p.id)
+			.next()
+			.is_none()
+		{
+			now |= UNREWRITTEN;
+		}
+		if now & !flags != 0 {
+			settling.push((at, now));
+		}
+		if flags & DECOMPOSED == 0
+			&& now & DECOMPOSED == 0
+			&& let Some(result) = can_decompose(p, capabilities, attacker)
 			&& !forged(at, attacker)
 			&& !minted(p, known, capabilities, attacker, built)
 		{
@@ -295,7 +365,10 @@ fn pass(
 				);
 			}
 		}
-		if let Some(revealed) = can_break_weak(p, capabilities, attacker) {
+		if flags & BROKEN == 0
+			&& now & BROKEN == 0
+			&& let Some(revealed) = can_break_weak(p, capabilities, attacker)
+		{
 			for r in revealed {
 				push(
 					&mut out,
@@ -308,10 +381,12 @@ fn pass(
 				);
 			}
 		}
-		for (v, d) in rewrite_build(known, p, capabilities, attacker) {
-			push(&mut out, v, d);
+		if flags & UNREWRITTEN == 0 {
+			for (v, d) in rewrite_build(known, p, capabilities, attacker, at, pools, &mut grown) {
+				push(&mut out, v, d);
+			}
 		}
-		if primitive_core_reveals_args(p.id) {
+		if flags & FRAGMENTED == 0 && now & FRAGMENTED == 0 {
 			for arg in &p.arguments {
 				push(
 					&mut out,
@@ -377,7 +452,7 @@ fn pass(
 			);
 		}
 	}
-	out
+	(out, grown, settling)
 }
 
 pub(crate) fn reconstruction(built: ReconstructResult) -> DerivationRecord {
@@ -401,12 +476,16 @@ fn rewrite_build(
 	inner: &Arc<Primitive>,
 	capabilities: &CapabilityIndex,
 	attacker: &AttackerState,
+	at: usize,
+	pools: &IdMap<(usize, usize), usize>,
+	grown: &mut Pools,
 ) -> Vec<(Value, DerivationRecord)> {
 	let mut out = Vec::new();
-	if can_decompose(inner, capabilities, attacker).is_some() {
+	let mut rewriting = crate::primitive::primitives_rewriting(inner.id).peekable();
+	if rewriting.peek().is_none() || can_decompose(inner, capabilities, attacker).is_some() {
 		return out;
 	}
-	for (spec, rule) in crate::primitive::primitives_rewriting(inner.id) {
+	for (rewriter, (spec, rule)) in rewriting.enumerate() {
 		if spec.definition_check
 			&& spec.rebuild.is_none()
 			&& spec.combine.is_empty()
@@ -440,9 +519,10 @@ fn rewrite_build(
 				}
 			}
 		}
-		if pool.is_empty() {
+		if pool.is_empty() || pools.get(&(at, rewriter)) == Some(&pool.len()) {
 			continue;
 		}
+		grown.push(((at, rewriter), pool.len()));
 		for &arity in &spec.arity {
 			let arity = arity as usize;
 			if rule.from >= arity {
@@ -577,22 +657,11 @@ fn applied(declared: &Value, pre: &Value, out: &mut Vec<Value>) {
 	}
 }
 
-fn reassembled(
-	value: &Value,
-	inputs: &IdMap<u64, Vec<&Value>>,
-	seen: &mut IdSet<usize>,
-	out: &mut Vec<Value>,
-) {
+fn reassembled(value: &Value, inputs: &TermSet, seen: &mut IdSet<usize>, out: &mut Vec<Value>) {
 	let Value::Primitive(p) = value else {
 		return;
 	};
-	if !seen.insert(Arc::as_ptr(p) as usize) {
-		return;
-	}
-	if inputs
-		.get(&value.hash_value())
-		.is_some_and(|bucket| bucket.iter().any(|input| input.equivalent(value, true)))
-	{
+	if !seen.insert(Arc::as_ptr(p) as usize) || inputs.contains(value) {
 		return;
 	}
 	out.push(value.clone());

@@ -24,27 +24,24 @@ pub(crate) fn merge<'a>(
 	for (id, value) in b {
 		match a.get(id) {
 			None => {
-				let variable = Value::Constant(Constant {
-					id: *id,
-					..Default::default()
-				});
+				let variable = Value::Variable(id.clone());
 				pending.push((variable, value.clone()));
 			}
 			Some(existing) if existing.equivalent(value, true) => {}
 			Some(existing) => {
 				pending.push((existing.clone(), value.clone()));
-				overlapping.push((*id, value));
+				overlapping.push((id.clone(), value));
 			}
 		}
 	}
 	pending.reverse();
 	solve_equations::<true>(pending, a.clone()).filter_map(move |mut out| {
-		for &(id, value) in &overlapping {
+		for (id, value) in &overlapping {
 			let resolved = super::vars::apply(value, &out);
 			if occurs(id, &resolved, &out) {
 				return None;
 			}
-			out.insert(id, resolved);
+			out.insert(id.clone(), resolved);
 		}
 		Some(out)
 	})
@@ -190,7 +187,7 @@ mod tests {
 
 	#[test]
 	fn matching_and_unification_preserve_a_shares_threshold() {
-		let variable = crate::solve::vars::attacker_var(0, "threshold_match");
+		let variable = crate::solve::vars::attacker_var(0);
 		let key = make_private("threshold_match_key");
 		let share = |secret: Value, threshold| {
 			let mut p = Primitive::new(crate::primitive::PRIM_THRESHOLD_SPLIT, vec![secret], 0);
@@ -222,8 +219,8 @@ mod tests {
 
 	#[test]
 	fn commutative_matching_retries_after_a_later_argument_conflicts() {
-		let x = crate::solve::vars::attacker_var(0, "backtrack_x");
-		let y = crate::solve::vars::attacker_var(1, "backtrack_y");
+		let x = crate::solve::vars::attacker_var(0);
+		let y = crate::solve::vars::attacker_var(1);
 		let a = make_private("backtrack_a");
 		let b = make_private("backtrack_b");
 		let tuple = |args| make_primitive(crate::primitive::PRIM_CONCAT, args, 0);
@@ -243,7 +240,7 @@ mod tests {
 
 	#[test]
 	fn matching_resolves_an_existing_variable_alias() {
-		let x = crate::solve::vars::attacker_var(0, "match_alias_x");
+		let x = crate::solve::vars::attacker_var(0);
 		let y = crate::solve::vars::free_var(0);
 		let target = make_private("match_alias_target");
 		let initial = Substitution::from_iter([(as_var(&x).unwrap(), y.clone())]);
@@ -256,8 +253,8 @@ mod tests {
 
 	#[test]
 	fn matching_enumerates_both_commutative_assignments() {
-		let x = crate::solve::vars::attacker_var(0, "alternatives_x");
-		let y = crate::solve::vars::attacker_var(1, "alternatives_y");
+		let x = crate::solve::vars::attacker_var(0);
+		let y = crate::solve::vars::attacker_var(1);
 		let a = make_private("alternatives_a");
 		let b = make_private("alternatives_b");
 		let pattern = dh_kex(pubkey(x.clone()), y.clone());
@@ -277,8 +274,8 @@ mod tests {
 
 	#[test]
 	fn commutative_matching_can_supply_a_missing_public_key_shape() {
-		let x = crate::solve::vars::attacker_var(0, "opaque_match_x");
-		let y = crate::solve::vars::attacker_var(1, "opaque_match_y");
+		let x = crate::solve::vars::attacker_var(0);
+		let y = crate::solve::vars::attacker_var(1);
 		let a = make_private("opaque_match_a");
 		let b = make_private("opaque_match_b");
 		let pattern = dh_kex(x.clone(), y.clone());
@@ -303,8 +300,8 @@ mod tests {
 
 	#[test]
 	fn commutative_unification_can_shape_both_public_key_inputs() {
-		let x = crate::solve::vars::attacker_var(0, "opaque_unify_x");
-		let y = crate::solve::vars::attacker_var(1, "opaque_unify_y");
+		let x = crate::solve::vars::attacker_var(0);
+		let y = crate::solve::vars::attacker_var(1);
 		let a = make_private("opaque_unify_a");
 		let b = make_private("opaque_unify_b");
 		let left = dh_kex(x.clone(), a.clone());
@@ -332,13 +329,13 @@ mod tests {
 			(crate::solve::vars::attacker_var_id(0), a.clone()),
 			(crate::solve::vars::attacker_var_id(1), b.clone()),
 		]);
-		let ids: Vec<_> = right.keys().copied().collect();
+		let ids: Vec<_> = right.keys().cloned().collect();
 		let left = Substitution::from_iter([
-			(ids[0], dh_kex(pubkey(x.clone()), y.clone())),
-			(ids[1], x.clone()),
+			(ids[0].clone(), dh_kex(pubkey(x.clone()), y.clone())),
+			(ids[1].clone(), x.clone()),
 		]);
-		right.insert(ids[0], dh_kex(pubkey(a.clone()), b.clone()));
-		right.insert(ids[1], b.clone());
+		right.insert(ids[0].clone(), dh_kex(pubkey(a.clone()), b.clone()));
+		right.insert(ids[1].clone(), b.clone());
 		let found = merge(&left, &right)
 			.next()
 			.expect("the swapped ordering satisfies both bindings");
@@ -351,8 +348,8 @@ mod tests {
 
 	#[test]
 	fn merging_still_refuses_a_cycle_between_partial_solutions() {
-		let x = crate::solve::vars::attacker_var(0, "merge_cycle_x");
-		let y = crate::solve::vars::attacker_var(1, "merge_cycle_y");
+		let x = crate::solve::vars::attacker_var(0);
+		let y = crate::solve::vars::attacker_var(1);
 		let left = Substitution::from_iter([(
 			as_var(&x).unwrap(),
 			Value::primitive(crate::primitive::PRIM_HASH, vec![y.clone()], 0),
@@ -372,15 +369,10 @@ mod tests {
 			(crate::solve::vars::attacker_var_id(0), atom.clone()),
 			(crate::solve::vars::attacker_var_id(1), atom.clone()),
 		]);
-		let ids: Vec<_> = right.keys().copied().collect();
-		let variable = |id| {
-			Value::Constant(Constant {
-				id,
-				..Default::default()
-			})
-		};
-		let left = Substitution::from_iter([(ids[0], variable(ids[1]))]);
-		right.insert(ids[1], variable(ids[0]));
+		let ids: Vec<_> = right.keys().cloned().collect();
+		let variable = Value::Variable;
+		let left = Substitution::from_iter([(ids[0].clone(), variable(ids[1].clone()))]);
+		right.insert(ids[1].clone(), variable(ids[0].clone()));
 		let found = merge(&left, &right)
 			.next()
 			.expect("both aliases resolve to the same atom");
@@ -395,8 +387,8 @@ mod tests {
 		let mut pattern = atom.clone();
 		let mut target = atom.clone();
 		for i in 0..30 {
-			let x = crate::solve::vars::attacker_var(2 * i, "symmetric_match_x");
-			let y = crate::solve::vars::attacker_var(2 * i + 1, "symmetric_match_y");
+			let x = crate::solve::vars::attacker_var(2 * i);
+			let y = crate::solve::vars::attacker_var(2 * i + 1);
 			pattern = Value::primitive(
 				crate::primitive::PRIM_HASH,
 				vec![pattern, dh_kex(pubkey(x), y)],
@@ -417,7 +409,7 @@ mod tests {
 
 	#[test]
 	fn matching_does_not_bind_target_variables() {
-		let x = crate::solve::vars::attacker_var(0, "match_rigid_x");
+		let x = crate::solve::vars::attacker_var(0);
 		let y = crate::solve::vars::free_var(0);
 		let constant = make_private("match_rigid_constant");
 		let tuple = |args| make_primitive(crate::primitive::PRIM_CONCAT, args, 0);
@@ -452,7 +444,7 @@ mod tests {
 	fn dh_kex_matches_modulo_commutativity() {
 		let x = make_constant("mtc_x");
 		let y = make_constant("mtc_y");
-		let var = crate::solve::vars::attacker_var(0, "mtc_slot");
+		let var = crate::solve::vars::attacker_var(0);
 		let pattern = dh_kex(pubkey(var.clone()), y.clone());
 		let target = dh_kex(pubkey(y), x.clone());
 		let s = match_value(&pattern, &target, &Substitution::default())
@@ -464,7 +456,7 @@ mod tests {
 	fn dh_kex_unifies_modulo_commutativity() {
 		let x = make_constant("unc_x");
 		let y = make_constant("unc_y");
-		let var = crate::solve::vars::attacker_var(1, "unc_slot");
+		let var = crate::solve::vars::attacker_var(1);
 		let a = dh_kex(pubkey(var.clone()), y.clone());
 		let b = dh_kex(pubkey(y), x.clone());
 		let s = unifiers(&a, &b, &Substitution::default())

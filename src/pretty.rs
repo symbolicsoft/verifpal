@@ -59,6 +59,8 @@ impl fmt::Display for Value {
 		match self {
 			Value::Constant(c) => write!(f, "{}", c),
 			Value::Primitive(p) => write!(f, "{}", p),
+			Value::Variable(VariableId::Slot(slot)) => write!(f, "$slot{slot}"),
+			Value::Variable(VariableId::Free(name)) => write!(f, "$free{name}"),
 		}
 	}
 }

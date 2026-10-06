@@ -4,122 +4,58 @@
 use std::cell::RefCell;
 use std::sync::Arc;
 
-use crate::context::Generational;
 use crate::equivalence::{equivalent_primitives, memoised_pair};
 use crate::primitive::*;
 use crate::types::*;
 
-#[derive(Default)]
-struct RewriteCache {
-	entries: IdMap<u64, Vec<RewriteEntry>>,
-	pointers: IdMap<usize, RewriteEntry>,
-	order: std::collections::VecDeque<usize>,
-	inserted: usize,
-	recent: std::collections::VecDeque<Arc<Primitive>>,
-}
-
-struct RewriteEntry {
-	input: std::sync::Weak<Primitive>,
-	result: bool,
-	value: Option<Value>,
-}
-
-impl RewriteEntry {
-	fn new(p: &Arc<Primitive>, result: bool, value: Value) -> RewriteEntry {
-		let value = match value {
-			Value::Primitive(output) if Arc::ptr_eq(p, &output) => None,
-			value => Some(value),
-		};
-		RewriteEntry {
-			input: Arc::downgrade(p),
-			result,
-			value,
-		}
-	}
-}
-
-const TERM_MEMO_SWEEP: usize = 65536;
-const TERM_MEMO_RECENT: usize = 1024;
-const TERM_MEMO_POINTERS: usize = 8192;
-
-impl RewriteCache {
-	fn get(&mut self, key: u64, p: &Arc<Primitive>) -> Option<(bool, Value)> {
-		if let Some(entry) = self.pointers.get(&(Arc::as_ptr(p) as usize)) {
-			return Some((
-				entry.result,
-				entry
-					.value
-					.clone()
-					.unwrap_or_else(|| Value::Primitive(Arc::clone(p))),
-			));
-		}
-		let hit = self.entries.get(&key)?.iter().find_map(|entry| {
-			let held = entry.input.upgrade()?;
-			(Arc::ptr_eq(&held, p) || structurally_identical_primitive(&held, p)).then(|| {
-				(
-					entry.result,
-					entry.value.clone().unwrap_or(Value::Primitive(held)),
-				)
-			})
-		});
-		if let Some((result, value)) = &hit {
-			self.remember_pointer(p, *result, value.clone());
-		}
-		hit
-	}
-
-	fn put(&mut self, key: u64, p: &Arc<Primitive>, result: bool, value: Value) {
-		self.remember_pointer(p, result, value.clone());
-		if self.recent.len() == TERM_MEMO_RECENT {
-			self.recent.pop_front();
-		}
-		self.recent.push_back(Arc::clone(p));
-		self.inserted += 1;
-		if self.inserted >= TERM_MEMO_SWEEP {
-			self.inserted = 0;
-			self.sweep();
-		}
-		let bucket = self.entries.entry(key).or_default();
-		bucket.retain(|entry| entry.input.strong_count() > 0);
-		bucket.push(RewriteEntry::new(p, result, value));
-	}
-
-	fn remember_pointer(&mut self, p: &Arc<Primitive>, result: bool, value: Value) {
-		let key = Arc::as_ptr(p) as usize;
-		if self
-			.pointers
-			.insert(key, RewriteEntry::new(p, result, value))
-			.is_none()
-		{
-			self.order.push_back(key);
-			if self.pointers.len() > TERM_MEMO_POINTERS
-				&& let Some(oldest) = self.order.pop_front()
-			{
-				self.pointers.remove(&oldest);
-			}
-		}
-	}
-
-	fn sweep(&mut self) {
-		self.pointers
-			.retain(|_, entry| entry.input.strong_count() > 0);
-		self.order.retain(|key| self.pointers.contains_key(key));
-		self.entries.retain(|_, bucket| {
-			bucket.retain(|entry| entry.input.strong_count() > 0);
-			!bucket.is_empty()
-		});
-	}
-}
-
 struct ObtainableMemo {
-	owner: (*const CapabilityIndex, *const AttackerState),
+	owner: (usize, usize),
 	entries: IdMap<u64, Vec<(Value, bool)>>,
+	pointers: IdMap<usize, (Arc<Primitive>, bool)>,
 	inputs: IdMap<usize, (Arc<Primitive>, Option<Vec<KnownIdx>>)>,
 }
 
 impl ObtainableMemo {
+	fn new(capabilities: &CapabilityIndex, attacker: &AttackerState) -> Self {
+		ObtainableMemo {
+			owner: (
+				capabilities as *const CapabilityIndex as usize,
+				attacker as *const AttackerState as usize,
+			),
+			entries: IdMap::default(),
+			pointers: IdMap::default(),
+			inputs: IdMap::default(),
+		}
+	}
+
 	fn is_for(&self, capabilities: &CapabilityIndex, attacker: &AttackerState) -> bool {
-		std::ptr::eq(self.owner.0, capabilities) && std::ptr::eq(self.owner.1, attacker)
+		self.owner
+			== (
+				capabilities as *const CapabilityIndex as usize,
+				attacker as *const AttackerState as usize,
+			)
+	}
+}
+
+#[derive(Default)]
+pub(crate) struct SavedMemo(Option<ObtainableMemo>);
+
+impl SavedMemo {
+	pub(crate) fn within<R>(
+		&mut self,
+		capabilities: &CapabilityIndex,
+		attacker: &AttackerState,
+		f: impl FnOnce() -> R,
+	) -> R {
+		let memo = self
+			.0
+			.take()
+			.filter(|memo| memo.is_for(capabilities, attacker))
+			.unwrap_or_else(|| ObtainableMemo::new(capabilities, attacker));
+		let previous = MEMO.with(|m| m.borrow_mut().replace(memo));
+		let out = f();
+		self.0 = MEMO.with(|m| std::mem::replace(&mut *m.borrow_mut(), previous));
+		out
 	}
 }
 
@@ -152,6 +88,7 @@ pub(crate) fn structurally_identical_primitive(x: &Primitive, y: &Primitive) -> 
 pub(crate) fn structurally_identical(a: &Value, b: &Value) -> bool {
 	match (a, b) {
 		(Value::Constant(x), Value::Constant(y)) => x.id == y.id,
+		(Value::Variable(x), Value::Variable(y)) => x == y,
 		(Value::Primitive(x), Value::Primitive(y)) => {
 			Arc::ptr_eq(x, y) || memoised_pair(2, x, y, || structurally_identical_primitive(x, y))
 		}
@@ -161,19 +98,6 @@ pub(crate) fn structurally_identical(a: &Value, b: &Value) -> bool {
 
 thread_local! {
 	static MEMO: RefCell<Option<ObtainableMemo>> = const { RefCell::new(None) };
-	static REWRITE_CACHE: RefCell<Generational<RewriteCache>> = RefCell::new(Generational::default());
-}
-
-fn rewrite_cache_get(key: u64, p: &Arc<Primitive>) -> Option<(bool, Value)> {
-	REWRITE_CACHE.with(|c| c.borrow_mut().fresh().get(key, p))
-}
-
-fn rewrite_cache_put(key: u64, p: &Arc<Primitive>, result: &(bool, Value)) {
-	REWRITE_CACHE.with(|c| {
-		c.borrow_mut()
-			.fresh()
-			.put(key, p, result.0, result.1.clone())
-	});
 }
 
 pub(crate) struct DeductionMemo<'a> {
@@ -199,11 +123,7 @@ impl<'a> DeductionMemo<'a> {
 		capabilities: &'a CapabilityIndex,
 		attacker: &'a AttackerState,
 	) -> DeductionMemo<'a> {
-		let installed = ObtainableMemo {
-			owner: (capabilities as *const _, attacker as *const _),
-			entries: IdMap::default(),
-			inputs: IdMap::default(),
-		};
+		let installed = ObtainableMemo::new(capabilities, attacker);
 		let previous = MEMO.with(|m| m.borrow_mut().replace(installed));
 		DeductionMemo {
 			previous: Some(previous),
@@ -220,22 +140,23 @@ impl Drop for DeductionMemo<'_> {
 	}
 }
 
-pub(crate) fn same_fixed(a: &Value, b: &Value) -> bool {
-	let (Value::Primitive(a), Value::Primitive(b)) = (a, b) else {
-		return false;
-	};
-	let Some(rule) = reuse_rule(a.id) else {
-		return false;
-	};
+fn fixed_alike(a: &Primitive, b: &Primitive, rule: &ReuseRule) -> bool {
 	a.id == b.id
 		&& a.arguments.len() == b.arguments.len()
 		&& rule
 			.fixed
 			.iter()
 			.all(|&at| match (a.arguments.get(at), b.arguments.get(at)) {
-				(Some(x), Some(y)) => x.hash_value() == y.hash_value() && x.equivalent(y, true),
+				(Some(x), Some(y)) => x.equivalent(y, true),
 				_ => false,
 			})
+}
+
+pub(crate) fn same_fixed(a: &Value, b: &Value) -> bool {
+	let (Value::Primitive(a), Value::Primitive(b)) = (a, b) else {
+		return false;
+	};
+	reuse_rule(a.id).is_some_and(|rule| fixed_alike(a, b, rule))
 }
 
 pub(crate) fn reused_pair(a: &Value, b: &Value) -> bool {
@@ -243,13 +164,12 @@ pub(crate) fn reused_pair(a: &Value, b: &Value) -> bool {
 }
 
 pub(crate) fn reused(p: &Primitive, attacker: &AttackerState) -> Option<[Value; 2]> {
-	reuse_rule(p.id)?;
-	let probe = Value::Primitive(Arc::new(p.clone()));
+	let rule = reuse_rule(p.id)?;
 	attacker
 		.reused
 		.iter()
 		.find(|pair| {
-			same_fixed(&pair[0], &probe)
+			matches!(&pair[0], Value::Primitive(held) if fixed_alike(held, p, rule))
 				&& attacker.knows(&pair[0]).is_some()
 				&& attacker.knows(&pair[1]).is_some()
 		})
@@ -257,10 +177,24 @@ pub(crate) fn reused(p: &Primitive, attacker: &AttackerState) -> Option<[Value; 
 }
 
 pub(crate) fn forgeable_by_reuse(p: &Primitive, attacker: &AttackerState) -> &'static [usize] {
-	match (reused(p, attacker), reuse_rule(p.id)) {
-		(Some(_), Some(rule)) => &rule.forgeable,
+	match reuse_rule(p.id) {
+		Some(rule) if reused(p, attacker).is_some() => &rule.forgeable,
 		_ => &[],
 	}
+}
+
+pub(crate) fn decompose_rule(p: &Primitive) -> Option<&'static DecomposeRule> {
+	if primitive_is_core(p.id) {
+		return None;
+	}
+	let rule = primitive_get(p.id).ok()?.decompose.as_ref()?;
+	rule.output
+		.is_none_or(|output| p.output == output)
+		.then_some(rule)
+}
+
+pub(crate) fn decomposition_reveals(p: &Primitive) -> Option<Vec<Value>> {
+	Some(revealed(p, &decompose_rule(p)?.reveals))
 }
 
 pub(crate) fn can_decompose(
@@ -268,13 +202,7 @@ pub(crate) fn can_decompose(
 	capabilities: &CapabilityIndex,
 	attacker: &AttackerState,
 ) -> Option<DecomposeResult> {
-	if primitive_is_core(p.id) {
-		return None;
-	}
-	let rule = primitive_get(p.id).ok()?.decompose.as_ref()?;
-	if rule.output.is_some_and(|output| p.output != output) {
-		return None;
-	}
+	let rule = decompose_rule(p)?;
 	let used = rule
 		.given
 		.iter()
@@ -307,7 +235,9 @@ pub(crate) fn revealed(p: &Primitive, reveals: &[Reveal]) -> Vec<Value> {
 		.iter()
 		.filter_map(|reveal| match *reveal {
 			Reveal::Argument(index) => p.arguments.get(index).map(reduce_once),
-			Reveal::Output(output) => Some(Value::Primitive(Arc::new(p.with_output(output)))),
+			Reveal::Output(output) => Some(crate::hashing::hashcons(&Value::Primitive(Arc::new(
+				p.with_output(output),
+			)))),
 		})
 		.collect()
 }
@@ -321,25 +251,30 @@ pub(crate) fn obtainable(
 	if attacker.knows_hashed(v, hash).is_some() {
 		return true;
 	}
-	if matches!(v, Value::Constant(_)) {
+	let Value::Primitive(p) = v else {
 		return false;
-	}
+	};
 	let _memo = DeductionMemo::ensure(capabilities, attacker);
+	let pointer = Arc::as_ptr(p) as usize;
 	let remembered = with_memo(capabilities, attacker, |memo| {
-		memo.entries
+		if let Some(&(_, hit)) = memo.pointers.get(&pointer) {
+			return Some(hit);
+		}
+		let hit = memo
+			.entries
 			.get(&hash)?
 			.iter()
 			.find(|(candidate, _)| structurally_identical(candidate, v))
-			.map(|(_, hit)| *hit)
+			.map(|(_, hit)| *hit)?;
+		memo.pointers.insert(pointer, (Arc::clone(p), hit));
+		Some(hit)
 	});
 	if let Some(hit) = remembered.flatten() {
 		return hit;
 	}
-	let result = match v {
-		Value::Primitive(p) => construction_inputs(p, capabilities, attacker).is_some(),
-		Value::Constant(_) => false,
-	};
+	let result = construction_inputs(p, capabilities, attacker).is_some();
 	with_memo(capabilities, attacker, |memo| {
+		memo.pointers.insert(pointer, (Arc::clone(p), result));
 		memo.entries
 			.entry(hash)
 			.or_default()
@@ -462,8 +397,7 @@ pub(crate) fn can_recompose(p: &Primitive, attacker: &AttackerState) -> Option<R
 	}
 	let mut candidates = Vec::new();
 	for output_idx in 0..MAX_SHARES {
-		let probe = p.with_output(output_idx);
-		let hash = crate::hashing::primitive_hash(&probe);
+		let hash = crate::hashing::primitive_hash_at_output(p, output_idx);
 		let Some(indices) = attacker.known_map.get(&hash) else {
 			continue;
 		};
@@ -496,7 +430,11 @@ pub(crate) fn can_reconstruct_primitive(
 	attacker: &AttackerState,
 ) -> Option<ReconstructResult> {
 	can_reconstruct_primitive_directly(p, capabilities, attacker).or_else(|| {
-		let swapped = Arc::new(commutativity_swap(p)?);
+		let Value::Primitive(swapped) =
+			crate::hashing::hashcons(&Value::Primitive(Arc::new(commutativity_swap(p)?)))
+		else {
+			return None;
+		};
 		can_reconstruct_primitive_directly(&swapped, capabilities, attacker)
 	})
 }
@@ -535,7 +473,10 @@ fn can_reconstruct_primitive_directly(
 	let forgeable_secret =
 		capabilities.forgeable_secret_position(rewritten_prim, attacker.current_phase);
 	let reused = reused(rewritten_prim, attacker);
-	let by_reuse = forgeable_by_reuse(rewritten_prim, attacker);
+	let by_reuse: &[usize] = match reuse_rule(rewritten_prim.id) {
+		Some(rule) if reused.is_some() => &rule.forgeable,
+		_ => &[],
+	};
 	let exempt = |i: usize| Some(i) == forgeable_secret || by_reuse.contains(&i);
 	let mut has = Vec::new();
 	let mut skipped = 0usize;
@@ -830,18 +771,28 @@ fn combinable(
 pub(crate) fn reduce_once(v: &Value) -> Value {
 	match v {
 		Value::Primitive(p) => can_rewrite(p).1,
-		Value::Constant(_) => v.clone(),
+		Value::Constant(_) | Value::Variable(_) => v.clone(),
 	}
 }
 
 pub(crate) fn can_rewrite(p: &Arc<Primitive>) -> (bool, Value) {
-	let key = crate::hashing::primitive_hash(p);
-	if let Some(hit) = rewrite_cache_get(key, p) {
-		return hit;
-	}
-	let result = can_rewrite_uncached(p);
-	rewrite_cache_put(key, p, &result);
-	result
+	let (rewritten, value) = match p.hash.reduct() {
+		Some(hit) => hit,
+		None => {
+			let (rewritten, value) = can_rewrite_uncached(p);
+			let value = match value {
+				Value::Primitive(output) if Arc::ptr_eq(p, &output) => None,
+				value => Some(value),
+			};
+			p.hash.set_reduct((rewritten, value))
+		}
+	};
+	(
+		*rewritten,
+		value
+			.clone()
+			.unwrap_or_else(|| Value::Primitive(Arc::clone(p))),
+	)
 }
 
 fn can_rewrite_uncached(p: &Arc<Primitive>) -> (bool, Value) {
@@ -1111,69 +1062,6 @@ mod tests {
 	}
 
 	#[test]
-	fn a_rewrite_cache_releases_discarded_inputs_after_eviction() {
-		crate::context::enter_generation(crate::context::next_generation());
-		let p = Arc::new(Primitive::new(
-			PRIM_HASH,
-			vec![make_constant("cache_lifetime")],
-			0,
-		));
-		let weak = Arc::downgrade(&p);
-		assert!(can_rewrite(&p).0);
-		assert!(rewrite_cache_get(crate::hashing::primitive_hash(&p), &p).is_some());
-		drop(p);
-		for index in 0..TERM_MEMO_RECENT {
-			let next = Arc::new(Primitive::new(
-				PRIM_HASH,
-				vec![make_constant(&format!("rewrite_eviction_{index}"))],
-				0,
-			));
-			rewrite_cache_put(
-				crate::hashing::primitive_hash(&next),
-				&next,
-				&(true, Value::Primitive(Arc::clone(&next))),
-			);
-		}
-		assert!(weak.upgrade().is_none());
-	}
-
-	#[test]
-	fn rewrite_pointer_aliases_release_their_results_after_eviction() {
-		let mut cache = RewriteCache::default();
-		let original = Arc::new(Primitive::new(
-			PRIM_HASH,
-			vec![make_constant("pointer_alias_original")],
-			0,
-		));
-		let observed = Arc::downgrade(&original);
-		let twin = Arc::new((*original).clone());
-		let hash = crate::hashing::primitive_hash(&original);
-		cache.put(
-			hash,
-			&original,
-			true,
-			Value::Primitive(Arc::clone(&original)),
-		);
-		assert!(cache.get(hash, &twin).is_some());
-		assert!(cache.get(hash, &twin).is_some());
-		drop((original, twin));
-		for i in 0..TERM_MEMO_POINTERS {
-			let next = Arc::new(Primitive::new(
-				PRIM_HASH,
-				vec![make_constant(&format!("pointer_alias_eviction_{i}"))],
-				0,
-			));
-			cache.put(
-				crate::hashing::primitive_hash(&next),
-				&next,
-				true,
-				Value::Primitive(Arc::clone(&next)),
-			);
-		}
-		assert!(observed.upgrade().is_none());
-	}
-
-	#[test]
 	fn rewrite_pointer_hits_preserve_collisions_and_checked_instances() {
 		let a = make_constant("pointer_collision_a");
 		let b = make_constant("pointer_collision_b");
@@ -1192,23 +1080,6 @@ mod tests {
 			assert!(!succeeded);
 			assert!(value.as_primitive().unwrap().instance_check);
 		}
-	}
-
-	#[test]
-	fn a_rewrite_cached_under_one_generation_is_not_served_under_the_next() {
-		crate::context::enter_generation(crate::context::next_generation());
-		let k = make_constant("tgen_k");
-		let m = make_constant("tgen_m");
-		let enc = make_primitive(primitive_get_enum("ENC").unwrap(), vec![k.clone(), m], 0);
-		let dec = make_primitive(primitive_get_enum("DEC").unwrap(), vec![k, enc], 0);
-		let Value::Primitive(p) = &dec else {
-			panic!("expected a primitive");
-		};
-		let key = crate::hashing::primitive_hash(p);
-		assert!(can_rewrite(p).0);
-		assert!(rewrite_cache_get(key, p).is_some());
-		crate::context::enter_generation(crate::context::next_generation());
-		assert!(rewrite_cache_get(key, p).is_none());
 	}
 
 	fn weak_index(v: &Value, onset: i32) -> CapabilityIndex {

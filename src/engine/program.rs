@@ -121,6 +121,24 @@ impl Program {
 		}
 	}
 
+	pub(crate) fn sends<'a>(
+		&'a self,
+		sent: &'a [Option<Vec<Value>>],
+	) -> impl Iterator<Item = (usize, &'a Delivery, usize, &'a Value)> + Clone + 'a {
+		self.deliveries
+			.iter()
+			.zip(sent)
+			.enumerate()
+			.filter_map(|(d, (delivery, sent))| Some((d, delivery, sent.as_ref()?)))
+			.flat_map(|(d, delivery, sent)| {
+				delivery
+					.slots
+					.iter()
+					.zip(sent)
+					.map(move |(&(slot, _), v)| (d, delivery, slot, v))
+			})
+	}
+
 	pub(crate) fn run_index(&self, id: PrincipalId) -> Option<usize> {
 		self.run_of.get(&id).copied()
 	}

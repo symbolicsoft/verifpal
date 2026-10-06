@@ -1,0 +1,42 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1 at one and two sessions. Bob can tag either public constant,
+// but one run cannot tag both. Dave can tag c0 by opening its replayed
+// ciphertext. The joint attack must reserve Bob for c1 and use Dave for c0,
+// even when Bob was the first discovered source of the tag over c0.
+attacker[active]
+
+principal Alice[
+	knows private k, kd
+	knows public c0, c1
+	generates nb, nd, m
+	d0 = ENC(kd, c0)
+	dh = ENC(kd, nd)
+	ek = HASH(MAC(k, c0), MAC(k, c1))
+	e = ENC(ek, m)
+]
+Alice -> Bob: nb
+Alice -> Dave: dh
+Alice -> Eve: d0, e
+
+principal Bob[
+	knows private k
+	t = MAC(k, nb)
+]
+Bob -> Eve: t
+
+principal Dave[
+	knows private k, kd
+	opened = DEC(kd, dh)
+	td = MAC(k, opened)
+]
+Dave -> Eve: td
+
+principal Eve[
+	_ = HASH(d0, e, t, td)
+]
+
+queries[
+	confidentiality? m
+]

@@ -1,0 +1,47 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0 at one and two sessions. All three oracle inputs are guarded,
+// so none can produce the tags needed for the key. Extra sessions only tag
+// their fresh inputs and cannot disclose the key or the sealed secret.
+attacker[active]
+
+principal Sender[
+	knows private k1, k2, k3
+	knows public tag
+	generates x1, x2, x3, x4, secret
+	t1 = MAC(k1, tag)
+	t2 = MAC(k2, tag)
+	t3 = MAC(k3, HASH(t1, t2))
+	sealed = ENC(t3, secret)
+]
+Sender -> One: [x1]
+Sender -> Two: [x2]
+Sender -> Three: [x3], [x4]
+Sender -> Observer: [sealed]
+
+principal One[
+	knows private k1
+	r1 = MAC(k1, x1)
+]
+One -> Observer: r1
+
+principal Two[
+	knows private k2
+	r2 = MAC(k2, x2)
+]
+Two -> Observer: r2
+
+principal Three[
+	knows private k3
+	r3 = MAC(k3, HASH(x3, x4))
+]
+Three -> Observer: r3
+
+principal Observer[
+	_ = HASH(sealed, r1, r2, r3)
+]
+
+queries[
+	confidentiality? secret
+]

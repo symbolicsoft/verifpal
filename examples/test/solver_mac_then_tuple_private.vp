@@ -1,0 +1,25 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a0 at one session, a1 at two. A private key prevents a new
+// matching ciphertext and tag. Two Bob runs can still accept one genuine
+// ciphertext, so cross-session replay breaks injectivity.
+
+attacker[active]
+principal Alice[
+	knows private k
+	generates a, b, c, d, e
+	message = CONCAT(a, b, c, d, e)
+	ciphertext = ENC(k, message)
+	tag = MAC(k, ciphertext)
+]
+Alice -> Bob: ciphertext, tag
+principal Bob[
+	knows private k
+	_ = ASSERT(tag, MAC(k, ciphertext))?
+	opened = DEC(k, ciphertext)
+	first, second, third, fourth, fifth = SPLIT(opened)?
+]
+queries[
+	authentication? Alice -> Bob: ciphertext
+]

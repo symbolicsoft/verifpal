@@ -84,25 +84,6 @@ impl<T: Default> Generational<T> {
 	}
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub(crate) struct KnowledgeKey {
-	chain: u64,
-	known: usize,
-	phase: i32,
-	reused: usize,
-}
-
-impl KnowledgeKey {
-	pub(crate) fn of(attacker: &AttackerState) -> KnowledgeKey {
-		KnowledgeKey {
-			chain: attacker.chain,
-			known: attacker.known.len(),
-			phase: attacker.current_phase,
-			reused: attacker.reused.len(),
-		}
-	}
-}
-
 const RECENT_GROUPS: usize = 8;
 
 pub(crate) struct Recent<G, K, V> {
@@ -149,7 +130,7 @@ pub(crate) struct VerifyContext {
 	corrupt_from: Option<IdMap<PrincipalId, i32>>,
 	scenarios: Vec<ScenarioSummary>,
 	assumptions: Vec<(Value, Capability, i32)>,
-	basis: RwLock<(u64, i32, usize, crate::hashing::TermSet)>,
+	arities: RwLock<(u64, Arc<crate::solve::deduce::Arities>)>,
 	term_bound: std::sync::OnceLock<crate::solve::control::TermBound>,
 	cancel: Arc<AtomicBool>,
 }
@@ -183,7 +164,7 @@ impl VerifyContext {
 			corrupt_from,
 			scenarios,
 			assumptions,
-			basis: RwLock::new((0, -1, 0, crate::hashing::TermSet::default())),
+			arities: RwLock::new((u64::MAX, Arc::default())),
 			term_bound: std::sync::OnceLock::new(),
 			cancel: Arc::new(AtomicBool::new(false)),
 		}
@@ -255,23 +236,19 @@ impl VerifyContext {
 			.get_or_init(|| crate::solve::control::TermBound::of(km))
 	}
 
-	pub(crate) fn known_subterms(&self, attacker: &AttackerState) -> crate::hashing::TermSet {
-		let mut basis = write_lock(&self.basis);
-		let (chain, phase, covered, set) = &mut *basis;
-		if *chain != attacker.chain
-			|| *phase != attacker.current_phase
-			|| *covered > attacker.known.len()
-		{
-			*chain = attacker.chain;
-			*phase = attacker.current_phase;
-			*covered = 0;
-			set.clear();
+	pub(crate) fn known_arities(
+		&self,
+		attacker: &AttackerState,
+	) -> Arc<crate::solve::deduce::Arities> {
+		let mut cached = write_lock(&self.arities);
+		if cached.0 != attacker.chain {
+			let mut arities = crate::solve::deduce::Arities::default();
+			for known in attacker.known.iter() {
+				crate::solve::deduce::note_arities(known, &mut arities);
+			}
+			*cached = (attacker.chain, Arc::new(arities));
 		}
-		for known in &attacker.known[*covered..] {
-			crate::hashing::collect_subterms(known, set);
-		}
-		*covered = attacker.known.len();
-		set.clone()
+		Arc::clone(&cached.1)
 	}
 
 	pub(crate) fn assumptions(&self) -> &[(Value, Capability, i32)] {
@@ -280,6 +257,35 @@ impl VerifyContext {
 
 	pub(crate) fn results_get(&self) -> Vec<VerifyResult> {
 		read_lock(&self.results).clone()
+	}
+
+	pub(crate) fn unresolved(&self) -> Vec<(usize, Vec<Query>)> {
+		read_lock(&self.results)
+			.iter()
+			.filter(|result| !result.resolved)
+			.map(|result| {
+				let queries = std::iter::once(&result.query)
+					.chain(&result.variants)
+					.cloned()
+					.collect();
+				(result.query_index, queries)
+			})
+			.collect()
+	}
+
+	pub(crate) fn queries(&self) -> Vec<Query> {
+		read_lock(&self.results)
+			.iter()
+			.flat_map(|result| std::iter::once(&result.query).chain(&result.variants))
+			.cloned()
+			.collect()
+	}
+
+	pub(crate) fn open_queries(&self) -> Vec<Query> {
+		self.unresolved()
+			.into_iter()
+			.flat_map(|(_, queries)| queries)
+			.collect()
 	}
 
 	pub(crate) fn results_file_name(&self) -> &str {

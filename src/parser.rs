@@ -43,7 +43,7 @@ const DECLARATIONS: [(&str, Declaration); 3] = [
 	("leaks", Declaration::Leaks),
 ];
 
-const MAX_NESTING: usize = 64;
+const MAX_NESTING: usize = 128;
 
 fn names_a_primitive(lower: &str) -> bool {
 	primitive_get_enum(&lower.to_uppercase()).is_ok()

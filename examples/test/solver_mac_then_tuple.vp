@@ -1,0 +1,26 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a1 at one and two sessions. After the key leaks, the attacker
+// constructs a new ciphertext and its MAC together, with a five-field
+// plaintext so both the MAC check and every checked projection succeed.
+
+attacker[active]
+principal Alice[
+	knows private k
+	generates a, b, c, d, e
+	message = CONCAT(a, b, c, d, e)
+	ciphertext = ENC(k, message)
+	tag = MAC(k, ciphertext)
+	leaks k
+]
+Alice -> Bob: ciphertext, tag
+principal Bob[
+	knows private k
+	_ = ASSERT(tag, MAC(k, ciphertext))?
+	opened = DEC(k, ciphertext)
+	first, second, third, fourth, fifth = SPLIT(opened)?
+]
+queries[
+	authentication? Alice -> Bob: ciphertext
+]

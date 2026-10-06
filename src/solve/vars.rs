@@ -1,81 +1,81 @@
 /* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
  * SPDX-License-Identifier: GPL-3.0-only */
 
+use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 use crate::types::*;
 use crate::value::value_nil;
 
-pub(crate) const ATTACKER_VAR_BASE: ValueId = 0x8000_0000;
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct FreshVariables {
+	scope: Arc<str>,
+	next: Vec<u8>,
+}
 
-pub(crate) const FREE_VAR_BASE: ValueId = 0xC000_0000;
+impl FreshVariables {
+	pub(crate) fn new(scope: Arc<str>) -> Self {
+		Self {
+			scope,
+			next: vec![b'0'],
+		}
+	}
 
-const FREE_LANE_STRIDE: u32 = 1 << 16;
-
-pub(crate) const FREE_LANES: u32 = 1 << 13;
-
-pub(crate) fn free_lane_bounds(lane: u32) -> (u32, u32) {
-	assert!(
-		lane <= FREE_LANES,
-		"free-variable lane {lane} is beyond the {FREE_LANES} available"
-	);
-	let top = u32::MAX - FREE_VAR_BASE + 1;
-	if lane == 0 {
-		(0, top - FREE_LANES * FREE_LANE_STRIDE)
-	} else {
-		let start = top - lane * FREE_LANE_STRIDE;
-		(start, start + FREE_LANE_STRIDE)
+	pub(crate) fn fresh(&mut self) -> VariableId {
+		let serial = std::str::from_utf8(&self.next).expect("decimal identifier");
+		let id = VariableId::Free(Arc::from(format!("{}/{serial}", self.scope)));
+		for digit in self.next.iter_mut().rev() {
+			if *digit < b'9' {
+				*digit += 1;
+				return id;
+			}
+			*digit = b'0';
+		}
+		self.next.insert(0, b'1');
+		id
 	}
 }
 
-pub(crate) fn is_free_var_id(id: ValueId) -> bool {
-	id >= FREE_VAR_BASE
+pub(crate) fn is_free_var_id(id: &VariableId) -> bool {
+	matches!(id, VariableId::Free(_))
 }
 
-pub(crate) fn free_var(n: u32) -> Value {
-	Value::Constant(Constant {
-		name: Arc::from(format!("$free{n}")),
-		id: FREE_VAR_BASE + n,
-		..Default::default()
-	})
+pub(crate) fn free_var(n: usize) -> Value {
+	Value::Variable(VariableId::Free(Arc::from(format!("root/{n}"))))
 }
 
-pub(crate) type Substitution = IdMap<ValueId, Value>;
+pub(crate) type Substitution = IdMap<VariableId, Value>;
 
-pub(crate) fn attacker_var_id(slot: usize) -> ValueId {
-	ATTACKER_VAR_BASE + slot as ValueId
+pub(crate) fn attacker_var_id(slot: usize) -> VariableId {
+	VariableId::Slot(slot)
 }
 
-pub(crate) fn is_var_id(id: ValueId) -> bool {
-	id >= ATTACKER_VAR_BASE
+pub(crate) fn is_slot_var_id(id: &VariableId) -> bool {
+	matches!(id, VariableId::Slot(_))
 }
 
-pub(crate) fn is_slot_var_id(id: ValueId) -> bool {
-	(ATTACKER_VAR_BASE..FREE_VAR_BASE).contains(&id)
+pub(crate) fn slot_of_var_id(id: &VariableId) -> usize {
+	let VariableId::Slot(slot) = id else {
+		panic!("a wire slot variable")
+	};
+	*slot
 }
 
-pub(crate) fn slot_of_var_id(id: ValueId) -> usize {
-	(id - ATTACKER_VAR_BASE) as usize
+pub(crate) fn attacker_var(slot: usize) -> Value {
+	Value::Variable(attacker_var_id(slot))
 }
 
-pub(crate) fn attacker_var(slot: usize, hint: &str) -> Value {
-	Value::Constant(Constant {
-		name: Arc::from(format!("${hint}")),
-		id: attacker_var_id(slot),
-		..Default::default()
-	})
-}
-
-pub(crate) fn as_var(v: &Value) -> Option<ValueId> {
+pub(crate) fn as_var(v: &Value) -> Option<VariableId> {
 	match v {
-		Value::Constant(c) if is_var_id(c.id) => Some(c.id),
+		Value::Variable(id) => Some(id.clone()),
 		_ => None,
 	}
 }
 
 pub(crate) fn contains_var(v: &Value) -> bool {
 	match v {
-		Value::Constant(c) => is_var_id(c.id),
+		Value::Constant(_) => false,
+		Value::Variable(_) => true,
 		Value::Primitive(p) => {
 			if let Some(has) = p.hash.has_variables() {
 				return has;
@@ -87,25 +87,59 @@ pub(crate) fn contains_var(v: &Value) -> bool {
 	}
 }
 
-pub(crate) fn collect_free_vars(v: &Value, out: &mut Vec<ValueId>) {
+pub(crate) fn collect_free_vars(v: &Value, out: &mut Vec<VariableId>) {
 	collect_var_ids(v, out, is_free_var_id);
 }
 
-pub(crate) fn collect_vars(v: &Value, out: &mut Vec<ValueId>) {
-	collect_var_ids(v, out, is_var_id);
+pub(crate) fn collect_vars(v: &Value, out: &mut Vec<VariableId>) {
+	collect_var_ids(v, out, |_| true);
 }
 
-fn collect_var_ids(v: &Value, out: &mut Vec<ValueId>, include: fn(ValueId) -> bool) {
+fn collect_var_ids(v: &Value, out: &mut Vec<VariableId>, include: fn(&VariableId) -> bool) {
 	if !contains_var(v) {
 		return;
 	}
 	for term in crate::value::subterms(v) {
-		if let Value::Constant(c) = term
-			&& include(c.id)
-			&& !out.contains(&c.id)
+		if let Value::Variable(id) = term
+			&& include(id)
+			&& !out.contains(id)
 		{
-			out.push(c.id);
+			out.push(id.clone());
 		}
+	}
+}
+
+pub(crate) struct PointerMemo<T> {
+	few: Vec<(usize, T)>,
+	many: IdMap<usize, T>,
+}
+
+impl<T: Clone> PointerMemo<T> {
+	pub(crate) fn new() -> Self {
+		Self {
+			few: Vec::new(),
+			many: IdMap::default(),
+		}
+	}
+
+	pub(crate) fn get(&self, key: usize) -> Option<T> {
+		if self.many.is_empty() {
+			return self
+				.few
+				.iter()
+				.find(|(held, _)| *held == key)
+				.map(|(_, value)| value.clone());
+		}
+		self.many.get(&key).cloned()
+	}
+
+	pub(crate) fn insert(&mut self, key: usize, value: T) {
+		if self.many.is_empty() && self.few.len() < 32 {
+			self.few.push((key, value));
+			return;
+		}
+		self.many.extend(self.few.drain(..));
+		self.many.insert(key, value);
 	}
 }
 
@@ -113,39 +147,48 @@ pub(crate) fn apply(v: &Value, s: &Substitution) -> Value {
 	if s.is_empty() || !contains_var(v) {
 		return v.clone();
 	}
-	let mut shared: IdMap<usize, Value> = IdMap::default();
-	apply_shared(v, s, &mut shared)
+	apply_shared(v, s, &mut PointerMemo::new())
 }
 
-fn apply_shared(v: &Value, s: &Substitution, shared: &mut IdMap<usize, Value>) -> Value {
+fn apply_shared(v: &Value, s: &Substitution, shared: &mut PointerMemo<Value>) -> Value {
 	if !contains_var(v) {
 		return v.clone();
 	}
 	match v {
-		Value::Constant(c) => match s.get(&c.id) {
+		Value::Constant(_) => v.clone(),
+		Value::Variable(id) => match s.get(id) {
 			Some(bound) => apply_shared(bound, s, shared),
 			None => v.clone(),
 		},
 		Value::Primitive(p) => {
 			let key = Arc::as_ptr(p) as usize;
-			if let Some(hit) = shared.get(&key) {
-				return hit.clone();
+			if let Some(hit) = shared.get(key) {
+				return hit;
 			}
-			let args: Vec<Value> = p
-				.arguments
-				.iter()
-				.map(|a| apply_shared(a, s, shared))
-				.collect();
-			let unchanged = args.iter().zip(&p.arguments).all(|(a, b)| match (a, b) {
-				(Value::Primitive(a), Value::Primitive(b)) => Arc::ptr_eq(a, b),
-				(Value::Constant(a), Value::Constant(b)) => a.id == b.id,
-				_ => false,
-			});
-			let out = if unchanged {
-				v.clone()
-			} else {
-				let args = crate::primitive::normalise_arguments(p.id, args);
-				Value::Primitive(Arc::new(p.with_arguments(args)))
+			let mut args: Option<Vec<Value>> = None;
+			for (at, a) in p.arguments.iter().enumerate() {
+				let applied = apply_shared(a, s, shared);
+				let unchanged = match (&applied, a) {
+					(Value::Primitive(x), Value::Primitive(y)) => Arc::ptr_eq(x, y),
+					(Value::Constant(x), Value::Constant(y)) => x.id == y.id,
+					(Value::Variable(x), Value::Variable(y)) => x == y,
+					_ => false,
+				};
+				if let Some(args) = args.as_mut() {
+					args.push(applied);
+				} else if !unchanged {
+					let mut changed = Vec::with_capacity(p.arguments.len());
+					changed.extend(p.arguments[..at].iter().cloned());
+					changed.push(applied);
+					args = Some(changed);
+				}
+			}
+			let out = match args {
+				None => v.clone(),
+				Some(args) => {
+					let args = crate::primitive::normalise_arguments(p.id, args);
+					Value::Primitive(Arc::new(p.with_arguments(args)))
+				}
 			};
 			shared.insert(key, out.clone());
 			out
@@ -153,8 +196,8 @@ fn apply_shared(v: &Value, s: &Substitution, shared: &mut IdMap<usize, Value>) -
 	}
 }
 
-pub(crate) fn occurs(id: ValueId, v: &Value, s: &Substitution) -> bool {
-	if is_var_id(id) && !contains_var(v) {
+pub(crate) fn occurs(id: &VariableId, v: &Value, s: &Substitution) -> bool {
+	if !contains_var(v) {
 		return false;
 	}
 	let mut variables = IdSet::default();
@@ -162,13 +205,13 @@ pub(crate) fn occurs(id: ValueId, v: &Value, s: &Substitution) -> bool {
 	let mut pending = vec![v];
 	while let Some(term) = pending.pop() {
 		match term {
-			Value::Constant(c) => {
-				if c.id == id {
+			Value::Constant(_) => {}
+			Value::Variable(variable) => {
+				if variable == id {
 					return true;
 				}
-				if is_var_id(c.id)
-					&& let Some(bound) = s.get(&c.id)
-					&& variables.insert(c.id)
+				if let Some(bound) = s.get(variable)
+					&& variables.insert(variable)
 				{
 					pending.push(bound);
 				}
@@ -183,11 +226,11 @@ pub(crate) fn occurs(id: ValueId, v: &Value, s: &Substitution) -> bool {
 	false
 }
 
-pub(crate) fn bind(s: &mut Substitution, id: ValueId, v: Value) -> bool {
+pub(crate) fn bind(s: &mut Substitution, id: VariableId, v: Value) -> bool {
 	match s.get(&id) {
 		Some(existing) => existing.equivalent(&v, true),
 		None => {
-			if occurs(id, &v, s) {
+			if occurs(&id, &v, s) {
 				return false;
 			}
 			s.insert(id, v);
@@ -210,8 +253,9 @@ fn ground_free_shared(v: &Value, filler: &Value, shared: &mut IdMap<usize, Value
 		return v.clone();
 	}
 	match v {
-		Value::Constant(c) => {
-			if is_free_var_id(c.id) {
+		Value::Constant(_) => v.clone(),
+		Value::Variable(id) => {
+			if is_free_var_id(id) {
 				filler.clone()
 			} else {
 				v.clone()
@@ -243,10 +287,10 @@ pub(crate) fn ground_remaining(v: &Value, s: &mut Substitution) {
 	}
 }
 
-pub(crate) fn remove_local_bindings(mut s: Substitution, ids: &[ValueId]) -> Substitution {
+pub(crate) fn remove_local_bindings(mut s: Substitution, ids: &[VariableId]) -> Substitution {
 	let local: Substitution = ids
 		.iter()
-		.filter_map(|id| s.remove(id).map(|value| (*id, value)))
+		.filter_map(|id| s.remove(id).map(|value| (id.clone(), value)))
 		.collect();
 	if !local.is_empty() {
 		for value in s.values_mut() {
@@ -267,18 +311,21 @@ pub(crate) fn same_substitution(a: &Substitution, b: &Substitution) -> bool {
 pub(crate) fn canonical_slots(s: &Substitution) -> Substitution {
 	fn rename(
 		v: &Value,
-		names: &mut IdMap<ValueId, Value>,
+		names: &mut IdMap<VariableId, Value>,
 		shared: &mut IdMap<usize, Value>,
 	) -> Value {
 		if !contains_var(v) {
 			return v.clone();
 		}
 		match v {
-			Value::Constant(c) if is_free_var_id(c.id) => {
-				let next = names.len() as u32;
-				names.entry(c.id).or_insert_with(|| free_var(next)).clone()
+			Value::Variable(id) if is_free_var_id(id) => {
+				let next = names.len();
+				names
+					.entry(id.clone())
+					.or_insert_with(|| free_var(next))
+					.clone()
 			}
-			Value::Constant(_) => v.clone(),
+			Value::Constant(_) | Value::Variable(_) => v.clone(),
 			Value::Primitive(p) => {
 				let key = Arc::as_ptr(p) as usize;
 				if let Some(hit) = shared.get(&key) {
@@ -296,7 +343,7 @@ pub(crate) fn canonical_slots(s: &Substitution) -> Substitution {
 		}
 	}
 
-	let mut slots: Vec<_> = s.keys().copied().filter(|id| is_slot_var_id(*id)).collect();
+	let mut slots: Vec<_> = s.keys().filter(|id| is_slot_var_id(id)).cloned().collect();
 	slots.sort_unstable();
 	let values: Vec<_> = slots.iter().map(|id| apply(&s[id], s)).collect();
 	let mut names = IdMap::default();
@@ -307,16 +354,29 @@ pub(crate) fn canonical_slots(s: &Substitution) -> Substitution {
 		.collect()
 }
 
-pub(crate) fn dedupe_slots(mut candidates: Vec<Substitution>) -> Vec<Substitution> {
+pub(crate) fn dedupe_slots(candidates: Vec<Substitution>) -> Vec<Substitution> {
 	let mut seen = Distinct::default();
-	candidates.retain(|s| seen.insert(canonical_slots(s), ()));
 	candidates
+		.into_iter()
+		.filter_map(|candidate| {
+			let mut shared = PointerMemo::new();
+			let slots = candidate
+				.iter()
+				.filter(|(id, _)| is_slot_var_id(id))
+				.map(|(id, value)| (id.clone(), apply_shared(value, &candidate, &mut shared)))
+				.collect();
+			seen.insert(canonical_slots(&slots), ()).then_some(slots)
+		})
+		.collect()
 }
 
 pub(crate) fn substitution_hash(s: &Substitution) -> u64 {
 	let mut acc: u64 = s.len() as u64;
 	for (id, v) in s {
-		let mut entry = (*id as u64)
+		let mut hash = IdHasher::default();
+		id.hash(&mut hash);
+		let mut entry = hash
+			.finish()
 			.wrapping_mul(0x9E37_79B9_7F4A_7C15)
 			.rotate_left(17)
 			^ v.hash_value().wrapping_mul(0xC2B2_AE3D_27D4_EB4F);
@@ -380,16 +440,16 @@ mod tests {
 		let tuple =
 			|a: Value, b: Value| Value::primitive(crate::primitive::PRIM_CONCAT, vec![a, b], 0);
 		let left = Substitution::from_iter([
-			(slot, tuple(free_var(10), free_var(11))),
-			(FREE_VAR_BASE + 11, free_var(10)),
-			(FREE_VAR_BASE + 12, value_nil()),
+			(slot.clone(), tuple(free_var(10), free_var(11))),
+			(as_var(&free_var(11)).unwrap(), free_var(10)),
+			(as_var(&free_var(12)).unwrap(), value_nil()),
 		]);
-		let right = Substitution::from_iter([(slot, tuple(free_var(20), free_var(20)))]);
+		let right = Substitution::from_iter([(slot.clone(), tuple(free_var(20), free_var(20)))]);
 		assert!(same_substitution(
 			&canonical_slots(&left),
 			&canonical_slots(&right)
 		));
-		let distinct = Substitution::from_iter([(slot, tuple(free_var(20), free_var(21)))]);
+		let distinct = Substitution::from_iter([(slot.clone(), tuple(free_var(20), free_var(21)))]);
 		assert!(!same_substitution(
 			&canonical_slots(&left),
 			&canonical_slots(&distinct)
@@ -408,11 +468,7 @@ mod tests {
 		}
 		let template = Value::primitive(
 			crate::primitive::PRIM_HASH,
-			vec![
-				ground.clone(),
-				free_var(0),
-				attacker_var(0, "grounding_slot"),
-			],
+			vec![ground.clone(), free_var(0), attacker_var(0)],
 			0,
 		);
 		for filler in [value_nil(), crate::primitive::attacker_public_key()] {
@@ -472,8 +528,7 @@ mod tests {
 			&canonical_slots(&make(10, 10)),
 			&canonical_slots(&make(20, 21))
 		));
-		let unbound_slot =
-			Substitution::from_iter([(attacker_var_id(0), attacker_var(1, "unbound"))]);
+		let unbound_slot = Substitution::from_iter([(attacker_var_id(0), attacker_var(1))]);
 		assert!(!same_substitution(
 			&canonical_slots(&make(10, 10)),
 			&canonical_slots(&unbound_slot)
@@ -482,7 +537,7 @@ mod tests {
 
 	#[test]
 	fn removing_local_bindings_preserves_the_remaining_choices() {
-		let slot = attacker_var(0, "local_projection_slot");
+		let slot = attacker_var(0);
 		let first = free_var(0);
 		let second = free_var(1);
 		let kept = free_var(2);
@@ -502,7 +557,7 @@ mod tests {
 		assert_eq!(projected.len(), 1);
 		assert!(apply(&slot, &original).equivalent(&apply(&slot, &projected), true));
 		assert!(occurs(
-			as_var(&kept).unwrap(),
+			&as_var(&kept).unwrap(),
 			&apply(&slot, &projected),
 			&projected
 		));
@@ -510,7 +565,7 @@ mod tests {
 	}
 	#[test]
 	fn variable_walks_visit_shared_terms_without_expanding_them() {
-		let slot = attacker_var(0, "dag_slot");
+		let slot = attacker_var(0);
 		let free = free_var(0);
 		let mut term = Value::primitive(
 			crate::primitive::PRIM_HASH,
@@ -532,10 +587,10 @@ mod tests {
 		assert_eq!(frees, vec![as_var(&free).unwrap()]);
 		let missing = attacker_var_id(1);
 		let mut bindings = Substitution::default();
-		assert!(!occurs(missing, &term, &bindings));
-		bindings.insert(as_var(&free).unwrap(), attacker_var(1, "dag_missing"));
-		assert!(occurs(missing, &term, &bindings));
-		assert!(!occurs(attacker_var_id(2), &term, &bindings));
+		assert!(!occurs(&missing, &term, &bindings));
+		bindings.insert(as_var(&free).unwrap(), attacker_var(1));
+		assert!(occurs(&missing, &term, &bindings));
+		assert!(!occurs(&attacker_var_id(2), &term, &bindings));
 	}
 
 	fn solver_constant(name: &str) -> Value {
@@ -547,28 +602,45 @@ mod tests {
 	}
 
 	#[test]
-	fn solver_var_ids_are_disjoint_from_interned_names() {
-		let interned = test_value_id("solver_disjoint_a");
-		assert!(interned < crate::solve::vars::ATTACKER_VAR_BASE);
-		assert!(crate::solve::vars::is_var_id(
-			crate::solve::vars::attacker_var_id(0)
-		));
-		assert!(!crate::solve::vars::is_var_id(interned));
+	fn variables_never_alias_constants_or_slots() {
+		let slot = attacker_var(3);
+		let free = free_var(3);
+		let constant = Value::Constant(Constant {
+			id: u32::MAX,
+			name: Arc::from("root/3"),
+			..Default::default()
+		});
+		for (a, b) in [(&slot, &free), (&slot, &constant), (&free, &constant)] {
+			assert!(!a.same_term(b));
+			assert!(!a.equivalent(b, true));
+		}
+		assert!(is_slot_var_id(&as_var(&slot).unwrap()));
+		assert!(is_free_var_id(&as_var(&free).unwrap()));
+		assert_eq!(slot_of_var_id(&as_var(&slot).unwrap()), 3);
+		assert!(!contains_var(&constant));
 	}
 
 	#[test]
-	fn a_free_variable_is_a_variable_but_not_a_slot() {
-		let slot = crate::solve::vars::attacker_var_id(3);
-		let free = crate::solve::vars::FREE_VAR_BASE + 3;
-		assert!(is_var_id(slot) && is_var_id(free));
-		assert!(is_slot_var_id(slot));
-		assert!(
-			!is_slot_var_id(free),
-			"a free position is an attacker choice, not a wire slot: reading one as \
-			 a slot index would install into slot {} of a state that may not have it",
-			slot_of_var_id(free)
-		);
-		assert_eq!(slot_of_var_id(slot), 3);
+	fn fresh_identifiers_grow_past_machine_integer_sizes() {
+		for width in [1, 10, 20, 40, 100] {
+			let mut variables = FreshVariables {
+				scope: Arc::from("rollover"),
+				next: vec![b'9'; width],
+			};
+			let before = Value::Variable(variables.fresh());
+			let after = Value::Variable(variables.fresh());
+			let following = Value::Variable(variables.fresh());
+			assert_eq!(
+				after.to_string(),
+				format!("$freerollover/1{}", "0".repeat(width))
+			);
+			assert!(!before.equivalent(&after, true));
+			assert!(!after.equivalent(&following, true));
+			let mut binding = Substitution::default();
+			assert!(bind(&mut binding, as_var(&before).unwrap(), value_nil()));
+			assert!(contains_var(&apply(&after, &binding)));
+			assert!(contains_var(&apply(&following, &binding)));
+		}
 	}
 
 	#[test]
@@ -590,9 +662,15 @@ mod tests {
 		};
 
 		let mut left = crate::solve::vars::Substitution::default();
-		left.insert(slot, concat(a.clone(), crate::solve::vars::free_var(0)));
+		left.insert(
+			slot.clone(),
+			concat(a.clone(), crate::solve::vars::free_var(0)),
+		);
 		let mut right = crate::solve::vars::Substitution::default();
-		right.insert(slot, concat(crate::solve::vars::free_var(1), b.clone()));
+		right.insert(
+			slot.clone(),
+			concat(crate::solve::vars::free_var(1), b.clone()),
+		);
 
 		let merged = crate::solve::matching::merge(&left, &right)
 			.next()
@@ -605,7 +683,7 @@ mod tests {
 	fn solver_occurs_check_refuses_a_cyclic_binding() {
 		let k = solver_constant("solver_occurs_k");
 		let slot = crate::solve::vars::attacker_var_id(0);
-		let var = crate::solve::vars::attacker_var(0, "occurs");
+		let var = crate::solve::vars::attacker_var(0);
 		let enc = |x: Value, y: Value| {
 			Value::Primitive(std::sync::Arc::new(Primitive {
 				id: crate::primitive::PRIM_ENC,
@@ -620,7 +698,7 @@ mod tests {
 		};
 
 		let mut s = crate::solve::vars::Substitution::default();
-		assert!(!bind(&mut s, slot, enc(k.clone(), var.clone())));
+		assert!(!bind(&mut s, slot.clone(), enc(k.clone(), var.clone())));
 		assert!(s.is_empty());
 		// The same binding without the self-reference is fine.
 		assert!(bind(
@@ -653,19 +731,19 @@ mod tests {
 		let mut s = crate::solve::vars::Substitution::default();
 		assert!(bind(
 			&mut s,
-			a,
-			hash(crate::solve::vars::attacker_var(1, "b"))
+			a.clone(),
+			hash(crate::solve::vars::attacker_var(1))
 		));
-		assert!(bind(&mut s, b, crate::solve::vars::attacker_var(2, "c")));
-		assert!(occurs(a, &crate::solve::vars::attacker_var(0, "a"), &s));
+		assert!(bind(&mut s, b, crate::solve::vars::attacker_var(2)));
+		assert!(occurs(&a, &crate::solve::vars::attacker_var(0), &s));
 		assert!(!bind(
 			&mut s,
-			c,
-			hash(crate::solve::vars::attacker_var(0, "a"))
+			c.clone(),
+			hash(crate::solve::vars::attacker_var(0))
 		));
 		assert!(bind(&mut s, c, hash(solver_constant("solver_chain_m"))));
 		// With the cycle refused, applying the substitution terminates.
-		let applied = crate::solve::vars::apply(&crate::solve::vars::attacker_var(0, "a"), &s);
+		let applied = crate::solve::vars::apply(&crate::solve::vars::attacker_var(0), &s);
 		assert!(!crate::solve::vars::contains_var(&applied));
 	}
 
@@ -673,7 +751,7 @@ mod tests {
 	fn solver_free_positions_become_nil() {
 		let free = crate::solve::vars::free_var(7);
 		assert!(crate::solve::vars::is_free_var_id(
-			crate::solve::vars::as_var(&free).expect("is a variable")
+			&crate::solve::vars::as_var(&free).expect("is a variable")
 		));
 		let grounded = crate::solve::vars::ground_free(&free);
 		assert!(grounded.equivalent(&crate::value::value_nil(), true));

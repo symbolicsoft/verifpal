@@ -511,7 +511,7 @@ fn ordinal(n: usize) -> Cow<'static, str> {
 
 pub(crate) fn info_output_text(revealed: &Value) -> String {
 	match revealed {
-		Value::Constant(_) => revealed.to_string(),
+		Value::Constant(_) | Value::Variable(_) => revealed.to_string(),
 		Value::Primitive(p) if primitive_has_single_output(p.id) => {
 			format!("Output of {revealed}")
 		}

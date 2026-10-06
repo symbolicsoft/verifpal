@@ -7,14 +7,14 @@ pub(crate) fn primitive_hash(p: &Primitive) -> u64 {
 	if let Some(cached) = p.hash.get() {
 		return cached;
 	}
-	let computed = primitive_hash_uncached(p);
+	let computed = primitive_hash_at_output(p, p.output);
 	p.hash.set(computed);
 	computed
 }
 
-fn primitive_hash_uncached(p: &Primitive) -> u64 {
+pub(crate) fn primitive_hash_at_output(p: &Primitive, output: usize) -> u64 {
 	let base = (p.id as u64).wrapping_mul(2654435761)
-		^ (p.output as u64).wrapping_mul(97)
+		^ (output as u64).wrapping_mul(97)
 		^ (p.threshold as u64).wrapping_mul(1000003)
 		^ (p.instance as u64).wrapping_mul(0x9E37_79B1);
 	if let Some((inner, bare)) = crate::primitive::commutativity_parts_ref(p) {
@@ -33,6 +33,114 @@ fn primitive_hash_uncached(p: &Primitive) -> u64 {
 		h = h.wrapping_mul(31).wrapping_add(a.hash_value());
 	}
 	h
+}
+
+thread_local! {
+	static TERMS: std::cell::RefCell<crate::context::Generational<Interner>> =
+		std::cell::RefCell::new(crate::context::Generational::default());
+}
+
+pub(crate) fn hashcons(v: &Value) -> Value {
+	match v {
+		Value::Primitive(_) => TERMS.with(|terms| terms.borrow_mut().fresh().intern(v)),
+		Value::Constant(_) | Value::Variable(_) => v.clone(),
+	}
+}
+
+pub(crate) fn hashconsed(p: &std::sync::Arc<Primitive>) -> bool {
+	TERMS.with(|terms| terms.borrow_mut().fresh().holds(p))
+}
+
+#[derive(Default)]
+struct Interner {
+	table: IdMap<u64, Vec<std::sync::Arc<Primitive>>>,
+}
+
+fn same_constant(a: &Constant, b: &Constant) -> bool {
+	a.id == b.id
+		&& a.name == b.name
+		&& a.guard == b.guard
+		&& a.fresh == b.fresh
+		&& a.leaked == b.leaked
+		&& a.declaration == b.declaration
+		&& a.qualifier == b.qualifier
+}
+
+fn same_leaf(a: &Value, b: &Value) -> bool {
+	match (a, b) {
+		(Value::Constant(x), Value::Constant(y)) => same_constant(x, y),
+		(Value::Variable(x), Value::Variable(y)) => x == y,
+		(Value::Primitive(x), Value::Primitive(y)) => std::sync::Arc::ptr_eq(x, y),
+		_ => false,
+	}
+}
+
+impl Interner {
+	fn holds(&self, p: &std::sync::Arc<Primitive>) -> bool {
+		self.table
+			.get(&primitive_hash(p))
+			.is_some_and(|bucket| bucket.iter().any(|held| std::sync::Arc::ptr_eq(held, p)))
+	}
+
+	fn intern(&mut self, v: &Value) -> Value {
+		self.intern_with(v, &mut crate::solve::vars::PointerMemo::new())
+	}
+
+	fn intern_with(
+		&mut self,
+		v: &Value,
+		memo: &mut crate::solve::vars::PointerMemo<Value>,
+	) -> Value {
+		let Value::Primitive(p) = v else {
+			return v.clone();
+		};
+		let key = std::sync::Arc::as_ptr(p) as usize;
+		if let Some(hit) = memo.get(key) {
+			return hit;
+		}
+		if self.holds(p) {
+			return v.clone();
+		}
+		let arguments: Vec<Value> = p
+			.arguments
+			.iter()
+			.map(|a| self.intern_with(a, memo))
+			.collect();
+		let bucket = self.table.entry(primitive_hash(p)).or_default();
+		let found = bucket.iter().find(|held| {
+			held.id == p.id
+				&& held.output == p.output
+				&& held.threshold == p.threshold
+				&& held.instance == p.instance
+				&& held.instance_check == p.instance_check
+				&& held.capabilities == p.capabilities
+				&& held.arguments.len() == arguments.len()
+				&& held
+					.arguments
+					.iter()
+					.zip(&arguments)
+					.all(|(a, b)| same_leaf(a, b))
+		});
+		let canonical = match found {
+			Some(held) => std::sync::Arc::clone(held),
+			None => {
+				let canonical = if arguments
+					.iter()
+					.zip(&p.arguments)
+					.all(|(a, b)| a.same_term(b))
+				{
+					std::sync::Arc::clone(p)
+				} else {
+					std::sync::Arc::new(p.with_arguments(arguments))
+				};
+				bucket.push(std::sync::Arc::clone(&canonical));
+				canonical
+			}
+		};
+		let out = Value::Primitive(canonical);
+		memo.insert(key, out.clone());
+		out
+	}
 }
 
 #[derive(Clone, Default)]
@@ -61,10 +169,6 @@ impl TermSet {
 	pub(crate) fn is_empty(&self) -> bool {
 		self.0.is_empty()
 	}
-
-	pub(crate) fn clear(&mut self) {
-		self.0.clear();
-	}
 }
 
 impl Extend<Value> for TermSet {
@@ -83,10 +187,6 @@ impl FromIterator<Value> for TermSet {
 	}
 }
 
-pub(crate) fn collect_subterms(v: &Value, out: &mut TermSet) {
-	out.extend(crate::value::subterms(v).cloned());
-}
-
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -102,7 +202,7 @@ mod tests {
 			expected.insert(term.hash_value());
 		}
 		let mut found = TermSet::default();
-		collect_subterms(&term, &mut found);
+		found.extend(crate::value::subterms(&term).cloned());
 		assert_eq!(
 			found.iter().map(Value::hash_value).collect::<IdSet<_>>(),
 			expected
@@ -118,7 +218,7 @@ mod tests {
 		assert!(left.equivalent(&right, true));
 		let root = make_primitive(PRIM_HASH, vec![left.clone(), right.clone()], 0);
 		let mut found = TermSet::default();
-		collect_subterms(&root, &mut found);
+		found.extend(crate::value::subterms(&root).cloned());
 		for term in [&left, &right] {
 			let key = &term.as_primitive().unwrap().arguments[0];
 			assert!(found.contains(key));

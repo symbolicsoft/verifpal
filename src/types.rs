@@ -653,6 +653,13 @@ impl std::fmt::Display for AttackerKind {
 pub enum Value {
 	Constant(Constant),
 	Primitive(Arc<Primitive>),
+	Variable(VariableId),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum VariableId {
+	Slot(usize),
+	Free(Arc<str>),
 }
 
 impl Value {
@@ -687,13 +694,18 @@ pub struct Constant {
 }
 
 #[derive(Debug, Default)]
-pub struct HashCell(AtomicU64, AtomicU8);
+pub struct HashCell(
+	AtomicU64,
+	AtomicU8,
+	std::sync::OnceLock<Box<(bool, Option<Value>)>>,
+);
 
 impl Clone for HashCell {
 	fn clone(&self) -> Self {
 		HashCell(
 			AtomicU64::new(self.0.load(Ordering::Relaxed)),
 			AtomicU8::new(self.1.load(Ordering::Relaxed)),
+			std::sync::OnceLock::new(),
 		)
 	}
 }
@@ -708,8 +720,11 @@ impl HashCell {
 	pub fn set(&self, hash: u64) {
 		self.0.store(hash, Ordering::Relaxed);
 	}
-	pub fn clear(&self) {
-		self.0.store(0, Ordering::Relaxed);
+	pub(crate) fn reduct(&self) -> Option<&(bool, Option<Value>)> {
+		self.2.get().map(AsRef::as_ref)
+	}
+	pub(crate) fn set_reduct(&self, reduct: (bool, Option<Value>)) -> &(bool, Option<Value>) {
+		self.2.get_or_init(|| Box::new(reduct))
 	}
 	pub fn has_variables(&self) -> Option<bool> {
 		match self.1.load(Ordering::Relaxed) {
@@ -956,14 +971,12 @@ pub struct TraceValue {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Truncation {
 	TermDepth,
-	SolverVariables,
 }
 
 impl Truncation {
 	pub fn name(self) -> &'static str {
 		match self {
 			Truncation::TermDepth => "term depth",
-			Truncation::SolverVariables => "solver variables",
 		}
 	}
 }
@@ -1209,19 +1222,17 @@ impl Expression {
 	pub(crate) fn outputs(&self) -> impl Iterator<Item = (&Constant, Value)> + '_ {
 		self.assigned.iter().flat_map(move |assigned| {
 			self.constants.iter().enumerate().map(move |(output, c)| {
-				let mut value = assigned.clone();
-				if let Value::Primitive(p) = &mut value {
-					let projected = Arc::make_mut(p);
-					projected.output = output;
-					if crate::primitive::primitive_get(projected.id)
-						.is_ok_and(|spec| spec.distinct_per_assignment)
-						&& let Some(first) = self.constants.first()
-					{
-						projected.instance = crate::value::copy_index_of(first.id).1;
-					}
-					projected.hash.clear();
+				let Value::Primitive(p) = assigned else {
+					return (c, assigned.clone());
+				};
+				let mut projected = p.with_output(output);
+				if crate::primitive::primitive_get(projected.id)
+					.is_ok_and(|spec| spec.distinct_per_assignment)
+					&& let Some(first) = self.constants.first()
+				{
+					projected.instance = crate::value::copy_index_of(first.id).1;
 				}
-				(c, value)
+				(c, Value::Primitive(Arc::new(projected)))
 			})
 		})
 	}

@@ -5,8 +5,6 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
 use crate::context::VerifyContext;
-use crate::engine::exec::Execution;
-use crate::engine::program::Program;
 use crate::info::info_message;
 use crate::parser::parse_file;
 use crate::sanity::*;
@@ -83,9 +81,6 @@ pub(crate) fn analyze_sessions_cancellable(
 
 fn capability_reach_notice(trace: &ProtocolTrace) {
 	let governed = trace.capabilities.governed_occurrences(&trace.slots);
-	if governed.is_empty() {
-		return;
-	}
 	for (slot, reach) in &governed {
 		let anonymous = crate::util::is_anonymous_name(slot);
 		let slot = if anonymous {
@@ -204,37 +199,6 @@ fn verify_model(m: &Model, sessions: u8) -> VResult<VerifyReport> {
 	let report = VerifyReport::of(m, &analyzed?, sessions, elapsed);
 	verify_end(&report);
 	Ok(report)
-}
-
-pub(crate) fn check_honest_run(
-	ctx: &VerifyContext,
-	km: &ProtocolTrace,
-	program: &Program,
-	root: &Execution,
-) -> VResult<()> {
-	let located = |e: VerifpalError, slot: usize| e.or_span(km.slots[slot].declared_span);
-	let failed = root
-		.runs
-		.iter()
-		.filter_map(|run| run.halted.map(|slot| (slot, run)))
-		.filter(|&(slot, _)| {
-			let creator = km.slots[slot].creator;
-			ctx.is_honest_at(creator, program.phase_of(creator, slot))
-		})
-		.min_by_key(|&(slot, _)| slot);
-	if let Some((slot, run)) = failed
-		&& let Some(Value::Primitive(p)) = run.held(slot).map(|held| &held.value)
-	{
-		return Err(located(honest_check_failure(p), slot));
-	}
-	for run in &root.runs {
-		for (slot, held) in run.env.iter().enumerate() {
-			if let Some(held) = held {
-				sanity_check_argument_restrictions(&held.value).map_err(|e| located(e, slot))?;
-			}
-		}
-	}
-	Ok(())
 }
 
 pub(crate) fn status_line(

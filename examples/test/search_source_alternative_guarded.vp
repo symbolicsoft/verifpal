@@ -1,0 +1,41 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0 at one session, c1 at two. Guarding Dave's ciphertext
+// removes his tag oracle. Bob can supply only one of the two tags per run,
+// so recovering the encryption key now requires two concurrent Bob runs.
+attacker[active]
+
+principal Alice[
+	knows private k, kd
+	knows public c0, c1
+	generates nb, nd, m
+	d0 = ENC(kd, c0)
+	dh = ENC(kd, nd)
+	ek = HASH(MAC(k, c0), MAC(k, c1))
+	e = ENC(ek, m)
+]
+Alice -> Bob: nb
+Alice -> Dave: [dh]
+Alice -> Eve: d0, e
+
+principal Bob[
+	knows private k
+	t = MAC(k, nb)
+]
+Bob -> Eve: t
+
+principal Dave[
+	knows private k, kd
+	opened = DEC(kd, dh)
+	td = MAC(k, opened)
+]
+Dave -> Eve: td
+
+principal Eve[
+	_ = HASH(d0, e, t, td)
+]
+
+queries[
+	confidentiality? m
+]

@@ -345,11 +345,10 @@ impl CapabilityIndex {
 			if !p.capabilities.is_empty() {
 				return;
 			}
-			let probe = Value::Primitive(Arc::new((**p).clone()));
-			if let Some(bucket) = index.buckets.get(&probe.hash_value())
+			if let Some(bucket) = index.buckets.get(&v.hash_value())
 				&& let Some((annotated, _)) = bucket
 					.iter()
-					.find(|(a, caps)| !caps.is_empty() && a.equivalent(&probe, true))
+					.find(|(a, caps)| !caps.is_empty() && a.equivalent(v, true))
 			{
 				out.push((name.to_string(), Reach::SameTerm(annotated.clone())));
 				return;

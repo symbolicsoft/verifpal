@@ -110,6 +110,7 @@ impl Value {
 	pub fn equivalent(&self, other: &Value, consider_output: bool) -> bool {
 		match (self, other) {
 			(Value::Constant(c1), Value::Constant(c2)) => c1.id == c2.id,
+			(Value::Variable(a), Value::Variable(b)) => a == b,
 			(Value::Primitive(p1), Value::Primitive(p2)) => {
 				if Arc::ptr_eq(p1, p2) {
 					return true;
@@ -127,6 +128,7 @@ impl Value {
 	pub fn same_term(&self, other: &Value) -> bool {
 		match (self, other) {
 			(Value::Constant(c1), Value::Constant(c2)) => c1.id == c2.id,
+			(Value::Variable(a), Value::Variable(b)) => a == b,
 			(Value::Primitive(p1), Value::Primitive(p2)) => Arc::ptr_eq(p1, p2),
 			_ => false,
 		}
@@ -135,6 +137,12 @@ impl Value {
 		match self {
 			Value::Constant(c) => c.id as u64,
 			Value::Primitive(p) => primitive_hash(p),
+			Value::Variable(id) => {
+				use std::hash::{Hash, Hasher};
+				let mut hash = IdHasher::default();
+				id.hash(&mut hash);
+				hash.finish()
+			}
 		}
 	}
 	pub(crate) fn constant_leaves(&self) -> impl Iterator<Item = &Constant> {
@@ -152,10 +160,10 @@ impl Constant {
 }
 
 impl AttackerState {
-	pub(crate) fn retaining(&self, keep: &[bool]) -> Option<Arc<AttackerState>> {
+	pub(crate) fn retaining(&self, keep: &[bool]) -> std::borrow::Cow<'_, AttackerState> {
 		assert_eq!(keep.len(), self.known.len());
 		if keep.iter().all(|&keep| keep) {
-			return None;
+			return std::borrow::Cow::Borrowed(self);
 		}
 		let known: Vec<Value> = self
 			.known
@@ -175,14 +183,14 @@ impl AttackerState {
 			.filter(|&(_, &keep)| keep)
 			.map(|(d, _)| d.clone())
 			.collect();
-		Some(Arc::new(AttackerState {
+		std::borrow::Cow::Owned(AttackerState {
 			current_phase: self.current_phase,
 			derivations: Arc::new(derivations),
 			reused: Arc::clone(&self.reused),
 			known: Arc::new(known),
 			known_map: Arc::new(known_map),
 			chain: crate::types::next_chain(),
-		}))
+		})
 	}
 
 	pub fn derivation(&self, idx: KnownIdx) -> Option<&DerivationRecord> {
@@ -209,13 +217,7 @@ mod tests {
 	use crate::testutil::*;
 
 	#[test]
-	fn session_bands_stay_below_the_solver_ranges() {
-		let worst = COPY_BASE + MAX_COPIES * COPY_STRIDE + (COPY_STRIDE - 1);
-		assert!(worst < crate::solve::vars::ATTACKER_VAR_BASE);
-	}
-
-	#[test]
-	fn every_expansion_copy_id_is_distinct_and_below_the_solver_ranges() {
+	fn every_expansion_copy_id_is_distinct() {
 		let bases: [ValueId; 4] = [2, 3, 4096, COPY_STRIDE - 1];
 		let mut seen: std::collections::HashSet<ValueId> = std::collections::HashSet::new();
 		for base in bases {
@@ -225,10 +227,6 @@ mod tests {
 			for base in bases {
 				let id = copy_value_id(base, copy);
 				assert!(seen.insert(id), "copy {copy} of {base} collides");
-				assert!(
-					id < crate::solve::vars::ATTACKER_VAR_BASE,
-					"copy {copy} of {base} reaches the solver ranges"
-				);
 			}
 		}
 	}

@@ -1,0 +1,39 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a0 at one session and a1 at two. Guarding Signer's input
+// restricts its signature to the public request constant, which cannot
+// verify as a hash of Bob's message. Two Bob sessions still admit a replay
+// of Alice's genuine message and signature.
+
+attacker[active]
+principal Alice[
+	knows private sk, seal_key
+	generates message, request
+	pk = PUBKEY(sk)
+	signature = SIGN(sk, HASH(message))
+	sealed = ENC(seal_key, HASH(HASH(nil)))
+]
+Alice -> Bob: [pk], message, signature
+Alice -> Signer: [request]
+Alice -> Opener: sealed
+principal Signer[
+	knows private sk, seal_key
+	signed = SIGN(sk, request)
+	signed_box = ENC(seal_key, signed)
+]
+Signer -> Observer: signed_box
+principal Opener[
+	knows private seal_key
+	opened = DEC(seal_key, sealed)
+]
+Opener -> Observer: opened
+principal Observer[
+	_ = HASH(signed_box, opened)
+]
+principal Bob[
+	_ = SIGNVERIF(pk, HASH(message), signature)?
+]
+queries[
+	authentication? Alice -> Bob: signature
+]

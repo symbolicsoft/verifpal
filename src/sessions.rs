@@ -284,6 +284,7 @@ impl<'a> ModelCopy<'a> {
 
 pub(crate) fn map_constants(v: &Value, f: &impl Fn(&Constant) -> Constant) -> Value {
 	match v {
+		Value::Variable(_) => v.clone(),
 		Value::Constant(c) => Value::Constant(f(c)),
 		Value::Primitive(p) => Value::Primitive(Arc::new(
 			p.with_arguments(p.arguments.iter().map(|a| map_constants(a, f)).collect()),

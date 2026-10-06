@@ -21,8 +21,8 @@ impl SymbolicState {
 	}
 }
 
-fn shaped_var(slot: usize, honest: &Value, name: &str) -> Value {
-	let var = attacker_var(slot, name);
+fn shaped_var(slot: usize, honest: &Value) -> Value {
+	let var = attacker_var(slot);
 	match honest {
 		Value::Primitive(_) if crate::primitive::value_is_key_derivation(honest) => {
 			crate::primitive::key_derivation_of(var.clone()).unwrap_or(var)
@@ -103,8 +103,8 @@ fn build_with(
 		}
 		let trace_slot = &km.slots[idx];
 		*slot = Some(match shaped {
-			true => shaped_var(idx, &trace_slot.initial_value, &trace_slot.constant.name),
-			false => attacker_var(idx, &trace_slot.constant.name),
+			true => shaped_var(idx, &trace_slot.initial_value),
+			false => attacker_var(idx),
 		});
 		var_slots.push(idx);
 	}
@@ -156,6 +156,7 @@ impl Walk<'_> {
 
 	fn inline(&mut self, v: &Value, owner: PrincipalId) -> Value {
 		match v {
+			Value::Variable(_) => v.clone(),
 			Value::Constant(c) => match self.km.index_of(c) {
 				Some(idx) => {
 					if self.var_terms[idx].is_some() && !self.reaches(idx, owner) {

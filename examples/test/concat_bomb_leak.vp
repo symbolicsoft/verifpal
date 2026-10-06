@@ -1,5 +1,8 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1c1c1c1c1a1 at one and two sessions. The leaked key opens the
+// honest bundle and permits a new encrypted five-field tuple with its MAC.
 
 attacker[active]
 

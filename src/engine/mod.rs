@@ -21,7 +21,7 @@ pub(crate) fn verify(ctx: &VerifyContext, m: &Model, km: &ProtocolTrace) -> VRes
 	let program = Program::of(m, km);
 	let cx = Context::new(&program, km);
 	let root = execute(&cx, &Vec::new());
-	crate::verify::check_honest_run(ctx, km, &program, &root)?;
+	check_honest_run(ctx, km, &program, &root)?;
 	info_message(
 		&format!("Attacker is configured as {}.", m.attacker),
 		InfoLevel::Info,
@@ -43,6 +43,38 @@ pub(crate) fn verify(ctx: &VerifyContext, m: &Model, km: &ProtocolTrace) -> VRes
 		let mut search = search::Search::new(ctx, &cx, root);
 		search.run();
 		search.report_stats();
+	}
+	Ok(())
+}
+
+fn check_honest_run(
+	ctx: &VerifyContext,
+	km: &ProtocolTrace,
+	program: &Program,
+	root: &Execution,
+) -> VResult<()> {
+	let located = |e: VerifpalError, slot: usize| e.or_span(km.slots[slot].declared_span);
+	let failed = root
+		.runs
+		.iter()
+		.filter_map(|run| run.halted.map(|slot| (slot, run)))
+		.filter(|&(slot, _)| {
+			let creator = km.slots[slot].creator;
+			ctx.is_honest_at(creator, program.phase_of(creator, slot))
+		})
+		.min_by_key(|&(slot, _)| slot);
+	if let Some((slot, run)) = failed
+		&& let Some(Value::Primitive(p)) = run.held(slot).map(|held| &held.value)
+	{
+		return Err(located(crate::sanity::honest_check_failure(p), slot));
+	}
+	for run in &root.runs {
+		for (slot, held) in run.env.iter().enumerate() {
+			if let Some(held) = held {
+				crate::sanity::sanity_check_argument_restrictions(&held.value)
+					.map_err(|e| located(e, slot))?;
+			}
+		}
 	}
 	Ok(())
 }
@@ -95,20 +127,9 @@ pub(crate) fn judge(
 ) {
 	for phase in 0..=cx.km.max_phase {
 		let claims = |p: PrincipalId| ctx.claims_at(p, phase);
-		let violation = |ex: &Execution, q: &Query| {
-			Judge {
-				cx,
-				ex: ex.at(phase),
-				whole: ex,
-				claims: &claims,
-			}
-			.evaluate(q)
-		};
-		for result in ctx.results_get() {
-			if result.resolved {
-				continue;
-			}
-			for q in std::iter::once(&result.query).chain(&result.variants) {
+		let violation = |ex: &Execution, q: &Query| Judge::at(cx, ex, phase, &claims).evaluate(q);
+		for (index, queries) in ctx.unresolved() {
+			for q in &queries {
 				let Some(first) = violation(ex, q) else {
 					continue;
 				};
@@ -117,7 +138,8 @@ pub(crate) fn judge(
 					Some((smaller, found)) => (smaller, found),
 					None => (ex, &first),
 				};
-				report(ctx, cx, ex.at(phase), honest, &result, q, found);
+				let out = VerifyResult::new(&queries[0], index);
+				report(ctx, cx, ex.at(phase), honest, out, q, found);
 				break;
 			}
 		}
@@ -125,12 +147,7 @@ pub(crate) fn judge(
 }
 
 fn carries_a_secret(v: &Value, km: &ProtocolTrace) -> bool {
-	v.constant_leaves().any(|c| {
-		km.index_of(c).is_some_and(|i| {
-			let declared = &km.slots[i].constant;
-			declared.fresh || declared.qualifier == Some(Qualifier::Private)
-		})
-	})
+	v.constant_leaves().any(|c| unlink::declared_secret(c, km))
 }
 
 fn recipient_contributed(c: &Constant, km: &ProtocolTrace, recipient: PrincipalId) -> bool {
@@ -149,13 +166,12 @@ fn report(
 	cx: &Context,
 	ex: &Execution,
 	honest: &Execution,
-	result: &VerifyResult,
+	mut out: VerifyResult,
 	q: &Query,
 	(v, verdict): &Found,
 ) {
 	let km = cx.km;
 	let program = cx.program;
-	let mut out = VerifyResult::new(&result.query, result.query_index);
 	out.resolved = true;
 	out.options = q
 		.options
@@ -183,9 +199,8 @@ fn report(
 			narrator.explain(value, ex.order.len());
 			let constant = &km.slots[*slot].constant;
 			let value_shown = shown(&narrator, *slot, value);
-			let honest_value =
-				crate::theory::reduce_once(&crate::value::resolve_trace_constant(constant, km));
-			if !crate::theory::reduce_once(value).equivalent(&honest_value, true)
+			if !crate::theory::reduce_once(value)
+				.equivalent(&unlink::honest_reduct(km, *slot), true)
 				&& !carries_a_secret(value, km)
 			{
 				out.subtype = Some(Subtype::AttackerSuppliedValue);
@@ -301,18 +316,12 @@ fn report(
 				name(*other)
 			)
 		}
-		Violation::Linked {
-			a,
-			b,
-			link,
-			resolved,
-		} => {
+		Violation::Linked { link, resolved } => {
 			narrator.resolves(resolved);
-			let queried = [a.to_string(), b.to_string()];
-			let queried: [&str; 2] = [&queried[0], &queried[1]];
+			let [a, b] = [&resolved[0].0, &resolved[1].0].map(ToString::to_string);
 			format!(
 				"Attacker links {a} and {b} {}.",
-				link.describe(|v| narrator.term(v, &queried))
+				link.describe(|v| narrator.term(v, &[&a, &b]))
 			)
 		}
 		Violation::Differ { resolved } => {

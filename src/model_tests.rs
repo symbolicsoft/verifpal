@@ -158,6 +158,113 @@ fn expansion_base(name: &str) -> String {
 		.to_lowercase()
 }
 
+#[derive(Default)]
+struct Swept {
+	traceless: Vec<(String, usize)>,
+	incoherent: Vec<String>,
+	header_problems: Vec<String>,
+	documented: usize,
+	undocumented: usize,
+}
+
+fn sweep_model(model: &str, path: &str) -> Swept {
+	let mut swept = Swept::default();
+	let one = crate::verify::verify_with_sessions(path, 1);
+	let Ok((results, _)) = crate::verify::verify(path) else {
+		return swept;
+	};
+	let source = std::fs::read_to_string(path).expect("read model");
+	let legs = message_legs(&source);
+	let stated = stated_result_codes(&source);
+	if stated.is_empty() {
+		swept.undocumented += 1;
+	} else {
+		swept.documented += 1;
+		let code = crate::types::VerifyResult::results_code(&results);
+		let mut produced = vec![code.clone()];
+		if source.contains("session")
+			&& let Ok((one, _)) = &one
+		{
+			produced.push(crate::types::VerifyResult::results_code(one));
+		}
+		if !stated.contains(&code) {
+			swept.header_problems.push(format!(
+				"{}: the header says the model produces {}, but at the shipped default it \
+				 produces {}",
+				model,
+				stated.join(" / "),
+				code
+			));
+		}
+		for claim in &stated {
+			if !produced.contains(claim) {
+				swept.header_problems.push(format!(
+					"{}: the header claims a result of {}, which the model does not produce \
+					 at one session or at two (it produces {})",
+					model,
+					claim,
+					produced.join(" / ")
+				));
+			}
+		}
+	}
+	for result in results.iter().filter(|r| r.resolved) {
+		let summary = result.summary.as_str();
+		let key = (model.to_string(), result.query_index);
+		if !summary.contains("Attack trace:") {
+			swept.traceless.push(key.clone());
+		}
+		for line in summary.lines() {
+			let line = line.trim();
+			let replaced = line
+				.split_once("Attacker replaces ")
+				.and_then(|(_, rest)| rest.split_once(" (sent by "))
+				.and_then(|(names, tail)| {
+					tail.split_once(") with ").map(|(route, _)| (names, route))
+				});
+			let replayed = line
+				.split_once("Attacker replays ")
+				.and_then(|(_, rest)| rest.split_once(" ("))
+				.and_then(|(names, tail)| tail.split_once(") ").map(|(route, _)| (names, route)));
+			let Some((names, route)) = replaced.or(replayed) else {
+				continue;
+			};
+			let Some((_, recipient)) = route.split_once(" to ") else {
+				continue;
+			};
+			let recipient = expansion_base(recipient);
+			for name in names.split(',') {
+				let name = expansion_base(name);
+				let to_recipient: Vec<&(String, String, String, bool)> = legs
+					.iter()
+					.filter(|(_, r, n, _)| *r == recipient && *n == name)
+					.collect();
+				if to_recipient.is_empty() {
+					swept.incoherent.push(format!(
+						"{} query {}: trace says the attacker replaces `{}` on a message to \
+						 {}, but no message in the model carries `{}` to {}",
+						model, result.query_index, name, recipient, name, recipient
+					));
+					continue;
+				}
+				if to_recipient.iter().all(|(_, _, _, g)| *g)
+					&& !line.contains("upstream of the guard")
+					&& !legs.iter().any(|(_, _, n, g)| *n == name && !*g)
+				{
+					swept.incoherent.push(format!(
+						"{} query {}: trace says the attacker replaces `{}` on a message to \
+						 {}, but every message carrying `{}` guards it and the step claims no \
+						 guard bypass",
+						model, result.query_index, name, recipient, name
+					));
+				}
+			}
+		}
+	}
+
+	swept
+}
+
 #[test]
 fn attack_traces_keep_their_shape_and_name_only_wires_that_exist() {
 	let mut traceless: Vec<(String, usize)> = Vec::new();
@@ -166,101 +273,13 @@ fn attack_traces_keep_their_shape_and_name_only_wires_that_exist() {
 	let mut documented = 0usize;
 	let mut undocumented = 0usize;
 
-	for (model, path) in swept_models() {
-		let _ = crate::verify::verify_with_sessions(&path, 1);
-		let Ok((results, _)) = crate::verify::verify(&path) else {
-			continue;
-		};
-		let source = std::fs::read_to_string(&path).expect("read model");
-		let legs = message_legs(&source);
-		let stated = stated_result_codes(&source);
-		if stated.is_empty() {
-			undocumented += 1;
-		} else {
-			documented += 1;
-			let code = crate::types::VerifyResult::results_code(&results);
-			let mut produced = vec![code.clone()];
-			if source.contains("session")
-				&& let Ok((one, _)) = crate::verify::verify_with_sessions(&path, 1)
-			{
-				produced.push(crate::types::VerifyResult::results_code(&one));
-			}
-			if !stated.contains(&code) {
-				header_problems.push(format!(
-					"{}: the header says the model produces {}, but at the shipped default it \
-					 produces {}",
-					model,
-					stated.join(" / "),
-					code
-				));
-			}
-			for claim in &stated {
-				if !produced.contains(claim) {
-					header_problems.push(format!(
-						"{}: the header claims a result of {}, which the model does not produce \
-						 at one session or at two (it produces {})",
-						model,
-						claim,
-						produced.join(" / ")
-					));
-				}
-			}
-		}
-		for result in results.iter().filter(|r| r.resolved) {
-			let summary = result.summary.as_str();
-			let key = (model.clone(), result.query_index);
-			if !summary.contains("Attack trace:") {
-				traceless.push(key.clone());
-			}
-			for line in summary.lines() {
-				let line = line.trim();
-				let replaced = line
-					.split_once("Attacker replaces ")
-					.and_then(|(_, rest)| rest.split_once(" (sent by "))
-					.and_then(|(names, tail)| {
-						tail.split_once(") with ").map(|(route, _)| (names, route))
-					});
-				let replayed = line
-					.split_once("Attacker replays ")
-					.and_then(|(_, rest)| rest.split_once(" ("))
-					.and_then(|(names, tail)| {
-						tail.split_once(") ").map(|(route, _)| (names, route))
-					});
-				let Some((names, route)) = replaced.or(replayed) else {
-					continue;
-				};
-				let Some((_, recipient)) = route.split_once(" to ") else {
-					continue;
-				};
-				let recipient = expansion_base(recipient);
-				for name in names.split(',') {
-					let name = expansion_base(name);
-					let to_recipient: Vec<&(String, String, String, bool)> = legs
-						.iter()
-						.filter(|(_, r, n, _)| *r == recipient && *n == name)
-						.collect();
-					if to_recipient.is_empty() {
-						incoherent.push(format!(
-							"{} query {}: trace says the attacker replaces `{}` on a message to \
-							 {}, but no message in the model carries `{}` to {}",
-							model, result.query_index, name, recipient, name, recipient
-						));
-						continue;
-					}
-					if to_recipient.iter().all(|(_, _, _, g)| *g)
-						&& !line.contains("upstream of the guard")
-						&& !legs.iter().any(|(_, _, n, g)| *n == name && !*g)
-					{
-						incoherent.push(format!(
-							"{} query {}: trace says the attacker replaces `{}` on a message to \
-							 {}, but every message carrying `{}` guards it and the step claims no \
-							 guard bypass",
-							model, result.query_index, name, recipient, name
-						));
-					}
-				}
-			}
-		}
+	let models = swept_models();
+	for swept in crate::metamorphic::spread(&models, |(model, path)| sweep_model(model, path)) {
+		traceless.extend(swept.traceless);
+		incoherent.extend(swept.incoherent);
+		header_problems.extend(swept.header_problems);
+		documented += swept.documented;
+		undocumented += swept.undocumented;
 	}
 
 	let pinned = |rows: &[(&str, usize)]| -> Vec<(String, usize)> {
@@ -2855,6 +2874,7 @@ fn test_concat_bomb() {
 #[test]
 fn test_concat_bomb_leak() {
 	run_model("concat_bomb_leak.vp", "c1c1c1c1c1a1");
+	run_model_sessions("concat_bomb_leak.vp", 1, "c1c1c1c1c1a1");
 }
 #[test]
 fn test_concat_bomb_unguarded() {
@@ -4493,6 +4513,50 @@ fn test_nested_attested_release_unsigned() {
 }
 
 #[test]
+fn test_search_derived_three_oracles() {
+	for sessions in [1, 2] {
+		run_model_sessions("search_derived_three_oracles.vp", sessions, "c1");
+		run_model_sessions("search_derived_three_oracles_guarded.vp", sessions, "c0");
+	}
+}
+
+#[test]
+fn test_search_source_alternative() {
+	run_model_sessions("search_source_alternative.vp", 1, "c1");
+	run_model("search_source_alternative.vp", "c1");
+}
+
+#[test]
+fn test_search_source_alternative_guarded() {
+	run_model_sessions("search_source_alternative_guarded.vp", 1, "c0");
+	run_model("search_source_alternative_guarded.vp", "c1");
+}
+
+#[test]
+fn test_solver_mac_then_tuple() {
+	run_model_sessions("solver_mac_then_tuple.vp", 1, "a1");
+	run_model("solver_mac_then_tuple.vp", "a1");
+}
+
+#[test]
+fn test_solver_mac_then_tuple_private() {
+	run_model_sessions("solver_mac_then_tuple_private.vp", 1, "a0");
+	run_model("solver_mac_then_tuple_private.vp", "a1");
+}
+
+#[test]
+fn test_solver_oracle_constructed_goal() {
+	run_model_sessions("solver_oracle_constructed_goal.vp", 1, "a1");
+	run_model("solver_oracle_constructed_goal.vp", "a1");
+}
+
+#[test]
+fn test_solver_oracle_constructed_goal_guarded() {
+	run_model_sessions("solver_oracle_constructed_goal_guarded.vp", 1, "a0");
+	run_model("solver_oracle_constructed_goal_guarded.vp", "a1");
+}
+
+#[test]
 fn test_solver_rewrite_matching() {
 	for sessions in [1, 2] {
 		run_model_sessions("solver_rewrite_matching.vp", sessions, "c1");
@@ -4854,6 +4918,8 @@ fn test_unlink_supplied_witness() {
 	for sessions in [1, 2] {
 		run_model_sessions("unlink_supplied_witness_only.vp", sessions, "u0");
 		run_model_sessions("unlink_supplied_witness_masks.vp", sessions, "u1");
+		run_model_sessions("unlink_supplied_wrapped_witness.vp", sessions, "u0");
+		run_model_sessions("unlink_supplied_wrapper_late_key.vp", sessions, "u1");
 	}
 }
 

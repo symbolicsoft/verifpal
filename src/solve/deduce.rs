@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::equivalence::equivalent_primitives;
-use crate::hashing::{TermSet, collect_subterms};
+use crate::hashing::TermSet;
 use crate::primitive::*;
 use crate::theory::{forgeable_by_reuse, same_fixed};
 use crate::types::*;
@@ -15,7 +15,7 @@ use crate::value::value_nil;
 use super::matching::{match_values, unifiers};
 use super::symbolic::SymbolicState;
 use super::vars::{
-	Distinct, Substitution, apply, as_var, bind, contains_var, dedupe, same_substitution,
+	Distinct, FreshVariables, Substitution, apply, as_var, contains_var, dedupe, same_substitution,
 	substitution_hash,
 };
 
@@ -28,33 +28,108 @@ struct SolvedGoal {
 type GoalMemo = IdMap<(u64, u64), Vec<SolvedGoal>>;
 type DecompositionMemo = IdMap<usize, (Arc<Primitive>, Vec<Substitution>)>;
 type HeldByHead = IdMap<(PrimitiveId, usize), Vec<usize>>;
+pub(crate) type Arities = IdMap<PrimitiveId, Vec<usize>>;
+
+pub(crate) fn note_arities(v: &Value, out: &mut Arities) {
+	for term in crate::value::subterms(v) {
+		if let Value::Primitive(p) = term {
+			let arities = out.entry(p.id).or_default();
+			if let Err(at) = arities.binary_search(&p.arguments.len()) {
+				arities.insert(at, p.arguments.len());
+			}
+		}
+	}
+}
 
 struct Shared<'a> {
 	capabilities: &'a CapabilityIndex,
 	wire_terms: Vec<Value>,
-	slot_terms: Vec<(ValueId, Value)>,
+	wire_reach: std::sync::OnceLock<Vec<Option<Arc<Reach>>>>,
+	slot_terms: Vec<(VariableId, Value)>,
 	honest: Substitution,
-	basis: TermSet,
-	truncated: Arc<AtomicBool>,
+	arities: Arities,
+	by_head: HeldByHead,
+}
+
+struct Bound {
+	inputs: Vec<(Value, usize)>,
+	declined: AtomicBool,
 }
 
 pub(crate) struct Deducer<'a> {
 	attacker: &'a AttackerState,
 	shared: Arc<Shared<'a>>,
-	by_head: Arc<HeldByHead>,
 	memo: RefCell<GoalMemo>,
 	active: RefCell<Vec<(u64, Value)>>,
 	cycles_cut: Cell<usize>,
-	fresh: Cell<u32>,
-	fresh_end: u32,
+	variables: RefCell<FreshVariables>,
+	bound: Option<Arc<Bound>>,
+	saved: RefCell<crate::theory::SavedMemo>,
+}
+
+#[derive(Default)]
+struct Reach {
+	heads: Vec<u64>,
+	anything: bool,
+}
+
+fn reach(p: &Arc<Primitive>, seen: &mut IdMap<usize, Arc<Reach>>) -> Arc<Reach> {
+	let key = Arc::as_ptr(p) as usize;
+	if let Some(reach) = seen.get(&key) {
+		return Arc::clone(reach);
+	}
+	let mut reveals: Vec<Reveal> = Vec::new();
+	if primitive_core_reveals_args(p.id) {
+		reveals.extend((0..p.arguments.len()).map(Reveal::Argument));
+	}
+	if let Ok(spec) = primitive_get(p.id) {
+		if let Some(rule) = &spec.decompose {
+			reveals.extend(rule.reveals.iter().copied());
+		}
+		reveals.extend(spec.weak_reveals.iter().copied());
+	}
+	if let Some(rule) = reuse_rule(p.id) {
+		reveals.extend(rule.reveals.iter().copied());
+	}
+	let mut out = Reach::default();
+	for reveal in reveals {
+		match reveal {
+			Reveal::Output(_) => out.heads.push(1 << 40 | u64::from(p.id)),
+			Reveal::Argument(index) => {
+				let Some(argument) = p.arguments.get(index) else {
+					continue;
+				};
+				match head_key(argument) {
+					Some(head) => out.heads.push(head),
+					None => out.anything = true,
+				}
+				if let Value::Primitive(inner) = argument {
+					let inner = reach(inner, seen);
+					out.heads.extend(inner.heads.iter().copied());
+					out.anything |= inner.anything;
+				}
+			}
+		}
+	}
+	out.heads.sort_unstable();
+	out.heads.dedup();
+	let out = Arc::new(out);
+	seen.insert(key, Arc::clone(&out));
+	out
+}
+
+fn head_key(v: &Value) -> Option<u64> {
+	match v {
+		Value::Primitive(p) => Some(1 << 40 | u64::from(p.id)),
+		Value::Constant(c) => Some(u64::from(c.id)),
+		Value::Variable(_) => None,
+	}
 }
 
 impl<'a> Deducer<'a> {
 	#[cfg(test)]
-	pub(crate) fn with_fresh_range(mut self, start: u32, end: u32) -> Self {
-		self.fresh = Cell::new(start);
-		self.fresh_end = end;
-		self
+	pub(crate) fn in_test_lane(self, lane: usize) -> Self {
+		self.in_scope(Arc::from(format!("root/lane/{lane}")))
 	}
 
 	#[cfg(test)]
@@ -63,22 +138,23 @@ impl<'a> Deducer<'a> {
 		attacker: &'a AttackerState,
 		sym: &'a SymbolicState,
 	) -> Self {
-		let mut known = TermSet::default();
+		let mut known = Arities::default();
 		for held in attacker.known.iter() {
-			collect_subterms(held, &mut known);
+			note_arities(held, &mut known);
 		}
-		Self::with_basis(km, attacker, sym, known, Substitution::default())
+		Self::with_basis(km, attacker, sym, &known, Substitution::default())
 	}
 
 	pub(crate) fn with_basis(
 		km: &'a ProtocolTrace,
 		attacker: &'a AttackerState,
 		sym: &'a SymbolicState,
-		mut basis: TermSet,
+		known: &Arities,
 		honest: Substitution,
 	) -> Self {
+		let mut arities = known.clone();
 		for term in &sym.terms {
-			collect_subterms(term, &mut basis);
+			note_arities(term, &mut arities);
 		}
 		let wire_terms = km
 			.slots
@@ -109,42 +185,82 @@ impl<'a> Deducer<'a> {
 		let shared = Shared {
 			capabilities: &km.capabilities,
 			wire_terms,
+			wire_reach: std::sync::OnceLock::new(),
 			slot_terms,
 			honest,
-			basis,
-			truncated: Arc::new(AtomicBool::new(false)),
+			arities,
+			by_head,
 		};
-		Self::in_lane(attacker, Arc::new(shared), Arc::new(by_head), 0)
+		Self::with_shared(attacker, Arc::new(shared), Arc::from("root"))
 	}
 
-	fn in_lane(
-		attacker: &'a AttackerState,
-		shared: Arc<Shared<'a>>,
-		by_head: Arc<HeldByHead>,
-		lane: u32,
-	) -> Self {
-		let (fresh, fresh_end) = super::vars::free_lane_bounds(lane);
+	fn with_shared(attacker: &'a AttackerState, shared: Arc<Shared<'a>>, scope: Arc<str>) -> Self {
 		Deducer {
 			attacker,
 			shared,
-			by_head,
 			memo: RefCell::default(),
 			active: RefCell::default(),
 			cycles_cut: Cell::new(0),
-			fresh: Cell::new(fresh),
-			fresh_end,
+			variables: RefCell::new(FreshVariables::new(scope)),
+			bound: None,
+			saved: RefCell::default(),
 		}
 	}
 
-	pub(crate) fn lane_factory(&self) -> impl Fn(u32) -> Self + Send + Sync + use<'a> {
-		let attacker = self.attacker;
-		let shared = Arc::clone(&self.shared);
-		let by_head = Arc::clone(&self.by_head);
-		move |lane| Self::in_lane(attacker, Arc::clone(&shared), Arc::clone(&by_head), lane)
+	pub(crate) fn with_bound(mut self, inputs: Vec<(Value, usize)>) -> Self {
+		self.bound = Some(Arc::new(Bound {
+			inputs,
+			declined: AtomicBool::new(false),
+		}));
+		self
 	}
 
-	pub(crate) fn truncation_flag(&self) -> Arc<AtomicBool> {
-		Arc::clone(&self.shared.truncated)
+	pub(crate) fn declined_bound(&self) -> bool {
+		self.bound
+			.as_ref()
+			.is_some_and(|bound| bound.declined.load(Ordering::Relaxed))
+	}
+
+	fn within_bound(&self, s: &Substitution) -> bool {
+		let Some(bound) = &self.bound else {
+			return true;
+		};
+		if bound
+			.inputs
+			.iter()
+			.any(|(term, maximum)| super::control::minimum_term_depth(term, s) > *maximum)
+		{
+			bound.declined.store(true, Ordering::Relaxed);
+			return false;
+		}
+		true
+	}
+
+	pub(crate) fn in_scope(mut self, scope: Arc<str>) -> Self {
+		self.variables = RefCell::new(FreshVariables::new(scope));
+		self
+	}
+
+	pub(crate) fn fresh_scope(&self) -> Arc<str> {
+		let VariableId::Free(id) = self.variables.borrow_mut().fresh() else {
+			unreachable!()
+		};
+		Arc::from(format!("{id}/scope"))
+	}
+
+	pub(crate) fn lanes(&self, count: usize) -> Vec<Self> {
+		let scope = self.fresh_scope();
+		(0..count)
+			.map(|lane| {
+				let mut deducer = Self::with_shared(
+					self.attacker,
+					Arc::clone(&self.shared),
+					Arc::from(format!("{scope}/lane/{lane}")),
+				);
+				deducer.bound = self.bound.clone();
+				deducer
+			})
+			.collect()
 	}
 
 	pub(crate) fn solve(&self, goal: &Value, s: &Substitution) -> Vec<Substitution> {
@@ -160,12 +276,12 @@ impl<'a> Deducer<'a> {
 	}
 
 	fn solve_into(&self, goal: &Value, s: &Substitution, out: &mut Vec<Substitution>) {
-		if self.out_of_variables() {
+		if !self.within_bound(s) {
 			return;
 		}
 		let g = crate::theory::reduce_once(&apply(goal, s));
 		let key = g.hash_value();
-		if !contains_var(&g) && self.attacker.knows(&g).is_some() {
+		if !contains_var(&g) && (self.attacker.knows(&g).is_some() || self.obtainable(&g)) {
 			out.push(s.clone());
 			return;
 		}
@@ -179,13 +295,18 @@ impl<'a> Deducer<'a> {
 			self.cycles_cut.set(self.cycles_cut.get() + 1);
 			return;
 		}
-		let memo_key = (key, substitution_hash(s));
+		let relevant = relevant_bindings(&g, s);
+		let memo_key = (key, substitution_hash(&relevant));
 		if let Some(entry) = self.memo.borrow().get(&memo_key).and_then(|bucket| {
 			bucket.iter().find(|entry| {
-				entry.goal.equivalent(&g, true) && same_substitution(&entry.bindings, s)
+				entry.goal.equivalent(&g, true) && same_substitution(&entry.bindings, &relevant)
 			})
 		}) {
-			out.extend(entry.solutions.iter().cloned());
+			out.extend(entry.solutions.iter().map(|delta| {
+				let mut solution = s.clone();
+				solution.extend(delta.iter().map(|(id, value)| (id.clone(), value.clone())));
+				solution
+			}));
 			return;
 		}
 
@@ -196,43 +317,39 @@ impl<'a> Deducer<'a> {
 		self.active.borrow_mut().pop();
 		local = dedupe(local);
 
-		if self.cycles_cut.get() == cycles_before {
+		if self.cycles_cut.get() == cycles_before
+			&& let Some(deltas) = local
+				.iter()
+				.map(|solution| extension_of(solution, s))
+				.collect::<Option<Vec<Substitution>>>()
+		{
 			self.memo
 				.borrow_mut()
 				.entry(memo_key)
 				.or_default()
 				.push(SolvedGoal {
 					goal: g,
-					bindings: s.clone(),
-					solutions: local.clone(),
+					bindings: relevant,
+					solutions: deltas,
 				});
 		}
 		out.extend(local);
 	}
 
 	fn obtainable(&self, v: &Value) -> bool {
-		crate::theory::obtainable(v, self.shared.capabilities, self.attacker)
+		self.saved
+			.borrow_mut()
+			.within(self.shared.capabilities, self.attacker, || {
+				crate::theory::obtainable(v, self.shared.capabilities, self.attacker)
+			})
 	}
 
-	fn out_of_variables(&self) -> bool {
-		let exhausted = self.fresh.get() >= self.fresh_end;
-		if exhausted {
-			self.shared.truncated.store(true, Ordering::Relaxed);
-		}
-		exhausted
-	}
-
-	fn fresh_var(&self) -> Value {
-		if self.out_of_variables() {
-			return super::vars::free_var(self.fresh_end.saturating_sub(1));
-		}
-		let n = self.fresh.get();
-		self.fresh.set(n + 1);
-		super::vars::free_var(n)
+	pub(crate) fn fresh_var(&self) -> Value {
+		Value::Variable(self.variables.borrow_mut().fresh())
 	}
 
 	fn rewrite_shapes(&self, outer: &Primitive, rule: &RewriteRule) -> Vec<Value> {
-		build_rewrite_shapes_with(outer, rule, |_| self.fresh_var())
+		rewrite_shapes_from(outer, rule, |_| self.fresh_var(), false)
 	}
 
 	fn rewrite_shapes_yielding(
@@ -243,9 +360,17 @@ impl<'a> Deducer<'a> {
 		s: &Substitution,
 	) -> Vec<(Value, Substitution)> {
 		let mut out = Vec::new();
-		let first = self.fresh.get();
-		let shapes = self.rewrite_shapes(outer, rule);
-		let locals = first..self.fresh.get();
+		let mut locals = Vec::new();
+		let shapes = rewrite_shapes_from(
+			outer,
+			rule,
+			|_| {
+				let variable = self.fresh_var();
+				locals.push(as_var(&variable).expect("a fresh variable"));
+				variable
+			},
+			false,
+		);
 		for shape in shapes {
 			let Value::Primitive(inner) = &shape else {
 				continue;
@@ -253,11 +378,8 @@ impl<'a> Deducer<'a> {
 			for bound in unifiers(&rule.to.apply(inner), target, s) {
 				let bindings = bound
 					.iter()
-					.filter(|(id, _)| {
-						!id.checked_sub(super::vars::FREE_VAR_BASE)
-							.is_some_and(|n| locals.contains(&n))
-					})
-					.map(|(&id, value)| (id, apply(value, &bound)))
+					.filter(|(id, _)| !locals.contains(id))
+					.map(|(id, value)| (id.clone(), apply(value, &bound)))
 					.collect();
 				out.push((apply(&shape, &bound), bindings));
 			}
@@ -288,18 +410,15 @@ impl<'a> Deducer<'a> {
 		{
 			arities.push(honest.arguments.len());
 		}
-		let mut seen: Vec<usize> = self
+		let seen: Vec<usize> = self
 			.shared
-			.basis
-			.iter()
-			.filter_map(|term| match term {
-				Value::Primitive(q) if q.id == tuple => Some(q.arguments.len()),
-				_ => None,
-			})
+			.arities
+			.get(&tuple)
+			.into_iter()
+			.flatten()
+			.copied()
 			.filter(|arity| *arity > p.output && !arities.contains(arity))
 			.collect();
-		seen.sort_unstable();
-		seen.dedup();
 		arities.extend(seen);
 		arities
 			.into_iter()
@@ -316,21 +435,23 @@ impl<'a> Deducer<'a> {
 	fn bind_from_shape(
 		&self,
 		shape: &Value,
-		var_id: ValueId,
+		var_id: &VariableId,
 		s: &Substitution,
 		defer_free: bool,
 		out: &mut Vec<Substitution>,
 	) {
-		for candidate in self.solve(shape, s) {
-			let ground = apply(shape, &candidate);
-			if (!defer_free && contains_var(&ground))
-				|| crate::value::subterms(&ground)
-					.any(|term| as_var(term).is_some_and(super::vars::is_slot_var_id))
-			{
-				continue;
-			}
-			let mut extended = candidate;
-			if bind(&mut extended, var_id, ground) {
+		for fixed in unifiers(&Value::Variable(var_id.clone()), shape, s) {
+			for mut extended in self.solve(shape, &fixed) {
+				let ground = apply(shape, &extended);
+				if (!defer_free && contains_var(&ground))
+					|| crate::value::subterms(&ground).any(|term| {
+						as_var(term)
+							.as_ref()
+							.is_some_and(super::vars::is_slot_var_id)
+					}) {
+					continue;
+				}
+				extended.insert(var_id.clone(), ground);
 				out.push(extended);
 			}
 		}
@@ -339,7 +460,7 @@ impl<'a> Deducer<'a> {
 	fn solve_rules(&self, g: &Value, s: &Substitution, out: &mut Vec<Substitution>) {
 		if let Some(id) = as_var(g) {
 			let mut extended = s.clone();
-			if !super::vars::is_free_var_id(id) {
+			if !super::vars::is_free_var_id(&id) {
 				extended.insert(id, value_nil());
 			}
 			out.push(extended);
@@ -369,7 +490,8 @@ impl<'a> Deducer<'a> {
 	}
 
 	fn held_like(&self, p: &Primitive) -> impl Iterator<Item = &Value> {
-		self.by_head
+		self.shared
+			.by_head
 			.get(&(p.id, p.arguments.len()))
 			.into_iter()
 			.flatten()
@@ -673,7 +795,6 @@ impl<'a> Deducer<'a> {
 			if !contains_var(term) {
 				continue;
 			}
-			let before = out.len();
 			for bound in unifiers(term, goal, s) {
 				out.extend(self.require_constructible(&bound, s, false));
 			}
@@ -683,8 +804,7 @@ impl<'a> Deducer<'a> {
 				self.solve_by_oracle(p, rule, goal, s, out);
 				self.solve_by_rewrite_match(p, rule, goal, s, out);
 			}
-			if out.len() == before && projects_a_variable(term) && self.shared.basis.contains(goal)
-			{
+			if projects_a_variable(term) {
 				for bound in self.invert(term, goal, s) {
 					out.extend(self.require_constructible(&bound, s, false));
 				}
@@ -712,7 +832,8 @@ impl<'a> Deducer<'a> {
 		}
 		for current in match_values(&rule.to.apply(inner), goal, s) {
 			let refined = refine_check(p, &current);
-			for shape in build_rewrite_shapes_with(&refined, rule, |at| inner.arguments[at].clone())
+			for shape in
+				rewrite_shapes_from(&refined, rule, |at| inner.arguments[at].clone(), false)
 			{
 				for bound in unifiers(&p.arguments[rule.from], &shape, &current) {
 					out.extend(self.require_constructible(&bound, s, false));
@@ -732,11 +853,8 @@ impl<'a> Deducer<'a> {
 		let Some(var_id) = p.arguments.get(rule.from).and_then(as_var) else {
 			return;
 		};
-		if !self.shared.basis.contains(goal) {
-			return;
-		}
 		for (shape, bound) in self.rewrite_shapes_yielding(p, rule, goal, s) {
-			self.bind_from_shape(&shape, var_id, &bound, false, out);
+			self.bind_from_shape(&shape, &var_id, &bound, false, out);
 		}
 	}
 
@@ -750,7 +868,7 @@ impl<'a> Deducer<'a> {
 		}
 		if p.arguments.iter().any(contains_var) {
 			let term = Value::Primitive(Arc::new(p.clone()));
-			for bound in self.satisfy_check(p, s) {
+			for bound in self.satisfy_check_shaped(p, s, true) {
 				let applied = apply(&term, &bound);
 				let reduced = crate::theory::reduce_once(&applied);
 				if !applied.equivalent(&reduced, true) {
@@ -823,7 +941,26 @@ impl<'a> Deducer<'a> {
 
 	fn solve_by_decomposition(&self, goal: &Value, s: &Substitution, out: &mut Vec<Substitution>) {
 		let mut memo = DecompositionMemo::default();
-		for term in self.shared.wire_terms.iter() {
+		let wanted = head_key(goal);
+		let reaches = self.shared.wire_reach.get_or_init(|| {
+			let mut seen = IdMap::default();
+			self.shared
+				.wire_terms
+				.iter()
+				.map(|term| match term {
+					Value::Primitive(p) => Some(reach(p, &mut seen)),
+					_ => None,
+				})
+				.collect()
+		});
+		for (term, reach) in self.shared.wire_terms.iter().zip(reaches) {
+			let Some(reach) = reach else {
+				continue;
+			};
+			if !reach.anything && wanted.is_some_and(|key| reach.heads.binary_search(&key).is_err())
+			{
+				continue;
+			}
 			out.extend(self.solve_decomposition_from(term, goal, s, &mut memo));
 		}
 	}
@@ -954,7 +1091,7 @@ impl<'a> Deducer<'a> {
 		out
 	}
 
-	pub(crate) fn forgeable_shapes(&self, sym: &SymbolicState, var_id: ValueId) -> Vec<Value> {
+	pub(crate) fn forgeable_shapes(&self, sym: &SymbolicState, var_id: &VariableId) -> Vec<Value> {
 		let mut out = Vec::new();
 		let mut seen = IdSet::default();
 		for term in &sym.terms {
@@ -966,7 +1103,7 @@ impl<'a> Deducer<'a> {
 	fn collect_forgeable(
 		&self,
 		v: &Value,
-		var_id: ValueId,
+		var_id: &VariableId,
 		out: &mut Vec<Value>,
 		seen: &mut IdSet<usize>,
 	) {
@@ -977,7 +1114,7 @@ impl<'a> Deducer<'a> {
 			return;
 		}
 		if let Some(rule) = rewrite_rule(p.id)
-			&& p.arguments.get(rule.from).and_then(as_var) == Some(var_id)
+			&& p.arguments.get(rule.from).and_then(as_var).as_ref() == Some(var_id)
 		{
 			for shape in self.rewrite_shapes(p, rule) {
 				if !out.iter().any(|existing| existing.equivalent(&shape, true)) {
@@ -991,43 +1128,33 @@ impl<'a> Deducer<'a> {
 	}
 
 	pub(crate) fn constraint_goals(
-		&mut self,
-		ctx: &crate::context::VerifyContext,
+		&self,
+		queries: &[Query],
 		km: &ProtocolTrace,
 		sym: &SymbolicState,
 	) -> Vec<Substitution> {
-		let protocol = ctx.term_bound(km).protocol(km);
-		for entries in Arc::make_mut(&mut self.by_head).values_mut() {
-			entries.retain(|&at| {
-				let constructed = matches!(
-					self.attacker.derivation(KnownIdx(at)),
-					Some(DerivationRecord::Reconstructed { .. })
-				);
-				!constructed || protocol.contains(&self.attacker.known[at])
-			});
-		}
 		let base = &Substitution::default();
-		let groups = constraint_sets(ctx, km, sym);
+		let groups = constraint_sets(queries, km, sym);
+		let debug = super::debugging();
 		let mut out = Vec::new();
 		let mut combined = vec![base.clone()];
 		for slots in groups {
+			if debug {
+				eprintln!("[search] constraints {:?}", slots);
+			}
 			let checked: Vec<_> = slots
 				.iter()
 				.filter_map(|&slot| sym.terms[slot].as_primitive().cloned())
 				.collect();
 			let checked = widest_checked_projections(checked);
 			let mut frontier = vec![base.clone()];
-			for check in &checked {
-				if primitive_is_projection(check.id) {
-					continue;
-				}
-				frontier.extend(self.satisfy_check_afresh(check, base));
-			}
-			let mut frontier = super::vars::dedupe_slots(frontier);
 			let mut seen = Distinct::default();
-			for _ in 0..=checked.len() {
+			loop {
 				let mut changed = false;
-				for p in &checked {
+				for (index, p) in checked.iter().enumerate() {
+					if debug {
+						eprintln!("[search] constraint {index}: {} bindings", frontier.len());
+					}
 					let mut next = Vec::new();
 					for candidate in frontier {
 						let refined = refine_check(p, &candidate);
@@ -1043,7 +1170,7 @@ impl<'a> Deducer<'a> {
 							}
 							continue;
 						}
-						let solutions = self.satisfy_check_afresh(&refined, &candidate);
+						let solutions = self.check_equations(&refined, &candidate);
 						if solutions.is_empty() {
 							next.push(candidate);
 							continue;
@@ -1067,11 +1194,54 @@ impl<'a> Deducer<'a> {
 							.is_some_and(|key| contains_var(&key) || self.obtainable(&key))
 				})
 			});
+			frontier = frontier
+				.iter()
+				.flat_map(|candidate| {
+					let solutions = self.require_constructible(candidate, base, true);
+					self.memo.borrow_mut().clear();
+					solutions
+				})
+				.collect();
+			let frontier = super::vars::dedupe_slots(frontier);
 			combined = combine(&combined, &frontier);
 			out.extend(frontier);
 		}
 		out.extend(combined);
 		super::vars::dedupe_slots(out)
+	}
+
+	fn check_equations(&self, p: &Primitive, base: &Substitution) -> Vec<Substitution> {
+		if primitive_is_equality(p.id) && p.arguments.len() == 2 {
+			let mut out = self.invert(&p.arguments[0], &p.arguments[1], base);
+			out.extend(self.invert(&p.arguments[1], &p.arguments[0], base));
+			return dedupe(out);
+		}
+		if primitive_is_projection(p.id)
+			&& let Some(inner) = p.arguments.first()
+		{
+			return self
+				.tuple_shapes(p, None)
+				.iter()
+				.flat_map(|shape| self.invert(inner, shape, base))
+				.collect();
+		}
+		let Some(rule) = rewrite_rule(p.id) else {
+			return Vec::new();
+		};
+		let Some(from) = p.arguments.get(rule.from) else {
+			return Vec::new();
+		};
+		let mut out: Vec<_> = self
+			.rewrite_shapes(p, rule)
+			.iter()
+			.flat_map(|shape| self.invert(from, shape, base))
+			.collect();
+		if out.is_empty() {
+			for (refined, bound) in self.shape_check_inputs(p, rule, base) {
+				out.extend(self.check_equations(&refined, &bound));
+			}
+		}
+		dedupe(out)
 	}
 
 	fn invert(&self, term: &Value, target: &Value, s: &Substitution) -> Vec<Substitution> {
@@ -1129,16 +1299,6 @@ impl<'a> Deducer<'a> {
 		dedupe(out)
 	}
 
-	fn satisfy_check(&self, p: &Primitive, base: &Substitution) -> Vec<Substitution> {
-		self.satisfy_check_shaped(p, base, true)
-	}
-
-	fn satisfy_check_afresh(&self, p: &Primitive, base: &Substitution) -> Vec<Substitution> {
-		let solutions = self.satisfy_check(p, base);
-		self.memo.borrow_mut().clear();
-		solutions
-	}
-
 	pub(crate) fn invert_into_revealed(
 		&self,
 		emission: &Value,
@@ -1173,10 +1333,7 @@ impl<'a> Deducer<'a> {
 		if !(primitive_is_equality(p.id) && p.arguments.len() == 2) {
 			return Vec::new();
 		}
-		let base = Substitution::default();
-		let mut out = self.invert(&p.arguments[0], &p.arguments[1], &base);
-		out.extend(self.invert(&p.arguments[1], &p.arguments[0], &base));
-		dedupe(out)
+		self.check_equations(p, &Substitution::default())
 	}
 
 	pub(crate) fn repair_check(&self, p: &Primitive, base: &Substitution) -> Vec<Substitution> {
@@ -1184,7 +1341,9 @@ impl<'a> Deducer<'a> {
 		if check_passes(&refined) {
 			return Vec::new();
 		}
-		self.satisfy_check_afresh(&refined, base)
+		let solutions = self.satisfy_check_shaped(&refined, base, true);
+		self.memo.borrow_mut().clear();
+		solutions
 	}
 
 	fn satisfy_check_shaped(
@@ -1193,25 +1352,13 @@ impl<'a> Deducer<'a> {
 		base: &Substitution,
 		may_shape: bool,
 	) -> Vec<Substitution> {
-		if primitive_is_equality(p.id) && p.arguments.len() == 2 {
-			let mut out = Vec::new();
-			for (pattern, target) in [(0usize, 1usize), (1, 0)] {
-				for bound in self.invert(&p.arguments[pattern], &p.arguments[target], base) {
-					out.extend(self.require_constructible(&bound, base, false));
-				}
-			}
-			return dedupe(out);
-		}
-
-		if primitive_is_projection(p.id)
-			&& let Some(inner) = p.arguments.first()
+		if (primitive_is_equality(p.id) && p.arguments.len() == 2) || primitive_is_projection(p.id)
 		{
-			let mut out = Vec::new();
-			for candidate in self.tuple_shapes(p, None) {
-				for bound in self.invert(inner, &candidate, base) {
-					out.extend(self.require_constructible(&bound, base, false));
-				}
-			}
+			let out = self
+				.check_equations(p, base)
+				.iter()
+				.flat_map(|bound| self.require_constructible(bound, base, false))
+				.collect();
 			return dedupe(out);
 		}
 
@@ -1225,7 +1372,7 @@ impl<'a> Deducer<'a> {
 		let mut out = Vec::new();
 		if let Some(var_id) = as_var(from) {
 			for shape in &shapes {
-				self.bind_from_shape(shape, var_id, base, true, &mut out);
+				self.bind_from_shape(shape, &var_id, base, true, &mut out);
 			}
 		} else {
 			for shape in &shapes {
@@ -1241,17 +1388,19 @@ impl<'a> Deducer<'a> {
 			}
 		}
 		if out.is_empty() && may_shape {
-			return self.satisfy_check_by_shaping(p, rule, base);
+			for (refined, bound) in self.shape_check_inputs(p, rule, base) {
+				out.extend(self.satisfy_check_shaped(&refined, &bound, false));
+			}
 		}
 		dedupe(out)
 	}
 
-	fn satisfy_check_by_shaping(
+	fn shape_check_inputs(
 		&self,
 		p: &Primitive,
 		rule: &RewriteRule,
 		base: &Substitution,
-	) -> Vec<Substitution> {
+	) -> Vec<(Primitive, Substitution)> {
 		let filter = rule.filter;
 		let mut out = Vec::new();
 		for (outer_idx, inner_idxs) in &rule.matching {
@@ -1275,10 +1424,10 @@ impl<'a> Deducer<'a> {
 				if equivalent_primitives(&refined, p, true) {
 					continue;
 				}
-				out.extend(self.satisfy_check_shaped(&refined, &bound, false));
+				out.push((refined, bound));
 			}
 		}
-		dedupe(out)
+		out
 	}
 
 	fn require_constructible(
@@ -1287,12 +1436,11 @@ impl<'a> Deducer<'a> {
 		base: &Substitution,
 		slots_only: bool,
 	) -> Vec<Substitution> {
-		let mut obligations: Vec<(ValueId, &Value)> = s
+		let mut obligations: Vec<(&VariableId, &Value)> = s
 			.iter()
 			.filter(|(id, _)| {
-				!base.contains_key(*id) && !(slots_only && super::vars::is_free_var_id(**id))
+				!base.contains_key(*id) && !(slots_only && super::vars::is_free_var_id(id))
 			})
-			.map(|(id, v)| (*id, v))
 			.collect();
 		obligations.sort_by_key(|(id, _)| *id);
 
@@ -1302,7 +1450,7 @@ impl<'a> Deducer<'a> {
 				.shared
 				.slot_terms
 				.iter()
-				.find(|(slot_id, _)| *slot_id == id)
+				.find(|(slot_id, _)| slot_id == id)
 				.map(|(_, term)| apply(term, s));
 			frontier = self.solve_each(wire.as_ref().unwrap_or(obligation), &frontier);
 			if frontier.is_empty() {
@@ -1313,11 +1461,46 @@ impl<'a> Deducer<'a> {
 	}
 }
 
-fn constraint_sets(
-	ctx: &crate::context::VerifyContext,
-	km: &ProtocolTrace,
-	sym: &SymbolicState,
-) -> Vec<Vec<usize>> {
+fn relevant_bindings(goal: &Value, s: &Substitution) -> Substitution {
+	let mut pending: Vec<VariableId> = s
+		.keys()
+		.filter(|id| super::vars::is_slot_var_id(id))
+		.cloned()
+		.collect();
+	super::vars::collect_vars(goal, &mut pending);
+	let mut reached: IdSet<VariableId> = IdSet::default();
+	while let Some(id) = pending.pop() {
+		if !reached.insert(id.clone()) {
+			continue;
+		}
+		if let Some(value) = s.get(&id) {
+			super::vars::collect_vars(value, &mut pending);
+		}
+	}
+	s.iter()
+		.filter(|(id, _)| reached.contains(*id))
+		.map(|(id, value)| (id.clone(), value.clone()))
+		.collect()
+}
+
+fn extension_of(solution: &Substitution, base: &Substitution) -> Option<Substitution> {
+	if !base.iter().all(|(id, value)| {
+		solution
+			.get(id)
+			.is_some_and(|held| held.equivalent(value, true))
+	}) {
+		return None;
+	}
+	Some(
+		solution
+			.iter()
+			.filter(|(id, _)| !base.contains_key(*id))
+			.map(|(id, value)| (id.clone(), value.clone()))
+			.collect(),
+	)
+}
+
+fn constraint_sets(queries: &[Query], km: &ProtocolTrace, sym: &SymbolicState) -> Vec<Vec<usize>> {
 	let mut checks: IdMap<PrincipalId, Vec<usize>> = IdMap::default();
 	for (slot, trace_slot) in km.slots.iter().enumerate() {
 		if let Value::Primitive(p) = &trace_slot.initial_value
@@ -1352,16 +1535,14 @@ fn constraint_sets(
 			km.index.get(&event.constant_id).copied(),
 		)
 	}));
-	for result in ctx.results_get() {
-		for query in std::iter::once(&result.query).chain(&result.variants) {
-			for constant in query.constants.iter().chain(&query.message.constants) {
-				if let Some(slot) = km.index_of(constant) {
-					endpoints.push((
-						km.slots[slot].creator,
-						(km.slots[slot].declared_at, slot + 1),
-						Some(slot),
-					));
-				}
+	for query in queries {
+		for constant in query.constants.iter().chain(&query.message.constants) {
+			if let Some(slot) = km.index_of(constant) {
+				endpoints.push((
+					km.slots[slot].creator,
+					(km.slots[slot].declared_at, slot + 1),
+					Some(slot),
+				));
 			}
 		}
 	}
@@ -1423,7 +1604,7 @@ fn projects_a_variable(v: &Value) -> bool {
 		Value::Primitive(p) => {
 			primitive_is_projection(p.id) && p.arguments.first().is_some_and(contains_var)
 		}
-		Value::Constant(_) => false,
+		Value::Constant(_) | Value::Variable(_) => false,
 	})
 }
 
@@ -1431,10 +1612,7 @@ fn decomposition_targets(p: &Primitive) -> Option<(Vec<Value>, Vec<Value>)> {
 	if primitive_core_reveals_args(p.id) {
 		return Some((p.arguments.clone(), Vec::new()));
 	}
-	let rule = primitive_get(p.id).ok()?.decompose.as_ref()?;
-	if rule.output.is_some_and(|output| p.output != output) {
-		return None;
-	}
+	let rule = crate::theory::decompose_rule(p)?;
 	let mut given = Vec::new();
 	for &index in &rule.given {
 		let argument = p.arguments.get(index)?;
@@ -1512,23 +1690,7 @@ fn check_passes(p: &Primitive) -> bool {
 	crate::theory::can_rewrite(&Arc::new(p.clone())).0
 }
 
-pub(crate) fn build_rewrite_shapes_with(
-	outer: &Primitive,
-	rule: &RewriteRule,
-	fill: impl FnMut(usize) -> Value,
-) -> Vec<Value> {
-	rewrite_shapes_from(outer, rule, fill, false)
-}
-
-pub(crate) fn build_rewrite_shapes_leaving_free(
-	outer: &Primitive,
-	rule: &RewriteRule,
-	fill: impl FnMut(usize) -> Value,
-) -> Vec<Value> {
-	rewrite_shapes_from(outer, rule, fill, true)
-}
-
-fn rewrite_shapes_from(
+pub(crate) fn rewrite_shapes_from(
 	outer: &Primitive,
 	rule: &RewriteRule,
 	mut fill: impl FnMut(usize) -> Value,
@@ -1653,6 +1815,82 @@ mod tests {
 	use super::*;
 
 	#[test]
+	fn deduction_uses_the_bound_of_its_inputs_and_keeps_reducible_inputs() {
+		let nil = value_nil();
+		let km = make_trace(vec![]);
+		let sym = SymbolicState::default();
+		let attacker = make_attacker_state(vec![nil.clone()]);
+		let input = super::super::vars::attacker_var(0);
+		let hash = |v| Value::primitive(PRIM_HASH, vec![v], 0);
+		let too_deep = hash(hash(nil.clone()));
+		let reducible = Value::primitive(
+			PRIM_DEC,
+			vec![
+				too_deep.clone(),
+				Value::primitive(PRIM_ENC, vec![too_deep.clone(), nil.clone()], 0),
+			],
+			0,
+		);
+		for (value, accepted) in [(too_deep, false), (reducible, true)] {
+			let deducer = Deducer::new(&km, &attacker, &sym).with_bound(vec![(input.clone(), 1)]);
+			let binding = [(as_var(&input).unwrap(), value)].into_iter().collect();
+			assert_eq!(!deducer.solve(&nil, &binding).is_empty(), accepted);
+			assert_eq!(deducer.declined_bound(), !accepted);
+		}
+	}
+
+	#[test]
+	fn an_oracle_accepts_a_constructed_goal_outside_the_protocol_basis() {
+		let key = make_private("oracle_constructed_seal");
+		let signing = make_private("oracle_constructed_signing");
+		let message = make_constant("oracle_constructed_message");
+		let input = super::super::vars::attacker_var(2);
+		let cipher = super::super::vars::attacker_var(3);
+		let sealed = Value::primitive(
+			PRIM_ENC,
+			vec![
+				key.clone(),
+				Value::primitive(PRIM_SIGN, vec![signing.clone(), input.clone()], 0),
+			],
+			0,
+		);
+		let opened = Value::primitive(PRIM_DEC, vec![key, cipher.clone()], 0);
+		let km = make_trace(vec![
+			crate::testutil::make_wire_slot(
+				&make_constant("oracle_constructed_sealed"),
+				&sealed,
+				0,
+			),
+			crate::testutil::make_wire_slot(
+				&make_constant("oracle_constructed_opened"),
+				&opened,
+				1,
+			),
+		]);
+		let sym = SymbolicState {
+			terms: vec![sealed, opened, input.clone(), cipher.clone()],
+			var_slots: vec![2, 3],
+			var_terms: vec![None, None, Some(input.clone()), Some(cipher.clone())],
+		};
+		let attacker = make_attacker_state(vec![message.clone(), value_nil()]);
+		let deducer = Deducer::new(&km, &attacker, &sym);
+		let chosen = Value::primitive(PRIM_HASH, vec![message], 0);
+		let goal = Value::primitive(PRIM_SIGN, vec![signing, chosen.clone()], 0);
+		assert!(
+			!sym.terms
+				.iter()
+				.chain(attacker.known.iter())
+				.any(|term| crate::value::subterms(term).any(|t| t.equivalent(&goal, true)))
+		);
+		let solutions = deducer.solve(&goal, &Substitution::default());
+		assert!(solutions.iter().any(|solution| {
+			apply(&input, solution).equivalent(&chosen, true)
+				&& crate::theory::reduce_once(&apply(&sym.terms[1], solution))
+					.equivalent(&goal, true)
+		}));
+	}
+
+	#[test]
 	fn forgeable_goals_share_only_the_declared_key_primitive_and_phase() {
 		let key = make_private("forge_scope_key");
 		let other = make_private("forge_scope_other");
@@ -1681,7 +1919,7 @@ mod tests {
 					"{goal} at phase {phase}"
 				);
 			}
-			let variable = super::super::vars::attacker_var(0, "forge_scope_variable");
+			let variable = super::super::vars::attacker_var(0);
 			let goal = Value::primitive(PRIM_SIGN, vec![variable.clone(), message.clone()], 0);
 			let solutions = deducer.solve(&goal, &Substitution::default());
 			assert!(
@@ -1707,7 +1945,7 @@ mod tests {
 		let km = make_trace(vec![]);
 		let sym = SymbolicState::default();
 		let attacker = make_attacker_state(vec![value_nil(), public, sealed]);
-		let variable = super::super::vars::attacker_var(0, "reduct_goal_ciphertext");
+		let variable = super::super::vars::attacker_var(0);
 		let goal = Value::primitive(PRIM_PKE_DEC, vec![key, variable.clone()], 0);
 		let deducer = Deducer::new(&km, &attacker, &sym);
 		let bound = Substitution::from_iter([(
@@ -1718,11 +1956,11 @@ mod tests {
 				0,
 			),
 		)]);
-		let before = deducer.fresh.get();
+		let before = deducer.variables.borrow().clone();
 		let solved = deducer.solve(&goal, &bound);
 		assert_eq!(solved.len(), 1);
 		assert!(same_substitution(&solved[0], &bound));
-		assert_eq!(deducer.fresh.get(), before);
+		assert_eq!(deducer.variables.borrow().clone(), before);
 		let solutions = deducer.solve(&goal, &Substitution::default());
 		assert!(!solutions.is_empty());
 		for solution in solutions {
@@ -1758,8 +1996,8 @@ mod tests {
 			)
 		};
 		let slot = super::super::vars::attacker_var_id(0);
-		let left = Substitution::from_iter([(slot, key(x.clone(), y.clone()))]);
-		let right = Substitution::from_iter([(slot, key(a.clone(), b.clone()))]);
+		let left = Substitution::from_iter([(slot.clone(), key(x.clone(), y.clone()))]);
+		let right = Substitution::from_iter([(slot.clone(), key(a.clone(), b.clone()))]);
 		let merged = combine(&[left], &[right]);
 		assert_eq!(merged.len(), 2);
 		for (wanted, other) in [(&a, &b), (&b, &a)] {
@@ -1775,8 +2013,8 @@ mod tests {
 	fn rewrite_inversion_keeps_bindings_in_the_reduct() {
 		let key = make_private("invert_reduct_key");
 		let message = make_constant("invert_reduct_message");
-		let input = super::super::vars::attacker_var(0, "invert_reduct_input");
-		let signature = super::super::vars::attacker_var(1, "invert_reduct_signature");
+		let input = super::super::vars::attacker_var(0);
+		let signature = super::super::vars::attacker_var(1);
 		let term = Value::primitive(PRIM_UNBLIND, vec![value_nil(), input.clone(), signature], 0);
 		let target = Value::primitive(PRIM_SIGN, vec![key, message.clone()], 0);
 		let km = make_trace(vec![]);
@@ -1786,11 +2024,7 @@ mod tests {
 		let found = deducer.invert(&term, &target, &Substitution::default());
 		assert!(!found.is_empty());
 		for solution in found {
-			assert!(
-				solution
-					.keys()
-					.all(|id| super::super::vars::is_slot_var_id(*id))
-			);
+			assert!(solution.keys().all(super::super::vars::is_slot_var_id));
 			assert!(apply(&input, &solution).equivalent(&message, true));
 			assert!(crate::theory::reduce_once(&apply(&term, &solution)).equivalent(&target, true));
 		}
@@ -1801,9 +2035,9 @@ mod tests {
 		let a = make_constant("invert_alternatives_a");
 		let b = make_constant("invert_alternatives_b");
 		let key = make_private("invert_alternatives_key");
-		let x = super::super::vars::attacker_var(0, "invert_alternatives_x");
-		let y = super::super::vars::attacker_var(1, "invert_alternatives_y");
-		let sig = super::super::vars::attacker_var(2, "invert_alternatives_sig");
+		let x = super::super::vars::attacker_var(0);
+		let y = super::super::vars::attacker_var(1);
+		let sig = super::super::vars::attacker_var(2);
 		let dh = |a, b| {
 			Value::primitive(
 				PRIM_DH_KEX,
@@ -1849,21 +2083,17 @@ mod tests {
 		let km = make_trace(vec![]);
 		let sym = SymbolicState::default();
 		let original = Deducer::new(&km, &attacker, &sym);
-		let in_lane = original.lane_factory();
-		let mut restricted = in_lane(1);
-		let sibling = in_lane(2);
-		assert!(Arc::ptr_eq(&original.by_head, &restricted.by_head));
+		let [restricted, sibling]: [Deducer; 2] = original.lanes(2).try_into().ok().unwrap();
 		assert!(Arc::ptr_eq(&original.shared, &restricted.shared));
 		assert!(Arc::ptr_eq(&original.shared, &sibling.shared));
-		Arc::make_mut(&mut restricted.by_head).clear();
 		let mut variables = IdSet::default();
-		for (deducer, expected) in [(&restricted, 0), (&original, 1), (&sibling, 1)] {
+		for deducer in [&restricted, &original, &sibling] {
 			let variable = deducer.fresh_var();
 			assert!(variables.insert(as_var(&variable).unwrap()));
 			assert!(deducer.memo.borrow().is_empty());
 			let goal = Value::primitive(PRIM_ENC, vec![key.clone(), variable.clone()], 0);
 			let solutions = deducer.solve(&goal, &Substitution::default());
-			assert_eq!(solutions.len(), expected);
+			assert_eq!(solutions.len(), 1);
 			for solution in solutions {
 				assert!(apply(&variable, &solution).equivalent(&message, true));
 			}
@@ -1875,8 +2105,8 @@ mod tests {
 		let a = make_private("rewrite_match_a");
 		let b = make_private("rewrite_match_b");
 		let secret = make_private("rewrite_match_secret");
-		let x = super::super::vars::attacker_var(0, "rewrite_match_x");
-		let y = super::super::vars::attacker_var(1, "rewrite_match_y");
+		let x = super::super::vars::attacker_var(0);
+		let y = super::super::vars::attacker_var(1);
 		let dh = |a: Value, b| {
 			Value::primitive(
 				PRIM_DH_KEX,
@@ -1926,7 +2156,7 @@ mod tests {
 	fn weak_decomposition_respects_capabilities_and_their_phase() {
 		let secret = make_private("weak_route_secret");
 		let message = make_constant("weak_route_message");
-		let variable = super::super::vars::attacker_var(0, "weak_route_input");
+		let variable = super::super::vars::attacker_var(0);
 		let goal = Value::primitive(PRIM_MAC, vec![secret.clone(), message.clone()], 0);
 		for annotated in [false, true] {
 			let mut p = Primitive::new(
@@ -2117,8 +2347,8 @@ mod tests {
 	fn threshold_search_retains_key_alignments_until_the_message_matches() {
 		let a = make_private("threshold_alignment_a");
 		let b = make_private("threshold_alignment_b");
-		let x = super::super::vars::attacker_var(0, "threshold_alignment_x");
-		let y = super::super::vars::attacker_var(1, "threshold_alignment_y");
+		let x = super::super::vars::attacker_var(0);
+		let y = super::super::vars::attacker_var(1);
 		let dh = |a: Value, b| {
 			Value::primitive(
 				PRIM_DH_KEX,
@@ -2230,44 +2460,31 @@ mod tests {
 	}
 
 	#[test]
-	fn a_lane_out_of_fresh_variables_stops_instead_of_aborting() {
-		let key = make_private("exhausted_lane_key");
-		let message = make_private("exhausted_lane_message");
+	fn a_lane_issues_variables_without_a_ceiling() {
+		let key = make_private("unbounded_lane_key");
+		let message = make_private("unbounded_lane_message");
 		let held = Value::primitive(PRIM_ENC, vec![key.clone(), message.clone()], 0);
 		let attacker = make_attacker_state(vec![held]);
 		let km = make_trace(vec![]);
 		let sym = SymbolicState::default();
-		let (start, _) = super::super::vars::free_lane_bounds(0);
-		let deducer = Deducer::new(&km, &attacker, &sym).with_fresh_range(start, start + 2);
-		let first = deducer.fresh_var();
-		let second = deducer.fresh_var();
-		assert_ne!(as_var(&first), as_var(&second), "distinct while ids remain");
-		let last = as_var(&second).expect("a variable");
-		for _ in 0..4 {
-			assert_eq!(
-				as_var(&deducer.fresh_var()),
-				Some(last),
-				"an exhausted lane repeats its last id rather than aborting or \
-				 spilling into another lane's band"
-			);
+		let deducer = Deducer::new(&km, &attacker, &sym).in_test_lane(3);
+		let mut seen = IdSet::default();
+		for _ in 0..100_000 {
+			let id = as_var(&deducer.fresh_var()).expect("a variable");
+			assert!(seen.insert(id), "every issued variable is distinct");
 		}
+		let goal = Value::primitive(PRIM_ENC, vec![key, deducer.fresh_var()], 0);
 		assert!(
-			deducer
-				.truncation_flag()
-				.load(std::sync::atomic::Ordering::Relaxed)
-		);
-		let goal = Value::primitive(PRIM_ENC, vec![key, second], 0);
-		assert!(
-			deducer.solve(&goal, &Substitution::default()).is_empty(),
-			"and it proposes nothing further, since ids it would need are gone"
+			!deducer.solve(&goal, &Substitution::default()).is_empty(),
+			"a lane that has issued many variables keeps solving rather than giving up"
 		);
 	}
 
 	#[test]
 	fn threshold_frontier_retains_distinct_counts_and_bindings_in_order() {
 		let id = super::super::vars::attacker_var_id(0);
-		let first = Substitution::from_iter([(id, make_private("count_first"))]);
-		let second = Substitution::from_iter([(id, make_private("count_second"))]);
+		let first = Substitution::from_iter([(id.clone(), make_private("count_first"))]);
+		let second = Substitution::from_iter([(id.clone(), make_private("count_second"))]);
 		let reduced = dedupe_counts(vec![
 			(first.clone(), 1),
 			(second.clone(), 2),
@@ -2285,7 +2502,7 @@ mod tests {
 
 	#[test]
 	fn forgeable_shape_collection_visits_a_shared_check_once() {
-		let variable = super::super::vars::attacker_var(0, "dag_shape");
+		let variable = super::super::vars::attacker_var(0);
 		let key = make_private("dag_shape_key");
 		let check = Value::primitive(PRIM_DEC, vec![key.clone(), variable.clone()], 0);
 		let mut term = check.clone();
@@ -2300,7 +2517,7 @@ mod tests {
 		let km = make_trace(vec![]);
 		let attacker = make_attacker_state(vec![]);
 		let deducer = Deducer::new(&km, &attacker, &sym);
-		let shapes = deducer.forgeable_shapes(&sym, as_var(&variable).unwrap());
+		let shapes = deducer.forgeable_shapes(&sym, &as_var(&variable).unwrap());
 		assert_eq!(shapes.len(), 1);
 		let Value::Primitive(shape) = &shapes[0] else {
 			panic!("a decryption requires an encryption shape");
@@ -2339,9 +2556,7 @@ authentication? Sender -> Bob: payload
 		let attacker = make_attacker_state(vec![]);
 		let controllable = crate::solve::control::Controllable::of(&km, bob, &attacker);
 		let sym = super::super::symbolic::build(&controllable, &km, bob, &attacker);
-		let ctx =
-			crate::context::VerifyContext::new(&model, Vec::new(), 1, None, Vec::new(), Vec::new());
-		let groups = constraint_sets(&ctx, &km, &sym);
+		let groups = constraint_sets(&model.queries, &km, &sym);
 		let slot = |name: &str| {
 			km.slots
 				.iter()
@@ -2370,7 +2585,7 @@ authentication? Sender -> Bob: payload
 		let other_nonce = make_private("nested_reuse_other_nonce");
 		let secret = make_private("nested_reuse_secret");
 		let message = make_constant("nested_reuse_message");
-		let variable = super::super::vars::attacker_var(0, "nested_reuse_input");
+		let variable = super::super::vars::attacker_var(0);
 		let goal = Value::primitive(PRIM_MAC, vec![secret.clone(), message.clone()], 0);
 		let seal = |nonce: Value, plaintext: Value| {
 			Value::primitive(
@@ -2429,7 +2644,7 @@ authentication? Sender -> Bob: payload
 		let inner = make_private("nested_open_inner");
 		let secret = make_private("nested_open_secret");
 		let message = make_constant("nested_open_message");
-		let variable = super::super::vars::attacker_var(0, "nested_open_input");
+		let variable = super::super::vars::attacker_var(0);
 		let goal = Value::primitive(PRIM_MAC, vec![secret.clone(), message.clone()], 0);
 		let plaintext = Value::primitive(PRIM_MAC, vec![secret, variable.clone()], 0);
 		let encrypted = Value::primitive(PRIM_ENC, vec![inner.clone(), plaintext], 0);
@@ -2470,7 +2685,7 @@ authentication? Sender -> Bob: payload
 		let key = make_constant("nested_dag_key");
 		let secret = make_private("nested_dag_secret");
 		let message = make_constant("nested_dag_message");
-		let variable = super::super::vars::attacker_var(0, "nested_dag_input");
+		let variable = super::super::vars::attacker_var(0);
 		let goal = Value::primitive(PRIM_MAC, vec![secret.clone(), message.clone()], 0);
 		let plaintext = Value::primitive(PRIM_MAC, vec![secret, variable.clone()], 0);
 		let mut wire = Value::primitive(PRIM_ENC, vec![key.clone(), plaintext], 0);
@@ -2503,7 +2718,7 @@ authentication? Sender -> Bob: payload
 	fn deduction_routes_require_the_declared_encapsulation_projection() {
 		let key = make_private("route_projection_key");
 		let public = Value::primitive(PRIM_PUBKEY, vec![key.clone()], 0);
-		let variable = super::super::vars::attacker_var(0, "route_projection_input");
+		let variable = super::super::vars::attacker_var(0);
 		let randomness = make_constant("route_projection_randomness");
 		let secret = Value::primitive(PRIM_KEM_ENCAP, vec![public.clone(), randomness.clone()], 0);
 		let name = make_constant("route_projection_wire");
@@ -2547,7 +2762,7 @@ authentication? Sender -> Bob: payload
 		let key = make_private("memo_oracle_key");
 		let message = make_constant("memo_oracle_message");
 		let other = make_constant("memo_oracle_other");
-		let variable = super::super::vars::attacker_var(0, "memo_oracle_input");
+		let variable = super::super::vars::attacker_var(0);
 		let wire = Value::primitive(PRIM_MAC, vec![key.clone(), variable.clone()], 0);
 		let goal = Value::primitive(PRIM_MAC, vec![key, message.clone()], 0);
 		let name = make_constant("memo_oracle_wire");
@@ -2576,17 +2791,22 @@ authentication? Sender -> Bob: payload
 	}
 
 	#[test]
-	fn free_variable_lanes_are_disjoint_and_leave_the_sequential_half_alone() {
-		let (seq_start, seq_end) = super::super::vars::free_lane_bounds(0);
-		assert_eq!(seq_start, 0);
-		let (one_start, one_end) = super::super::vars::free_lane_bounds(1);
-		let (two_start, two_end) = super::super::vars::free_lane_bounds(2);
-		assert!(seq_end <= two_start);
-		assert_eq!(two_end, one_start);
-		assert_eq!(one_end, u32::MAX - super::super::vars::FREE_VAR_BASE + 1);
-		let (last_start, _) = super::super::vars::free_lane_bounds(super::super::vars::FREE_LANES);
-		assert_eq!(last_start, seq_end);
+	fn fresh_variables_are_disjoint_between_lanes_and_batches() {
+		let km = make_trace(vec![]);
+		let attacker = make_attacker_state(vec![]);
+		let sym = SymbolicState::default();
+		let deducer = Deducer::new(&km, &attacker, &sym);
+		let mut seen = IdSet::default();
+		for _ in 0..2 {
+			for worker in deducer.lanes(7) {
+				for _ in 0..1_000 {
+					assert!(seen.insert(as_var(&worker.fresh_var()).unwrap()));
+					assert!(seen.insert(as_var(&deducer.fresh_var()).unwrap()));
+				}
+			}
+		}
 	}
+
 	use crate::testutil::*;
 
 	fn unblind_over(k: &Value, m: &Value, sig: &Value) -> Primitive {
@@ -2678,7 +2898,7 @@ authentication? Sender -> Bob: payload
 		let nonce = make_constant("sealed_share_nonce");
 		let secret = make_private("sealed_share_secret");
 		let public = Value::primitive(PRIM_PUBKEY, vec![secret.clone()], 0);
-		let ciphertext = super::super::vars::attacker_var(0, "sealed_share_hello");
+		let ciphertext = super::super::vars::attacker_var(0);
 		let opened = Value::primitive(
 			PRIM_AEAD_DEC,
 			vec![seal.clone(), nonce.clone(), ciphertext.clone(), value_nil()],
@@ -2689,7 +2909,7 @@ authentication? Sender -> Bob: payload
 		let km = make_trace(vec![]);
 		let sym = SymbolicState::default();
 		let attacker = make_attacker_state(vec![value_nil(), seal, nonce, public.clone()]);
-		let deducer = Deducer::new(&km, &attacker, &sym).with_fresh_range(1, 64);
+		let deducer = Deducer::new(&km, &attacker, &sym).in_test_lane(1);
 		let own = Value::primitive(PRIM_DH_KEX, vec![public.clone(), value_nil()], 0);
 		for wrapped in [share, free] {
 			let goal = Value::primitive(PRIM_DH_KEX, vec![wrapped.clone(), secret.clone()], 0);
