@@ -26,6 +26,7 @@ struct HeldValue {
 	slot: usize,
 	value: Value,
 	received: bool,
+	installed: bool,
 }
 
 impl Node {
@@ -45,6 +46,7 @@ impl Node {
 								slot,
 								value: crate::hashing::hashcons(&held.value),
 								received: held.sender.is_some(),
+								installed: held.installed.is_some(),
 							})
 						})
 						.collect()
@@ -128,6 +130,8 @@ pub(crate) struct Search<'a, 'b> {
 	cheapest: std::cell::RefCell<IdMap<usize, Cheapest>>,
 	holders: IdMap<(usize, QueryKind), Holders>,
 	merged_targets: IdMap<(u64, usize), Vec<Value>>,
+	routes: Vec<(Installs, Vec<Value>)>,
+	rerouting: bool,
 }
 
 struct Cheapest {
@@ -181,6 +185,7 @@ enum Family {
 	Idle,
 	Unshaped,
 	Shared,
+	Rerouted,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -347,6 +352,8 @@ impl<'a, 'b> Search<'a, 'b> {
 			cheapest: std::cell::RefCell::default(),
 			holders: IdMap::default(),
 			merged_targets: IdMap::default(),
+			routes: Vec::new(),
+			rerouting: false,
 		};
 		let root = Node::of(Vec::new(), &search.honest, &search.queried);
 		search.push_node(root);
@@ -668,6 +675,7 @@ impl<'a, 'b> Search<'a, 'b> {
 		if !self.done() && symbolic::has_key_shaped_slot(self.cx.km) {
 			self.as_family(Family::Unshaped, |search| search.fixpoint(Mode::Unshaped));
 		}
+		self.reroute();
 	}
 
 	fn idle(&mut self) {
@@ -1311,16 +1319,41 @@ impl<'a, 'b> Search<'a, 'b> {
 		}
 	}
 
-	fn note_fresh(&mut self, at: usize, node: &Node) -> bool {
-		let touched = runs_of(&node.installs);
-		let mut added = false;
+	fn send_step(&self, d: usize) -> Option<usize> {
+		let sender = self.cx.program.deliveries[d].sender;
+		self.cx.program.runs[sender]
+			.steps
+			.iter()
+			.position(|step| step.event == Event::Send(d))
+	}
+
+	fn rerouted(&self, node: &Node, d: usize) -> bool {
+		self.replaced(node, d).next().is_some()
+	}
+
+	fn replaced<'n>(&'n self, node: &'n Node, d: usize) -> impl Iterator<Item = usize> + 'n {
+		let sender = self.cx.program.deliveries[d].sender;
+		let run = &self.cx.program.runs[sender];
+		let send = self.send_step(d);
+		node.held[sender].iter().filter_map(move |held| {
+			let step = *run.step_of_slot.get(&held.slot)?;
+			let Event::Recv(replaced) = run.steps[step].event else {
+				return None;
+			};
+			(held.installed && send.is_some_and(|send| step < send)).then_some(replaced)
+		})
+	}
+
+	fn fresh_sends(&self, at: usize, node: &Node) -> Vec<(Value, Source)> {
+		let mut out = Vec::new();
 		for (d, delivery) in self.cx.program.deliveries.iter().enumerate() {
 			let Some(sent) = &node.sent[d] else {
 				continue;
 			};
+			let rerouted = self.rerouting && self.rerouted(node, d);
 			for (k, v) in sent.iter().enumerate() {
 				let honest = self.nodes[0].sent[d].as_ref().map(|values| &values[k]);
-				if honest.is_some_and(|h| h.equivalent(v, true)) {
+				if !rerouted && honest.is_some_and(|h| h.equivalent(v, true)) {
 					continue;
 				}
 				let source = Source {
@@ -1328,17 +1361,170 @@ impl<'a, 'b> Search<'a, 'b> {
 					run: delivery.sender,
 					slot: delivery.slots[k].0,
 				};
-				let bucket = self.fresh.entry(v.hash_value()).or_default();
-				if bucket.iter().any(|(w, held, runs)| {
-					held.run == source.run && w.equivalent(v, true) && *runs == touched
-				}) {
-					continue;
-				}
-				bucket.push((v.clone(), source, touched.clone()));
-				added = true;
+				out.push((v.clone(), source));
 			}
 		}
+		out
+	}
+
+	fn note_fresh(&mut self, at: usize, node: &Node) -> bool {
+		let sends = self.fresh_sends(at, node);
+		self.note_sources(sends, runs_of(&node.installs))
+	}
+
+	fn note_sources(&mut self, sends: Vec<(Value, Source)>, touched: Vec<usize>) -> bool {
+		let mut added = false;
+		for (v, source) in sends {
+			let bucket = self.fresh.entry(v.hash_value()).or_default();
+			if bucket.iter().any(|(w, held, runs)| {
+				held.run == source.run && w.equivalent(&v, true) && *runs == touched
+			}) {
+				continue;
+			}
+			bucket.push((v, source, touched.clone()));
+			added = true;
+		}
 		added
+	}
+
+	fn rerouted_values(&self, node: &Node) -> Vec<Value> {
+		let mut out = Vec::new();
+		for (d, sent) in node.sent.iter().enumerate() {
+			if let Some(sent) = sent
+				&& self.rerouted(node, d)
+			{
+				out.extend(sent.iter().cloned());
+			}
+		}
+		out
+	}
+
+	fn honest_sent_at(&self, d: usize, at: &IdMap<(usize, usize), usize>) -> Option<usize> {
+		let sender = self.cx.program.deliveries[d].sender;
+		at.get(&(sender, self.send_step(d)?)).copied()
+	}
+
+	fn waits_for(&self, stuck: &Stuck, at: &IdMap<(usize, usize), usize>) -> Option<usize> {
+		let program = self.cx.program;
+		stuck
+			.installs
+			.iter()
+			.filter(|(run, slot, _)| stuck.slots.contains(&(*run, *slot)))
+			.filter_map(|(run, slot, value)| {
+				let receive = *at.get(&(*run, *program.runs[*run].step_of_slot.get(slot)?))?;
+				let early = (0..program.deliveries.len()).any(|d| {
+					self.nodes[0].sent[d]
+						.as_ref()
+						.is_some_and(|sent| sent.iter().any(|v| v.equivalent(value, true)))
+						&& self
+							.honest_sent_at(d, at)
+							.is_some_and(|sent| sent < receive)
+				});
+				(!early).then_some(receive)
+			})
+			.min()
+	}
+
+	fn bypasses(&self, source: Source, receive: usize, at: &IdMap<(usize, usize), usize>) -> bool {
+		let node = &self.nodes[source.node];
+		self.cx
+			.program
+			.deliveries
+			.iter()
+			.enumerate()
+			.any(|(d, delivery)| {
+				delivery.sender == source.run
+					&& node.sent[d].is_some()
+					&& delivery.slots.iter().any(|&(slot, _)| slot == source.slot)
+					&& self.replaced(node, d).any(|replaced| {
+						self.honest_sent_at(replaced, at)
+							.is_some_and(|sent| sent > receive)
+					})
+			})
+	}
+
+	fn reroute(&mut self) {
+		if self.done() {
+			return;
+		}
+		self.rerouting = true;
+		let at: IdMap<(usize, usize), usize> = self
+			.honest
+			.order
+			.iter()
+			.enumerate()
+			.map(|(i, &(run, step, _))| ((run, step), i))
+			.collect();
+		let waits: Vec<Option<usize>> = self
+			.stuck
+			.iter()
+			.map(|stuck| self.waits_for(stuck, &at))
+			.collect();
+		let mut wanted: IdMap<u64, Vec<Value>> = IdMap::default();
+		for (stuck, _) in self
+			.stuck
+			.iter()
+			.zip(&waits)
+			.filter(|(_, waits)| waits.is_some())
+		{
+			for (run, slot, value) in &stuck.installs {
+				if !stuck.slots.contains(&(*run, *slot)) {
+					continue;
+				}
+				let bucket = wanted.entry(value.hash_value()).or_default();
+				if !bucket.iter().any(|held| held.equivalent(value, true)) {
+					bucket.push(value.clone());
+				}
+			}
+		}
+		let wants = |v: &Value| {
+			wanted
+				.get(&v.hash_value())
+				.is_some_and(|bucket| bucket.iter().any(|w| w.equivalent(v, true)))
+		};
+		for n in 0..self.nodes.len() {
+			let sends: Vec<(Value, Source)> = self
+				.fresh_sends(n, &self.nodes[n])
+				.into_iter()
+				.filter(|(v, _)| wants(v))
+				.collect();
+			let touched = runs_of(&self.nodes[n].installs);
+			self.note_sources(sends, touched);
+		}
+		for (installs, values) in std::mem::take(&mut self.routes) {
+			if self.done() {
+				return;
+			}
+			if values.iter().any(wants) {
+				let ex = self.execute_counted(&installs);
+				let accepted =
+					self.as_family(Family::Rerouted, |search| search.accept(installs, ex));
+				self.tally(Family::Rerouted, accepted);
+			}
+		}
+		for (index, receive) in waits.into_iter().enumerate() {
+			if self.done() {
+				return;
+			}
+			let Some(receive) = receive else {
+				continue;
+			};
+			let sources: Vec<Source> = self
+				.stuck_sources(index)
+				.into_iter()
+				.filter(|&source| self.bypasses(source, receive, &at))
+				.collect();
+			if sources.is_empty() {
+				continue;
+			}
+			let installs = self.stuck[index].installs.clone();
+			let slots = self.stuck[index].slots.clone();
+			self.stuck[index]
+				.tried_with
+				.extend(sources.iter().map(|s| s.node));
+			self.try_sources(&installs, &slots, sources);
+		}
+		self.drain();
 	}
 
 	fn push_node(&mut self, node: Node) {
@@ -1385,27 +1571,33 @@ impl<'a, 'b> Search<'a, 'b> {
 		(kept.len() < plan.len()).then_some(kept)
 	}
 
-	fn retry_stuck(&mut self, at: usize) {
-		let installs = self.stuck[at].installs.clone();
-		let slots = self.stuck[at].slots.clone();
-		let mut supply = std::mem::take(&mut self.stuck[at].supply);
-		let tried_with = &self.stuck[at].tried_with;
+	fn stuck_sources(&self, at: usize) -> Vec<Source> {
+		let stuck = &self.stuck[at];
 		let mut sources: Vec<Source> = Vec::new();
-		for (run, slot, value) in &installs {
-			if !slots.contains(&(*run, *slot)) {
+		for (run, slot, value) in &stuck.installs {
+			if !stuck.slots.contains(&(*run, *slot)) {
 				continue;
 			}
 			for source in self.fresh_sources(value) {
 				let n = source.node;
 				if n != 0
 					&& !sources.iter().any(|s| s.node == n)
-					&& !tried_with.contains(&n)
-					&& compatible_with(&installs, &self.nodes[n].installs)
+					&& !stuck.tried_with.contains(&n)
+					&& compatible_with(&stuck.installs, &self.nodes[n].installs)
 				{
 					sources.push(source);
 				}
 			}
 		}
+		sources
+	}
+
+	fn retry_stuck(&mut self, at: usize) {
+		let installs = self.stuck[at].installs.clone();
+		let slots = self.stuck[at].slots.clone();
+		let mut supply = std::mem::take(&mut self.stuck[at].supply);
+		let sources = self.stuck_sources(at);
+		let tried_with = &self.stuck[at].tried_with;
 		let mut suppliers: Vec<usize> = Vec::new();
 		let context: Vec<&(usize, usize, Value)> = installs
 			.iter()
@@ -1470,6 +1662,10 @@ impl<'a, 'b> Search<'a, 'b> {
 				self.as_family(Family::Stuck, |search| search.consider(plan));
 			}
 		}
+		self.try_sources(&installs, &slots, sources);
+	}
+
+	fn try_sources(&mut self, installs: &Installs, slots: &[(usize, usize)], sources: Vec<Source>) {
 		for source in sources {
 			if self.done() {
 				return;
@@ -1483,8 +1679,8 @@ impl<'a, 'b> Search<'a, 'b> {
 				}
 			}
 			let plan = normalize(plan);
-			let cleared = self.cleared(&plan, &slots, source, &cone);
-			let settled = !same_installs(&plan, &installs)
+			let cleared = self.cleared(&plan, slots, source, &cone);
+			let settled = !same_installs(&plan, installs)
 				&& self.as_family(Family::Stuck, |search| search.settles(plan));
 			if !settled && let Some(cleared) = cleared {
 				self.as_family(Family::Cleared, |search| search.consider(cleared));
@@ -1839,6 +2035,12 @@ impl<'a, 'b> Search<'a, 'b> {
 		let at = self.nodes.len();
 		let fresh = self.note_fresh(at, &node);
 		if !(kept || fresh || alternative) {
+			if !self.rerouting {
+				let values = self.rerouted_values(&node);
+				if !values.is_empty() {
+					self.routes.push((node.installs, values));
+				}
+			}
 			return false;
 		}
 		self.push_node(node);

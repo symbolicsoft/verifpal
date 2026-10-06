@@ -1,0 +1,74 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a0 at one session and at two.
+//
+// history_own_later_emission.vp with associated data that names each
+// direction: Bob's boxes carry to_alice, Alice's carry to_bob. The reflection
+// that breaks the original no longer opens: Bob's own box1 handed back to him
+// as Alice's reply fails his AEAD_DEC under to_bob, at one session and through
+// Bob#2 at two, so the only box Alice opens as box1 is one Bob sent to her as
+// box1. This is the counterweight that keeps reflection from being reported
+// where the key is shared but the direction is bound.
+
+attacker[active]
+
+principal Alice[
+	knows public to_alice, to_bob
+	generates ea
+	gea = PUBKEY(ea)
+]
+
+principal Bob[
+	knows public to_alice, to_bob
+	knows private lb
+	glb = PUBKEY(lb)
+	generates eb
+	geb = PUBKEY(eb)
+]
+
+Bob -> Alice: [glb]
+
+Alice -> Bob: gea
+
+Bob -> Alice: geb
+
+principal Alice[
+	k_a = HASH(DH_KEX(geb, ea), DH_KEX(glb, ea))
+]
+
+principal Bob[
+	k_b = HASH(DH_KEX(gea, eb), DH_KEX(gea, lb))
+	sig = SIGN(lb, HASH(gea, geb))
+	generates n1
+	box1 = AEAD_ENC(k_b, n1, sig, to_alice)
+]
+
+Bob -> Alice: n1, box1
+
+principal Alice[
+	s = AEAD_DEC(k_a, n1, box1, to_alice)?
+	_ = SIGNVERIF(glb, HASH(gea, geb), s)?
+	knows private m1
+	generates n2
+	box2 = AEAD_ENC(k_a, n2, m1, to_bob)
+]
+
+Alice -> Bob: n2, box2
+
+principal Bob[
+	m1b = AEAD_DEC(k_b, n2, box2, to_bob)?
+	knows private m2
+	generates n3
+	box3 = AEAD_ENC(k_b, n3, m2, to_alice)
+]
+
+Bob -> Alice: n3, box3
+
+principal Alice[
+	m2a = AEAD_DEC(k_a, n3, box3, to_alice)?
+]
+
+queries[
+	authentication? Bob -> Alice: box1
+]

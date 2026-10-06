@@ -1822,7 +1822,7 @@ fn test_scuttlebutt() {
 		"examples/messaging/scuttlebutt.vp",
 		"scuttlebutt.vp",
 		1,
-		"c1c0c1c0a1a1a0a1a1e1",
+		"c1c0c1c0a1a1a1a1a1e1",
 	);
 }
 
@@ -2132,7 +2132,13 @@ fn test_bypass_needs_the_signed_message_wire() {
 #[test]
 fn test_history_own_later_emission() {
 	run_model("history_own_later_emission.vp", "a1");
-	run_model_sessions("history_own_later_emission.vp", 1, "a0");
+	run_model_sessions("history_own_later_emission.vp", 1, "a1");
+}
+
+#[test]
+fn test_history_own_later_emission_directional() {
+	run_model("history_own_later_emission_directional.vp", "a0");
+	run_model_sessions("history_own_later_emission_directional.vp", 1, "a0");
 }
 
 #[test]

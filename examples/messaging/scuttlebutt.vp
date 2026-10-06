@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
 //
-// Expected: c1c0c1c0a1a1a0a1a1e1 at one session and c1c0c1c0a1a1a1a1a1e1 at two.
+// Expected: c1c0c1c0a1a1a1a1a1e1 at one session and at two.
 //
 // Secure Scuttlebutt's "Secret Handshake" — the mutual-authentication key
 // exchange used by the SSB peer-to-peer social network. Alice (client)
@@ -12,7 +12,7 @@
 // Handshake's network key `n` (a MAC key on the ephemerals) is what keeps
 // outsiders off an SSB network — and this model declares it `knows public`,
 // making the attacker a fully paid-up member of the network. The verdict
-// (c1c0c1c0a1a1a0a1a1e1) then splits along a sharp line:
+// (c1c0c1c0a1a1a1a1a1e1) then splits along a sharp line:
 //
 //  What survives a malicious fellow peer:
 //   confidentiality? m1            HOLDS — Alice knows who she is talking
@@ -31,24 +31,23 @@
 //     secretBox2Alice) and checks it against nothing he knew beforehand,
 //     so nothing stops a member attacker from completing the handshake in
 //     the client role — after which Bob's reply is addressed to it.
-//   authentication? (four of five) FAIL — same root cause, compounded by
-//     the boxes being AEADs under hash-derived keys with no signature over
-//     the later ones: a member attacker can get Bob to accept boxes it
-//     authored, and several traces splice in material recorded from the
-//     other concurrent session. (Some of these witnesses reproduce only
-//     because parallel sessions share the model's ephemerals; the m2 story
-//     above does not need that crutch.)
-//   authentication? Bob -> Alice: secretBox1Bob  HOLDS at one session — the
-//     exception, and it is the server-authentication half working. Alice
-//     derives her master secret through Bob's guarded long-term key, so the
-//     only ciphertext that opens under it is one Bob made; the only other such
-//     box is secretBoxM2Bob, which Bob sends two messages later and only after
-//     Alice has already accepted this one.
-//     At two sessions it FAILS by reflection. The attacker steers Alice's key
-//     onto Bob#2 and hands Bob#2 its own secretBox1Bob back as Alice's
-//     secretBoxM1Alice: both directions use the same master secret and no
-//     associated data, so Bob#2 opens it and answers with secretBoxM2Bob, which
-//     Alice then opens as her secretBox1Bob.
+//   authentication? (all five) FAIL — same root cause, compounded by the
+//     boxes being AEADs under hash-derived keys with no signature over the
+//     later ones: a member attacker can get Bob to accept boxes it authored,
+//     and several traces splice in material recorded from the other
+//     concurrent session. (Some of these witnesses reproduce only because
+//     parallel sessions share the model's ephemerals; the m2 story above
+//     does not need that crutch.)
+//   authentication? Bob -> Alice: secretBox1Bob  FAILS by reflection, even
+//     at one session. Alice derives her master secret through Bob's guarded
+//     long-term key, so the only ciphertexts that open under it are Bob's:
+//     secretBox1Bob and secretBoxM2Bob. The second needs a reply from
+//     "Alice", and the attacker supplies one by handing Bob his own
+//     secretBox1Bob back as her secretBoxM1Alice: both directions use the
+//     same master secret and no associated data, so Bob opens it and answers
+//     with secretBoxM2Bob, which Alice then opens as her secretBox1Bob. At
+//     two sessions Bob#2 can play the same part. The server-authentication
+//     half survives everything except this reflection of Bob's own box.
 //
 // The honest reading: Secret Handshake authenticates the SERVER to the
 // client and hides identities from OUTSIDERS; a client identity is

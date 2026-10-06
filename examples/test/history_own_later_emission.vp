@@ -1,23 +1,25 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
 //
-// Expected: a0 at one session and a1 at two.
+// Expected: a1 at one session and at two.
 //
 // Alice accepts Bob's first box only after verifying the signature inside it,
 // and sends her reply under the same key afterwards; Bob's second box exists
-// only once he has a reply. At one session the only box that opens under
-// Alice's key is one her own Bob made, and his second box needs the reply she
-// sends only after accepting a first one, so the query holds.
+// only once he has a reply. That reply need not come from Alice. The key and
+// the associated data are the same in both directions, so the attacker hands
+// Bob his own first box, observed on the wire, as Alice's reply before she has
+// sent one: Bob's check passes and he answers with box3. Handed to Alice as
+// her first box, box3 decrypts, so she uses it; her signature check then
+// fails, but every slot that mentions box1 is reached and its first use
+// passed, so the acceptance stands. Every step happens in one execution, in
+// order: Bob emits box1 before receiving it back, and Alice receives box3
+// only after Bob emits it.
 //
-// At two sessions it fails by reflection. The attacker routes Alice's key share
-// into Bob#2 and hands Bob#2 its own first box back as Alice's reply: the key
-// and the associated data are the same in both directions, so Bob#2's check
-// passes, and Bob#2 answers with box3#2 under the key it now shares with Alice.
-// Handed to Alice as her first box, that box decrypts, so she uses it; her
-// signature check then fails, but every slot that mentions box1 is reached and
-// its first use passed, so the acceptance stands. Nothing in the witness
-// depends on a value Alice's own run computes later. history_own_early_emission.vp
-// is the counterweight.
+// The engine once pinned a0 at one session, reasoning that Bob's second box
+// needs a reply Alice sends only after accepting a first one; that overlooks
+// reflecting Bob's own box. At two sessions the same reflection also works
+// through Bob#2. Nothing in the witness depends on a value Alice's own run
+// computes later. history_own_early_emission.vp is the counterweight.
 
 attacker[active]
 
