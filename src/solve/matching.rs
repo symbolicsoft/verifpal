@@ -55,6 +55,32 @@ fn resolved<'a>(v: &'a Value, s: &Substitution) -> Cow<'a, Value> {
 	}
 }
 
+fn head<'a>(mut v: &'a Value, s: &'a Substitution) -> &'a Value {
+	while let Value::Variable(id) = v
+		&& let Some(bound) = s.get(id)
+	{
+		v = bound;
+	}
+	v
+}
+
+fn clash<const UNIFY: bool>(a: &Value, b: &Value, s: &Substitution) -> bool {
+	let b = if UNIFY { head(b, s) } else { b };
+	match (head(a, s), b) {
+		(Value::Constant(x), Value::Constant(y)) => x.id != y.id,
+		(Value::Constant(_), Value::Primitive(_)) | (Value::Primitive(_), Value::Constant(_)) => {
+			true
+		}
+		(Value::Primitive(p1), Value::Primitive(p2)) => {
+			p1.id != p2.id
+				|| p1.output != p2.output
+				|| p1.threshold != p2.threshold
+				|| p1.arguments.len() != p2.arguments.len()
+		}
+		_ => false,
+	}
+}
+
 fn solve_equations<const UNIFY: bool>(
 	pending: Vec<(Value, Value)>,
 	s: Substitution,
@@ -66,6 +92,12 @@ fn solve_equations<const UNIFY: bool>(
 			let Some((a, b)) = pending.pop() else {
 				return Some(s);
 			};
+			if clash::<UNIFY>(&a, &b, &s) {
+				let (retry, bindings) = alternatives.pop()?;
+				pending = retry;
+				s = bindings;
+				continue;
+			}
 			let a = resolved(&a, &s);
 			let b = if UNIFY {
 				resolved(&b, &s)

@@ -1,7 +1,7 @@
 /* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
  * SPDX-License-Identifier: GPL-3.0-only */
 
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -23,6 +23,7 @@ struct SolvedGoal {
 	goal: Value,
 	bindings: Substitution,
 	solutions: Vec<Substitution>,
+	cut: Vec<(u64, Value)>,
 }
 
 type GoalMemo = IdMap<(u64, u64), Vec<SolvedGoal>>;
@@ -61,7 +62,7 @@ pub(crate) struct Deducer<'a> {
 	shared: Arc<Shared<'a>>,
 	memo: RefCell<GoalMemo>,
 	active: RefCell<Vec<(u64, Value)>>,
-	cycles_cut: Cell<usize>,
+	cuts: RefCell<Vec<usize>>,
 	variables: RefCell<FreshVariables>,
 	bound: Option<Arc<Bound>>,
 	saved: RefCell<crate::theory::SavedMemo>,
@@ -200,7 +201,7 @@ impl<'a> Deducer<'a> {
 			shared,
 			memo: RefCell::default(),
 			active: RefCell::default(),
-			cycles_cut: Cell::new(0),
+			cuts: RefCell::default(),
 			variables: RefCell::new(FreshVariables::new(scope)),
 			bound: None,
 			saved: RefCell::default(),
@@ -290,38 +291,59 @@ impl<'a> Deducer<'a> {
 			.active
 			.borrow()
 			.iter()
-			.any(|(seen, goal)| *seen == key && goal.equivalent(&g, true));
-		if cycling {
-			self.cycles_cut.set(self.cycles_cut.get() + 1);
+			.position(|(seen, goal)| *seen == key && goal.equivalent(&g, true));
+		if let Some(at) = cycling {
+			self.cut_at(at);
 			return;
 		}
 		let relevant = relevant_bindings(&g, s);
 		let memo_key = (key, substitution_hash(&relevant));
-		if let Some(entry) = self.memo.borrow().get(&memo_key).and_then(|bucket| {
-			bucket.iter().find(|entry| {
-				entry.goal.equivalent(&g, true) && same_substitution(&entry.bindings, &relevant)
-			})
-		}) {
-			out.extend(entry.solutions.iter().map(|delta| {
-				let mut solution = s.clone();
-				solution.extend(delta.iter().map(|(id, value)| (id.clone(), value.clone())));
-				solution
-			}));
-			return;
+		{
+			let memo = self.memo.borrow();
+			let reused = memo.get(&memo_key).and_then(|bucket| {
+				bucket.iter().find_map(|entry| {
+					if !entry.goal.equivalent(&g, true)
+						|| !same_substitution(&entry.bindings, &relevant)
+					{
+						return None;
+					}
+					self.active_at(&entry.cut).map(|at| (entry, at))
+				})
+			});
+			if let Some((entry, at)) = reused {
+				for i in at {
+					self.cut_at(i);
+				}
+				out.extend(entry.solutions.iter().map(|delta| {
+					let mut solution = s.clone();
+					solution.extend(delta.iter().map(|(id, value)| (id.clone(), value.clone())));
+					solution
+				}));
+				return;
+			}
 		}
 
-		let cycles_before = self.cycles_cut.get();
+		let depth = self.active.borrow().len();
+		let outer = self.cuts.replace(Vec::new());
 		self.active.borrow_mut().push((key, g.clone()));
 		let mut local = Vec::new();
 		self.solve_rules(&g, s, &mut local);
 		self.active.borrow_mut().pop();
 		local = dedupe(local);
+		let inner = self.cuts.replace(outer);
+		let below: Vec<usize> = inner.into_iter().filter(|&i| i < depth).collect();
+		let cut: Vec<(u64, Value)> = {
+			let active = self.active.borrow();
+			below.iter().map(|&i| active[i].clone()).collect()
+		};
+		for &i in &below {
+			self.cut_at(i);
+		}
 
-		if self.cycles_cut.get() == cycles_before
-			&& let Some(deltas) = local
-				.iter()
-				.map(|solution| extension_of(solution, s))
-				.collect::<Option<Vec<Substitution>>>()
+		if let Some(deltas) = local
+			.iter()
+			.map(|solution| extension_of(solution, s))
+			.collect::<Option<Vec<Substitution>>>()
 		{
 			self.memo
 				.borrow_mut()
@@ -331,9 +353,29 @@ impl<'a> Deducer<'a> {
 					goal: g,
 					bindings: relevant,
 					solutions: deltas,
+					cut,
 				});
 		}
 		out.extend(local);
+	}
+
+	fn cut_at(&self, at: usize) {
+		let mut cuts = self.cuts.borrow_mut();
+		if !cuts.contains(&at) {
+			cuts.push(at);
+		}
+	}
+
+	fn active_at(&self, goals: &[(u64, Value)]) -> Option<Vec<usize>> {
+		let active = self.active.borrow();
+		goals
+			.iter()
+			.map(|(key, goal)| {
+				active
+					.iter()
+					.position(|(seen, held)| seen == key && held.equivalent(goal, true))
+			})
+			.collect()
 	}
 
 	fn obtainable(&self, v: &Value) -> bool {
