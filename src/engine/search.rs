@@ -130,7 +130,7 @@ pub(crate) struct Search<'a, 'b> {
 	cheapest: std::cell::RefCell<IdMap<usize, Cheapest>>,
 	holders: IdMap<(usize, QueryKind), Holders>,
 	merged_targets: IdMap<(u64, usize), Vec<Value>>,
-	routes: Vec<(Installs, Vec<(Value, usize)>)>,
+	routes: Vec<Route>,
 	rerouting: bool,
 	honest_at: IdMap<(usize, usize), usize>,
 }
@@ -1353,28 +1353,32 @@ impl<'a, 'b> Search<'a, 'b> {
 		})
 	}
 
-	fn horizon(&self, node: &Node, d: usize) -> Option<usize> {
+	fn bypassed(&self, node: &Node, d: usize) -> Vec<(usize, usize)> {
 		self.replaced(node, d)
-			.filter_map(|replaced| self.honest_sent_at(replaced))
-			.max()
+			.filter_map(|replaced| {
+				let sender = self.cx.program.deliveries[replaced].sender;
+				Some((sender, self.honest_sent_at(replaced)?))
+			})
+			.collect()
 	}
 
-	fn rerouted_sends(&self, at: usize, node: &Node) -> Vec<(Value, Source, usize)> {
+	fn rerouted_sends(&self, at: usize, node: &Node) -> Vec<(Value, Source, Bypassed)> {
 		let mut out = Vec::new();
 		for (d, delivery) in self.cx.program.deliveries.iter().enumerate() {
 			let Some(sent) = &node.sent[d] else {
 				continue;
 			};
-			let Some(horizon) = self.horizon(node, d) else {
+			let bypassed = self.bypassed(node, d);
+			if bypassed.is_empty() {
 				continue;
-			};
+			}
 			for (k, v) in sent.iter().enumerate() {
 				let source = Source {
 					node: at,
 					run: delivery.sender,
 					slot: delivery.slots[k].0,
 				};
-				out.push((v.clone(), source, horizon));
+				out.push((v.clone(), source, bypassed.clone()));
 			}
 		}
 		out
@@ -1408,22 +1412,30 @@ impl<'a, 'b> Search<'a, 'b> {
 		self.note_sources(sends, runs_of(&node.installs))
 	}
 
+	fn registered(&self, v: &Value, run: usize, touched: &[usize]) -> bool {
+		self.fresh.get(&v.hash_value()).is_some_and(|bucket| {
+			bucket
+				.iter()
+				.any(|(w, held, runs)| held.run == run && w.equivalent(v, true) && runs == touched)
+		})
+	}
+
 	fn note_sources(&mut self, sends: Vec<(Value, Source)>, touched: Vec<usize>) -> bool {
 		let mut added = false;
 		for (v, source) in sends {
-			let bucket = self.fresh.entry(v.hash_value()).or_default();
-			if bucket.iter().any(|(w, held, runs)| {
-				held.run == source.run && w.equivalent(&v, true) && *runs == touched
-			}) {
+			if self.registered(&v, source.run, &touched) {
 				continue;
 			}
-			bucket.push((v, source, touched.clone()));
+			self.fresh
+				.entry(v.hash_value())
+				.or_default()
+				.push((v, source, touched.clone()));
 			added = true;
 		}
 		added
 	}
 
-	fn waits_for(&self, stuck: &Stuck) -> Option<usize> {
+	fn waiting(&self, stuck: &Stuck) -> Vec<(Value, usize, usize)> {
 		let program = self.cx.program;
 		stuck
 			.installs
@@ -1438,12 +1450,12 @@ impl<'a, 'b> Search<'a, 'b> {
 						.is_some_and(|sent| sent.iter().any(|v| v.equivalent(value, true)))
 						&& self.honest_sent_at(d).is_some_and(|sent| sent < receive)
 				});
-				(!early).then_some(receive)
+				(!early).then(|| (value.clone(), *run, receive))
 			})
-			.min()
+			.collect()
 	}
 
-	fn bypasses(&self, source: Source, receive: usize) -> bool {
+	fn bypasses(&self, source: Source, run: usize, receive: usize) -> bool {
 		let node = &self.nodes[source.node];
 		self.cx
 			.program
@@ -1454,9 +1466,7 @@ impl<'a, 'b> Search<'a, 'b> {
 				delivery.sender == source.run
 					&& node.sent[d].is_some()
 					&& delivery.slots.iter().any(|&(slot, _)| slot == source.slot)
-					&& self
-						.horizon(node, d)
-						.is_some_and(|horizon| horizon > receive)
+					&& reaches(&self.bypassed(node, d), run, receive)
 			})
 	}
 
@@ -1465,70 +1475,82 @@ impl<'a, 'b> Search<'a, 'b> {
 			return;
 		}
 		self.rerouting = true;
-		let waits: Vec<Option<usize>> = self
-			.stuck
-			.iter()
-			.map(|stuck| self.waits_for(stuck))
-			.collect();
-		let mut wanted: IdMap<u64, Vec<(Value, usize)>> = IdMap::default();
-		for (stuck, receive) in self.stuck.iter().zip(&waits) {
-			let Some(receive) = *receive else {
-				continue;
-			};
-			for (run, slot, value) in &stuck.installs {
-				if !stuck.slots.contains(&(*run, *slot)) {
-					continue;
-				}
-				let bucket = wanted.entry(value.hash_value()).or_default();
-				match bucket
-					.iter_mut()
-					.find(|(held, _)| held.equivalent(value, true))
-				{
-					Some((_, earliest)) => *earliest = (*earliest).min(receive),
-					None => bucket.push((value.clone(), receive)),
-				}
+		let waiting: Vec<Vec<(Value, usize, usize)>> =
+			self.stuck.iter().map(|stuck| self.waiting(stuck)).collect();
+		let mut earliest: IdMap<(u64, usize), Vec<(&Value, usize)>> = IdMap::default();
+		for (value, run, receive) in waiting.iter().flatten() {
+			let bucket = earliest.entry((value.hash_value(), *run)).or_default();
+			match bucket
+				.iter_mut()
+				.find(|(held, _)| held.equivalent(value, true))
+			{
+				Some((_, at)) => *at = (*at).min(*receive),
+				None => bucket.push((value, *receive)),
 			}
 		}
-		let useful = |v: &Value, horizon: usize| {
-			wanted.get(&v.hash_value()).is_some_and(|bucket| {
-				bucket
-					.iter()
-					.any(|(w, receive)| *receive < horizon && w.equivalent(v, true))
+		let wanted = |v: &Value, bypassed: &[(usize, usize)]| {
+			bypassed.iter().any(|&(run, sent)| {
+				earliest.get(&(v.hash_value(), run)).is_some_and(|bucket| {
+					bucket
+						.iter()
+						.any(|(w, receive)| *receive < sent && w.equivalent(v, true))
+				})
 			})
 		};
-		for n in 0..self.nodes.len() {
-			let sends: Vec<(Value, Source)> = self
-				.rerouted_sends(n, &self.nodes[n])
-				.into_iter()
-				.filter(|(v, _, horizon)| useful(v, *horizon))
-				.map(|(v, source, _)| (v, source))
-				.collect();
-			let touched = runs_of(&self.nodes[n].installs);
+		let registered: Vec<Registration> = self
+			.nodes
+			.iter()
+			.enumerate()
+			.map(|(n, node)| {
+				let sends = self
+					.rerouted_sends(n, node)
+					.into_iter()
+					.filter(|(v, _, bypassed)| wanted(v, bypassed))
+					.map(|(v, source, _)| (v, source))
+					.collect();
+				(sends, runs_of(&node.installs))
+			})
+			.collect();
+		let chosen: Vec<(Installs, Vec<(Value, usize)>)> = self
+			.routes
+			.iter()
+			.filter_map(|(installs, sends)| {
+				let useful: Vec<(Value, usize)> = sends
+					.iter()
+					.filter(|(v, _, bypassed)| wanted(v, bypassed))
+					.map(|(v, run, _)| (v.clone(), *run))
+					.collect();
+				(!useful.is_empty()).then(|| (installs.clone(), useful))
+			})
+			.collect();
+		self.routes.clear();
+		for (sends, touched) in registered {
 			self.note_sources(sends, touched);
 		}
-		for (installs, sends) in std::mem::take(&mut self.routes) {
+		for (installs, useful) in chosen {
 			if self.done() {
 				return;
 			}
-			if sends.iter().any(|(v, horizon)| useful(v, *horizon)) {
-				let ex = self.execute_counted(&installs);
-				let accepted =
-					self.as_family(Family::Rerouted, |search| search.accept(installs, ex));
-				self.tally(Family::Rerouted, accepted);
-			}
-		}
-		for (index, receive) in waits.into_iter().enumerate() {
-			if self.done() {
-				return;
-			}
-			let Some(receive) = receive else {
+			let touched = runs_of(&installs);
+			if useful
+				.iter()
+				.all(|(v, run)| self.registered(v, *run, &touched))
+			{
 				continue;
-			};
-			let sources: Vec<Source> = self
-				.stuck_sources(index)
-				.into_iter()
-				.filter(|&source| self.bypasses(source, receive))
-				.collect();
+			}
+			let ex = self.execute_counted(&installs);
+			let accepted = self.as_family(Family::Rerouted, |search| search.accept(installs, ex));
+			self.tally(Family::Rerouted, accepted);
+		}
+		for (index, late) in waiting.iter().enumerate() {
+			if self.done() {
+				return;
+			}
+			let sources = self.stuck_sources(
+				index,
+				late.iter()
+					.map(|(value, run, receive)| (value, Some((*run, *receive)))),
+			);
 			if sources.is_empty() {
 				continue;
 			}
@@ -1586,19 +1608,21 @@ impl<'a, 'b> Search<'a, 'b> {
 		(kept.len() < plan.len()).then_some(kept)
 	}
 
-	fn stuck_sources(&self, at: usize) -> Vec<Source> {
+	fn stuck_sources<'v>(
+		&self,
+		at: usize,
+		values: impl Iterator<Item = (&'v Value, Option<(usize, usize)>)>,
+	) -> Vec<Source> {
 		let stuck = &self.stuck[at];
 		let mut sources: Vec<Source> = Vec::new();
-		for (run, slot, value) in &stuck.installs {
-			if !stuck.slots.contains(&(*run, *slot)) {
-				continue;
-			}
+		for (value, receive) in values {
 			for source in self.fresh_sources(value) {
 				let n = source.node;
 				if n != 0
 					&& !sources.iter().any(|s| s.node == n)
 					&& !stuck.tried_with.contains(&n)
 					&& compatible_with(&stuck.installs, &self.nodes[n].installs)
+					&& receive.is_none_or(|(run, receive)| self.bypasses(source, run, receive))
 				{
 					sources.push(source);
 				}
@@ -1611,7 +1635,13 @@ impl<'a, 'b> Search<'a, 'b> {
 		let installs = self.stuck[at].installs.clone();
 		let slots = self.stuck[at].slots.clone();
 		let mut supply = std::mem::take(&mut self.stuck[at].supply);
-		let sources = self.stuck_sources(at);
+		let sources = self.stuck_sources(
+			at,
+			installs
+				.iter()
+				.filter(|(run, slot, _)| slots.contains(&(*run, *slot)))
+				.map(|(_, _, value)| (value, None)),
+		);
 		let tried_with = &self.stuck[at].tried_with;
 		let mut suppliers: Vec<usize> = Vec::new();
 		let context: Vec<&(usize, usize, Value)> = installs
@@ -2051,10 +2081,10 @@ impl<'a, 'b> Search<'a, 'b> {
 		let fresh = self.note_fresh(at, &node);
 		if !(kept || fresh || alternative) {
 			if !self.rerouting {
-				let sends: Vec<(Value, usize)> = self
+				let sends: Vec<(Value, usize, Bypassed)> = self
 					.rerouted_sends(at, &node)
 					.into_iter()
-					.map(|(v, _, horizon)| (v, horizon))
+					.map(|(v, source, bypassed)| (v, source.run, bypassed))
 					.collect();
 				if !sends.is_empty() {
 					self.routes.push((node.installs, sends));
@@ -2069,6 +2099,18 @@ impl<'a, 'b> Search<'a, 'b> {
 		}
 		kept
 	}
+}
+
+type Bypassed = Vec<(usize, usize)>;
+
+type Route = (Installs, Vec<(Value, usize, Bypassed)>);
+
+type Registration = (Vec<(Value, Source)>, Vec<usize>);
+
+fn reaches(bypassed: &[(usize, usize)], run: usize, receive: usize) -> bool {
+	bypassed
+		.iter()
+		.any(|&(sender, sent)| sender == run && sent > receive)
 }
 
 fn compatible_with(plan: &Installs, source: &Installs) -> bool {
