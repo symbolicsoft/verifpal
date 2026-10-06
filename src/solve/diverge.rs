@@ -1,12 +1,10 @@
 /* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
  * SPDX-License-Identifier: GPL-3.0-only */
 
-use crate::primitive::{filler_primitive, primitive_def};
-use crate::types::*;
-
 use super::symbolic::SymbolicState;
 use super::vars::{Substitution, apply, attacker_var_id, collect_free_vars, collect_vars, dedupe};
-use crate::value::value_nil;
+use crate::primitive::{filler_primitive, primitive_def};
+use crate::term::{Value, VariableId, value_nil};
 
 pub(crate) fn solve_divergent(a: &Value, b: &Value, s: &Substitution) -> Vec<Substitution> {
 	let mut a_vars = Vec::new();
@@ -77,6 +75,7 @@ mod tests {
 	use crate::primitive::{PRIM_CONCAT, PRIM_DH_KEX, normalise_arguments};
 	use crate::solve::symbolic::SymbolicState;
 	use crate::solve::vars::{as_var, attacker_var, free_var};
+	use crate::term::PrimitiveId;
 
 	fn widest(id: PrimitiveId) -> usize {
 		primitive_def(id)

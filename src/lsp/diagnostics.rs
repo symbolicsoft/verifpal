@@ -5,9 +5,9 @@ use lsp_types::{
 	Diagnostic, DiagnosticRelatedInformation, DiagnosticSeverity, Location, NumberOrString,
 };
 
-use crate::lsp::line::LineIndex;
-use crate::lsp::state::Document;
-use crate::types::VerifpalError;
+use super::line::LineIndex;
+use super::state::Document;
+use crate::syntax::VerifpalError;
 
 pub(crate) fn for_document(doc: &Document) -> Vec<Diagnostic> {
 	doc.error.iter().map(|e| of_error(doc, e)).collect()
@@ -79,7 +79,7 @@ pub(crate) fn of_verdicts(analysis: &crate::report::Analysis, line: &LineIndex) 
 				message.push_str(&step.text);
 			}
 			Diagnostic {
-				range: line.range(crate::types::Span::new(q.range.start, q.range.end)),
+				range: line.range(crate::syntax::Span::new(q.range.start, q.range.end)),
 				severity: Some(if q.resolved {
 					DiagnosticSeverity::ERROR
 				} else {

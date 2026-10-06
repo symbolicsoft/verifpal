@@ -5,8 +5,12 @@ use std::sync::Arc;
 
 use super::knowledge::{Knowledge, Origin};
 use super::program::{Event, Program};
+use crate::primitive::CapabilityIndex;
+use crate::protocol::ProtocolTrace;
+use crate::syntax::{Declaration, Qualifier};
+use crate::term::Value;
 use crate::theory::can_rewrite;
-use crate::types::*;
+use crate::util::IdMap;
 
 pub(crate) type Installs = Vec<(usize, usize, Value)>;
 
@@ -69,7 +73,7 @@ pub(crate) struct Context<'a> {
 impl<'a> Context<'a> {
 	pub(crate) fn new(program: &'a Program, km: &'a ProtocolTrace) -> Context<'a> {
 		let mut initial = Knowledge::new(0);
-		initial.learn(&crate::value::value_nil(), Origin::Initial);
+		initial.learn(&crate::term::value_nil(), Origin::Initial);
 		for slot in &km.slots {
 			let c = &slot.constant;
 			if c.declaration == Some(Declaration::Knows) && c.qualifier == Some(Qualifier::Public) {
@@ -116,7 +120,7 @@ fn resolve(
 
 fn deliverable(v: &Value) -> bool {
 	crate::primitive::admissible(v)
-		&& !crate::value::subterms(v).any(|term| {
+		&& !crate::term::subterms(v).any(|term| {
 			matches!(term, Value::Primitive(p) if p.instance_check
 				&& crate::primitive::rewrite_rule(p.id).is_some()
 				&& !can_rewrite(p).0)
@@ -129,7 +133,7 @@ fn installed_components(
 	capabilities: &CapabilityIndex,
 ) -> Arc<[Value]> {
 	let _memo = crate::theory::DeductionMemo::scoped(capabilities, &knowledge.state);
-	let mut seen = crate::hashing::TermSet::default();
+	let mut seen = crate::term::hashing::TermSet::default();
 	let mut pending = vec![value.clone()];
 	let mut out = Vec::new();
 	while let Some(value) = pending.pop() {
@@ -268,7 +272,7 @@ fn step_run(
 	let km = cx.km;
 	match event {
 		Event::Hold(slot) => {
-			let value = crate::hashing::hashcons(&km.slots[slot].initial_value);
+			let value = crate::term::hashing::hashcons(&km.slots[slot].initial_value);
 			ex.runs[r].env[slot] = Some(Held {
 				pre: value.clone(),
 				value,
@@ -285,11 +289,14 @@ fn step_run(
 				km,
 				&mut memo,
 			);
-			let pre = crate::hashing::hashcons(&pre);
+			let pre = crate::term::hashing::hashcons(&pre);
 			let (value, failed) = match &pre {
 				Value::Primitive(p) => {
 					let (ok, reduced) = can_rewrite(p);
-					(crate::hashing::hashcons(&reduced), !ok && p.instance_check)
+					(
+						crate::term::hashing::hashcons(&reduced),
+						!ok && p.instance_check,
+					)
 				}
 				Value::Constant(_) => (pre.clone(), false),
 				Value::Variable(_) => (pre.clone(), true),

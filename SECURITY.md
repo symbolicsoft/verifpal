@@ -4,10 +4,10 @@
 
 Verifpal is a formal verification tool for cryptographic protocols. Security-relevant areas include:
 
-- **Parser (`src/parser.rs`):** Parses `.vp` protocol model files. Malformed input could trigger unexpected behavior.
-- **Verification engine (`src/verify.rs`, `src/verifyactive.rs`, `src/verifyanalysis.rs`):** Performs symbolic analysis under an active attacker model. Bugs here could cause security properties to be incorrectly verified.
-- **Primitive definitions (`src/primitive.rs`):** Built-in cryptographic primitives and their symbolic reduction rules. Errors could lead to unsound analysis results.
-- **Resolution and rewriting (`src/resolution.rs`, `src/rewrite.rs`):** Value resolution and term rewriting during analysis. Incorrect behavior could cause missed attacks or false positives.
+- **Parser (`src/syntax/parser/`):** Parses `.vp` protocol model files. Malformed input could trigger unexpected behavior.
+- **Verification engine (`src/verify/`, `src/engine/`, `src/solve/`):** Performs symbolic analysis under an active attacker model. Bugs here could cause security properties to be incorrectly verified.
+- **Primitive definitions (`src/primitive/`):** Built-in cryptographic primitives and their symbolic reduction rules. Errors could lead to unsound analysis results.
+- **Resolution and rewriting (`src/protocol/trace.rs`, `src/theory/`):** Value resolution and term rewriting during analysis. Incorrect behavior could cause missed attacks or false positives.
 
 ## Reporting a Vulnerability
 

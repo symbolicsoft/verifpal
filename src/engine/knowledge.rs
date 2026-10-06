@@ -3,13 +3,18 @@
 
 use std::sync::Arc;
 
-use crate::hashing::TermSet;
-use crate::primitive::{primitive_core_reveals_args, recompose_rule, reuse_rule};
-use crate::theory::{
-	can_break_weak, can_decompose, can_recompose, can_reconstruct_primitive, can_rewrite,
-	obtainable, reused_pair, revealed,
+use crate::primitive::{
+	Capability, CapabilityIndex, primitive_core_reveals_args, recompose_rule, reuse_rule,
 };
-use crate::types::*;
+use crate::term::hashing::TermSet;
+use crate::term::{Primitive, Value};
+use crate::theory::attacker::next_chain;
+use crate::theory::{
+	AttackerState, DerivationRecord, Forged, ReconstructResult, SlotIdx, can_break_weak,
+	can_decompose, can_recompose, can_reconstruct_primitive, can_rewrite, obtainable, reused_pair,
+	revealed,
+};
+use crate::util::{IdMap, IdSet};
 
 #[derive(Clone, Debug)]
 pub(crate) enum Origin {
@@ -216,7 +221,7 @@ impl Knowledge {
 		let mut built = Vec::new();
 		applied(declared, pre, &mut built);
 		if !value.same_term(pre) {
-			let inputs: TermSet = crate::value::subterms(pre).cloned().collect();
+			let inputs: TermSet = crate::term::subterms(pre).cloned().collect();
 			reassembled(value, &inputs, &mut IdSet::default(), &mut built);
 		}
 		for term in &built {
@@ -677,9 +682,9 @@ mod tests {
 	use crate::engine::program::Program;
 
 	fn share_disclosed(src: &str, forge: bool) -> bool {
-		let _generation = crate::context::GenerationGuard::enter();
-		let m = crate::parser::parse_string("kmf.vp", src).expect("parses");
-		let km = crate::sanity::sanity(&m).expect("sane");
+		let _generation = crate::util::generation::GenerationGuard::enter();
+		let m = crate::syntax::parser::parse_string("kmf.vp", src).expect("parses");
+		let km = crate::protocol::sanity::sanity(&m).expect("sane");
 		let program = Program::of(&m, &km);
 		let cx = Context::new(&program, &km);
 		let honest = |name: &str| {
@@ -688,14 +693,17 @@ mod tests {
 				.iter()
 				.find(|s| s.constant.name.as_ref() == name)
 				.expect("declared");
-			crate::theory::reduce_once(&crate::value::resolve_trace_constant(&slot.constant, &km))
+			crate::theory::reduce_once(&crate::protocol::trace::resolve_trace_constant(
+				&slot.constant,
+				&km,
+			))
 		};
 		let installs: Installs = if forge {
 			let partial = Value::primitive(
 				crate::primitive::PRIM_THRESHOLD_SIGN,
 				vec![
 					honest("kmf_s1"),
-					crate::value::value_nil(),
+					crate::term::value_nil(),
 					honest("kmf_ca"),
 					honest("kmf_m"),
 				],
@@ -758,9 +766,9 @@ mod tests {
 				false,
 			),
 		] {
-			let _generation = crate::context::GenerationGuard::enter();
-			let m = crate::parser::parse_string("closure.vp", source).expect("parses");
-			let km = crate::sanity::sanity(&m).expect("sane");
+			let _generation = crate::util::generation::GenerationGuard::enter();
+			let m = crate::syntax::parser::parse_string("closure.vp", source).expect("parses");
+			let km = crate::protocol::sanity::sanity(&m).expect("sane");
 			let program = Program::of(&m, &km);
 			let cx = Context::new(&program, &km);
 			let slot = |name: &str| {
@@ -776,11 +784,12 @@ mod tests {
 					.position(|r| r.name == name)
 					.expect("run")
 			};
-			let share = crate::theory::reduce_once(&crate::value::resolve_trace_constant(
-				&km.slots[slot("share")].constant,
-				&km,
-			));
-			let nil = crate::value::value_nil();
+			let share =
+				crate::theory::reduce_once(&crate::protocol::trace::resolve_trace_constant(
+					&km.slots[slot("share")].constant,
+					&km,
+				));
+			let nil = crate::term::value_nil();
 			let bob = run("Bob");
 			let installs: Installs = vec![
 				(bob, slot("message"), nil.clone()),
@@ -796,7 +805,7 @@ mod tests {
 				"the partial the attacker forged in phase 0 reveals nothing about the share"
 			);
 			let claims = |_| Some(km.max_phase);
-			let judged = crate::engine::query::Judge {
+			let judged = crate::engine::judgment::Judge {
 				cx: &cx,
 				ex: &ex,
 				whole: &ex,
@@ -833,7 +842,7 @@ mod tests {
 			);
 			assert!(matches!(
 				judged,
-				Some((crate::engine::query::Violation::Forged { .. }, _))
+				Some((crate::engine::judgment::Violation::Forged { .. }, _))
 			));
 		}
 	}

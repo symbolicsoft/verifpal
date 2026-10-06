@@ -3,9 +3,8 @@
 
 use std::borrow::Cow;
 
-use crate::types::*;
-
 use super::vars::{Substitution, as_var, bind, contains_var, occurs};
+use crate::term::{Primitive, Value};
 
 pub(crate) fn unifiers(
 	a: &Value,
@@ -153,7 +152,7 @@ pub(crate) fn commutative_equations<const UNIFY: bool>(
 	if [left, right]
 		.into_iter()
 		.flatten()
-		.any(|(u, v)| crate::theory::structurally_identical(u, v))
+		.any(|(u, v)| crate::term::equivalence::structurally_identical(u, v))
 	{
 		return None;
 	}
@@ -215,7 +214,7 @@ pub(crate) fn match_values(
 mod tests {
 	use super::*;
 	use crate::primitive::primitive_get_enum;
-	use crate::testutil::*;
+	use crate::testing::*;
 
 	#[test]
 	fn matching_and_unification_preserve_a_shares_threshold() {

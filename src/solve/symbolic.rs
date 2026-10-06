@@ -3,10 +3,11 @@
 
 use std::sync::Arc;
 
-use crate::theory::reduce_once;
-use crate::types::*;
-
 use super::vars::attacker_var;
+use crate::protocol::ProtocolTrace;
+use crate::syntax::PrincipalId;
+use crate::term::Value;
+use crate::theory::{AttackerState, reduce_once};
 
 #[derive(Default)]
 pub(crate) struct SymbolicState {
@@ -183,7 +184,7 @@ impl Walk<'_> {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::testutil::make_attacker_state;
+	use crate::testing::make_attacker_state;
 
 	const SRC: &str = "attacker[active]\n\
 		principal Alice[\n\
@@ -201,8 +202,8 @@ mod tests {
 		]\n";
 
 	fn bob() -> (ProtocolTrace, PrincipalId, AttackerState) {
-		let m = crate::parser::parse_string("sym.vp", SRC).expect("parses");
-		let km = crate::sanity::sanity(&m).expect("passes sanity");
+		let m = crate::syntax::parser::parse_string("sym.vp", SRC).expect("parses");
+		let km = crate::protocol::sanity::sanity(&m).expect("passes sanity");
 		let bob = km.principal_ids[km
 			.principals
 			.iter()
@@ -229,13 +230,13 @@ mod tests {
 			"an unguarded wire value is controllable"
 		);
 		assert!(
-			super::super::vars::contains_var(&sym.terms[slot(&km, "sym_k")]),
+			crate::solve::vars::contains_var(&sym.terms[slot(&km, "sym_k")]),
 			"the key Bob computes is a function of the slot the attacker controls, so \
 			 the symbolic term has to carry the variable: got {}",
 			sym.terms[slot(&km, "sym_k")]
 		);
 		assert!(
-			super::super::vars::contains_var(&sym.terms[slot(&km, "sym_t")]),
+			crate::solve::vars::contains_var(&sym.terms[slot(&km, "sym_t")]),
 			"and so does everything downstream of it"
 		);
 	}
@@ -250,7 +251,7 @@ mod tests {
 		assert!(refined.var_slots.is_empty());
 		for name in ["sym_ga", "sym_k", "sym_t"] {
 			assert!(
-				!super::super::vars::contains_var(&refined.terms[slot(&km, name)]),
+				!crate::solve::vars::contains_var(&refined.terms[slot(&km, name)]),
 				"{name} still mentions a variable after the only controllable slot \
 				 was held honest"
 			);

@@ -29,8 +29,8 @@ static PRIMITIVES: LazyLock<Vec<Entry>> = LazyLock::new(|| {
 pub(crate) static CAPABILITIES: LazyLock<Vec<Entry>> = LazyLock::new(capability_entries);
 
 fn capability_entries() -> Vec<Entry> {
+	use crate::primitive::Capability;
 	use crate::primitive::{primitive_is_key_derivation, primitives_supporting};
-	use crate::types::Capability;
 	fn leak(text: String) -> &'static str {
 		Box::leak(text.into_boxed_str())
 	}
@@ -38,10 +38,11 @@ fn capability_entries() -> Vec<Entry> {
 		if names.is_empty() {
 			return "no primitive".to_string();
 		}
-		crate::util::and_list(&names)
+		crate::util::text::and_list(&names)
 	}
-	let supporting =
-		|cap: Capability| primitives_supporting(|id| crate::capability::supports(id, cap));
+	let supporting = |cap: Capability| {
+		primitives_supporting(|id| crate::primitive::capability::supports(id, cap))
+	};
 	let declared_for = |cap: Capability| list(supporting(cap).iter().map(|s| s.name).collect());
 	let example = |cap: Capability| {
 		supporting(cap)
@@ -251,7 +252,7 @@ mod tests {
 
 	#[test]
 	fn every_capability_is_documented() {
-		for cap in crate::types::Capability::ALL {
+		for cap in crate::primitive::Capability::ALL {
 			assert!(
 				capability(cap.name()).is_some(),
 				"{} has no documentation entry",
@@ -262,7 +263,7 @@ mod tests {
 
 	#[test]
 	fn every_query_kind_is_documented() {
-		for kind in crate::types::QueryKind::ALL {
+		for kind in crate::syntax::QueryKind::ALL {
 			assert!(
 				query(kind.name()).is_some(),
 				"{} has no documentation entry",

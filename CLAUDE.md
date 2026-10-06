@@ -6,7 +6,7 @@ Repository guidance for Claude Code.
 
 Verifpal checks `.vp` cryptographic-protocol models for confidentiality, authentication, freshness, unlinkability and equivalence under passive/active attackers. Default: **two concurrent sessions per principal** (`--sessions k`); a hold means no attack found within that bound. One Rust crate (`verifpal` 1.6.3, edition 2024, Rust 1.98, GPL-3.0-only) builds the CLI and a WASM library for the website and VS Code. [User Manual](https://verifpal.com/docs/): language reference; `README.md`: overview; [*From Toy to Instrument: Seven Years of Verifpal*](https://eprint.iacr.org/2026/1654): language and query semantics.
 
-**An attack is one execution.** `src/engine/` runs every session and scenario copy of every principal together as one execution under a map of attacker installs, with one attacker knowledge set belonging to that execution. A query fails only when the evaluator finds its violation in such an execution. The search (`engine/search.rs`, drawing candidates from `src/solve/`) only proposes install maps; it cannot record a result. Nothing reconstructs a joint history after the fact, so no gate has to decide whether one exists.
+**An attack is one execution.** `src/engine/` runs every session and scenario copy of every principal together as one execution under a map of attacker installs, with one attacker knowledge set belonging to that execution. A query fails only when the evaluator finds its violation in such an execution. The search (`engine/search/`, drawing candidates from `src/solve/`) only proposes install maps; it cannot record a result. Nothing reconstructs a joint history after the fact, so no gate has to decide whether one exists.
 
 ## Non-negotiable rules
 
@@ -19,13 +19,13 @@ Verifpal checks `.vp` cryptographic-protocol models for confidentiality, authent
 False attacks and missed attacks are equally serious. Preserve these distinctions:
 
 - Known versus forgeable; replay versus forgery; computed versus emitted; knowledge versus constructibility versus observability.
-- **An install is delivered only when the execution's own knowledge derives it at that receive** (`exec.rs`, `Event::Recv`). Never admit one from another execution's knowledge, the search's union or final knowledge.
+- **An install is delivered only when the execution's own knowledge derives it at that receive** (`engine/exec.rs`, `Event::Recv`). Never admit one from another execution's knowledge, the search's union or final knowledge.
 - **A forwarded value is exactly what the sender's executed send recorded** (`ex.sent[d]`). A guarded slot never takes an install; it takes the sender's value or nothing.
 - Own halt, foreign halt and starvation differ. A halted run stops; a run whose next receive has neither a sent value nor an install is blocked. A run the attacker never starts does nothing: sessions are up to k, not exactly k. A failed decryption is not a value for equivalence.
 - Search output is untrusted. Only `engine::judge` over an executed `Execution` reports, and only `Judge::evaluate` mints the `Verdict` that `results_put` requires.
 - Simplify duplicate representations, not correctness gates. An unchanged corpus never licenses removing a gate.
 
-The regression inventory is `src/model_tests.rs` and `examples/test/`. Representative pairs (`@1`/`@2`: session count):
+The regression inventory is `src/testing/model_tests.rs` and `examples/test/`. Representative pairs (`@1`/`@2`: session count):
 
 | invariant | regression / counterweight |
 | --- | --- |
@@ -96,11 +96,29 @@ For wrong active-attacker results, start with `VERIFPAL_SOLVE_DEBUG=1`: it logs 
 
 ## Crate layout and features
 
+```
+src/lib.rs     crate root: module tree and public re-exports    main.rs  CLI    wasm.rs  WASM exports
+  util/        IdMap/IdSet, text helpers, generations, lock helpers, the rayon seam (parallel.rs)
+  console/     verbosity, messages, status line; colors (terminal.rs), update check (update.rs)
+  syntax/      AST (ast.rs), Span/VerifpalError (error.rs), name interning (names.rs), tokens, parser/, pretty
+  term/        Value/Constant/Primitive and copy ids (mod.rs), hash-consing (hashing.rs), equivalence
+  primitive/   registry types and accessors (mod.rs), declarations (spec.rs), capabilities
+  theory/      AttackerState (attacker.rs), reduction (rewrite.rs), decomposition, reuse, obtainability, memos
+  protocol/    ProtocolTrace and resolution (trace.rs), sanity, construct, sessions, scenario, autoquery
+  engine/      program, exec, knowledge, judgment, unlink, narrate, search/
+  solve/       propose, goals, free positions, deduce/, symbolic, matching, vars, control, diverge
+  verify/      the pipeline (mod.rs), VerifyContext, results, the verdict-recording boundary (record.rs)
+  report/      structured report (mod.rs), msc, template, html/, tex/
+  lsp/         language server and editor services     testing/  builders (mod.rs), model_tests, metamorphic
+```
+
+Each component's `mod.rs` declares its files and re-exports the types other components name (`crate::syntax::Model`, `crate::term::Value`). Files other components reach into are `pub(crate)` modules (`crate::syntax::parser::parse_string`); a component split for size keeps its files private, re-exports what others use (`crate::theory::obtainable`, `crate::solve::propose`) and widens to `pub(super)` only what a sibling calls. Imports within a component are relative (`super::`, a child's name), across components absolute (`crate::`). A module that is a directory keeps its unit tests in `tests.rs`; the source scans treat every `tests.rs` and `testing/` as test-only.
+
 - Lib `verifpal` (`cdylib`, `rlib`), bin `src/main.rs` (default `cli` feature). CLI stdout uses `out!`/`outp!`, ignoring closed pipes. Engine modules are `pub(crate)`; only `lib.rs` re-exports are public. Keep `#![warn(unreachable_pub)]` / `#![forbid(unsafe_code)]`. No `tests/` directory: integration targets collide with the `cdylib`.
 - Features: default `cli` (clap, colored, ureq, rayon, `lsp`); `language` (lsp-types only); `lsp` (`language`, crossbeam, lsp-server); `wasm` (`language`, wasm-bindgen, js-sys). Language items the WASM build does not use carry `cfg_attr(not(feature = "lsp"), allow(dead_code))`.
 - `src/wasm.rs` holds every export; each takes and returns JSON strings and never panics on bad input. **Do not change the `wasm_verify`/`wasm_pretty` shapes.** `wasm_analyze` runs the CLI's `verify_parsed` path; `wasm_check`, `wasm_language` (LSP JSON, UTF-16 positions) and `wasm_suggest_queries` serve editors under `InfoQuiet`. On wasm32, buffered messages and a throttled status line also go to `globalThis.verifpalProgress(kind, text)` through a `catch` import. Imported JS panics natively: gate those calls on `target_arch = "wasm32"`, since the `wasm` unit tests run natively.
-- `parallel.rs` is the sole rayon seam, with a sequential WASM twin: **change both and run the WASM check**. `map_ordered` preserves order; `VERIFPAL_THREADS=1` is sequential and must give identical results. Only the solver's pure proposal work runs on workers; execution, closure, judgment, reporting and `VerifyContext` writes stay on the caller thread.
-- Thread-local caches use `context::Generational`, cleared on first access in a new generation so ids never leak between models. Internal parallelism runs only with one live analysis (`live_generations() > 1` makes `map_ordered` sequential).
+- `util/parallel.rs` is the sole rayon seam, with a sequential WASM twin: **change both and run the WASM check**. `map_ordered` preserves order; `VERIFPAL_THREADS=1` is sequential and must give identical results. Only the solver's pure proposal work runs on workers; execution, closure, judgment, reporting and `VerifyContext` writes stay on the caller thread.
+- Thread-local caches use `util::generation::Generational`, cleared on first access in a new generation so ids never leak between models. Internal parallelism runs only with one live analysis (`live_generations() > 1` makes `map_ordered` sequential).
 
 ## Language essentials
 
@@ -137,13 +155,13 @@ queries[
 ### Pipeline
 
 ```
-parse_file (parser.rs)              hand-written recursive-descent, comment-preserving AST
-  → expand_scenarios (scenario.rs)  one model copy per declared peer scenario
-  → expand_sessions (sessions.rs)   k copies of that, one per concurrent session
-  → sanity (sanity.rs)              model validation; drives construct.rs
+parse_file (syntax/parser/)         hand-written recursive-descent, comment-preserving AST
+  → expand_scenarios (protocol/)    one model copy per declared peer scenario
+  → expand_sessions (protocol/)     k copies of that, one per concurrent session
+  → sanity (protocol/sanity.rs)     model validation; drives protocol/construct.rs
       → construct_protocol_trace    "km": ProtocolTrace — slots with their delivery facts,
                                     and the CapabilityIndex
-  → VerifyContext::new (context.rs) results, envelopes, claims, term bound
+  → VerifyContext::new (verify/)    results, envelopes, claims, term bound
   → engine::verify (engine/mod.rs)
       → Program::of                 every copy as a straight-line run
       → execute(&[])                the honest execution; judged at once
@@ -180,7 +198,7 @@ A held value is *settled* for a rule once everything the rule could reveal from 
 
 **Nonce reuse pairs coexist by construction**: both members are in one execution's knowledge. A member the attacker could mint counts only if a principal built it, and `Knowledge::built` holds only the constructors an assignment applied, never a received argument (`aead_nonce_two_executions_not_a_reuse.vp`, `cap_forgeable_is_not_a_reuse_pair.vp`).
 
-### Judgment (engine/query.rs, engine/unlink.rs)
+### Judgment (engine/judgment.rs, engine/unlink.rs)
 
 `Judge { cx, ex, whole, claims }` evaluates one query against the configuration at the end of one phase (`ex.at(p)`, knowledge K_p): a claim at `p` concerns what honest runs had done by then. `claims` (`VerifyContext::claims_at`) gives the phase each run answers for: a copy honest at `p` answers for `p`; a copy corrupt from phase N ≤ `p` for the end of phase N−1, judged against K_p (forward secrecy); a copy corrupt from phase 0 for nothing, unless every copy is. `Judge::claimed(r, slot)` is the run's own `Held`, else its creator's when that creator is claimed. A precondition requires its named send to have executed in `whole`, in any phase.
 
@@ -206,7 +224,9 @@ A held value is *settled* for a rule once everything the rule could reveal from 
 
 Terms use the model's vocabulary: `Names` maps values held at non-authored slots to slot names, preferring unchanged and session-1 names; a *shaped* name, whose slot holds a non-honest value, is spelled one level out when it is the subject of a construction. Words require evidence: "from another session" only for an actual sibling emission in this execution, "on the wire" only for a recorded send; never call a concurrent run "earlier".
 
-### Search (engine/search.rs)
+### Search (engine/search/)
+
+`mod.rs` holds `Search`, its records and the pass order; `rounds.rs` the proposal rounds and `idle`, `placement.rs` installs and probes, `worklist.rs` the attempt store, execution, settling and fills, `union.rs` absorption, `merge.rs` query-source merges and sibling transfers, `stuck.rs` stuck retries and fresh-emission sources, `reroute.rs` the rerouted pass.
 
 `Search` keeps the honest execution and compact facts from each accepted candidate (a *node*): its install map, received values and queried subjects, sends, and the attacker state at each phase without derivation records. The **union** knowledge records which nodes supplied each value, and its closure feeds proposals. Nothing is ever delivered from the union, and node facts never stand in for an execution at the judge.
 
@@ -230,11 +250,11 @@ The solver generates candidates. It never sees an execution and only ever output
 - `symbolic.rs` replaces controllable wires with variables and reduces like the executor, rejecting self-created, wrong-phase, unused and nil slots (equivalence-named slots waive unused). `build_addressed` handles a direct delivery also sent to another recipient by a different sender.
 - `vars.rs`: `VariableId`s live outside the constant namespace; free variables come from per-lane namespaces whose counters grow without ceiling. An ungrounded variable is not an admissible message. `matching.rs`: one-way matching, two-way unification and merge modulo commutativity; **retain every alignment until all equations succeed**; reject occurs cycles.
 - `constraint_goals` propagates check equations across a whole constraint group before solving wire values (`solver_mac_then_tuple.vp`).
-- `deduce.rs` tries held values, variables, replay, two-way wire unification (`solver_reflected_request.vp`), oracles, rewrite matching, argument construction, decomposition and check inversion. **A position that must have a registry shape is solved for that shape rather than refused**: commuted, blocked-decomposition and check-input shapes (`solver_wrapped_key_decomposition.vp`, `solver_sealed_share_substitution.vp`). Goal memos are keyed by the goal and every binding it can read; never cache cycle-cut results. A ground goal the attacker already obtains is answered directly, and decomposition skips wire terms whose reveals can never have the goal's head. `tuple_shapes` offers the narrowest, the honest and every held tuple arity (`solver_split_prefix_replay.vp`). An oracle input is unified with its required shape before that shape is proven constructible; oracle and projection inversion accept goals outside the protocol basis.
-- Free positions take protocol terms only (`keyed_free`, `preserved_free` preferring a held honest value before the attacker's key, `aligned_held_free`, `swapped_free` at reuse-pinned positions); arbitrary held terms inflate the basis.
-- `propose`: query goals, constraint goals, oracle input goals (another principal's check shapes unified with this principal's emissions, or with what decomposing them reveals: `solver_oracle_sealed_relay.vp`), blanket and single-slot substitutions, then Constructed sibling flights, held replacements and rewrite candidates. Proposals are deduplicated by canonical slot bindings before free positions are expanded, so different repair possibilities survive even when grounding gives the same install map; an executed map keeps its own halt positions, since a filled execution cannot stand in for the original proposal's halt. Do not give the attacker shapes it did not derive.
+- `deduce/` (`mod.rs`: the goal loop and its memo; `rules.rs`, `shapes.rs`, `decomposition.rs`, `combination.rs`, `inversion.rs`, `checks.rs`) tries held values, variables, replay, two-way wire unification (`solver_reflected_request.vp`), oracles, rewrite matching, argument construction, decomposition and check inversion. **A position that must have a registry shape is solved for that shape rather than refused**: commuted, blocked-decomposition and check-input shapes (`solver_wrapped_key_decomposition.vp`, `solver_sealed_share_substitution.vp`). Goal memos are keyed by the goal and every binding it can read; never cache cycle-cut results. A ground goal the attacker already obtains is answered directly, and decomposition skips wire terms whose reveals can never have the goal's head. `tuple_shapes` offers the narrowest, the honest and every held tuple arity (`solver_split_prefix_replay.vp`). An oracle input is unified with its required shape before that shape is proven constructible; oracle and projection inversion accept goals outside the protocol basis.
+- Free positions (`free.rs`) take protocol terms only (`keyed_free`, `preserved_free` preferring a held honest value before the attacker's key, `aligned_held_free`, `swapped_free` at reuse-pinned positions); arbitrary held terms inflate the basis.
+- `propose` (`propose.rs`, goals in `goals.rs`): query goals, constraint goals, oracle input goals (another principal's check shapes unified with this principal's emissions, or with what decomposing them reveals: `solver_oracle_sealed_relay.vp`), blanket and single-slot substitutions, then Constructed sibling flights, held replacements and rewrite candidates. Proposals are deduplicated by canonical slot bindings before free positions are expanded, so different repair possibilities survive even when grounding gives the same install map; an executed map keeps its own halt positions, since a filled execution cannot stand in for the original proposal's halt. Do not give the attacker shapes it did not derive.
 
-### Sessions and scenarios (sessions.rs, scenario.rs)
+### Sessions and scenarios (protocol/sessions.rs, protocol/scenario.rs)
 
 `expand_scenarios` then `expand_sessions` clone principal and message blocks before sanity, sharing `sessions::ModelCopy`. Fresh and assigned constants become `c#s` (session) or `c@k` (scenario); `knows` constants stay shared; `s*k <= 31`. Original queries cover session 1; variants share `query_index`. `km.session_siblings`/`copy_siblings` group a constant's copies and `km.interchangeable`/`actors` group principal copies. Copies are runs, not agents: match recipients by agent and senders per slot.
 
@@ -254,19 +274,19 @@ A scenario entry rebinds one principal's `knows` values throughout that principa
 
 `--auto-queries` **replaces** queries after sanity: confidentiality for each fresh or private constant, authentication for each delivery used in a recipient primitive, freshness for each sent-and-used constant.
 
-### Core data model (types.rs, hashing.rs)
+### Core data model (term/, syntax/ast.rs, theory/attacker.rs)
 
 - `Value = Constant | Primitive(Arc) | Variable(VariableId)`; constants are model-interned ids (nil = 1). **Equivalent values must have equal hashes.** Registry commutativity drives equivalence, hashing and matching.
 - **Terms are DAGs.** Memoize transformations by `Arc` pointer and comparisons by pointer pair; never walk a term as a tree. Never prune by hash: equivalent DH terms hide distinct subterms.
 - A primitive's `HashCell` caches its hash and its `can_rewrite` result; a clone starts empty, and changing `output` clears both.
-- `hashing::hashcons` is the one analysis-scoped hash-consing table; its identity is structural, capabilities and every constant field included. Trace resolution, the executor, the search and the theory canonicalize the terms they build, so memos and equality checks hit across executions.
+- `term::hashing::hashcons` is the one analysis-scoped hash-consing table; its identity is structural, capabilities and every constant field included. Trace resolution, the executor, the search and the theory canonicalize the terms they build, so memos and equality checks hit across executions.
 - **Capabilities do not affect term identity**: read `km.capabilities`, never a deduped held term.
 - There is no per-principal state: sanity and the solver read `km` plus a `PrincipalId`; runtime state lives only in executions.
 - `AttackerState = { current_phase, known, known_map, derivations, reused, chain }`. **Length-keyed memos need chain identity**: every learn and phase change mints a new `chain`.
 
-### Equational theory (theory.rs)
+### Equational theory (theory/)
 
-`theory.rs` interprets the registry. `can_rewrite` is the sole reducer (arguments, rebuild, combine, then rewrite) and reports a failed outer check with its arguments reduced. `obtainable` is the common argument-recovery cascade, memoised within a `DeductionMemo` scope; a search node keeps its own `SavedMemo`. Decomposition returns a **set** of reveals covering everything the legitimate holder learns (`KEM_ENCAP` reveals the secret **and** the randomness).
+`theory/` interprets the registry. `can_rewrite` (`rewrite.rs`) is the sole reducer (arguments, rebuild, combine, then rewrite) and reports a failed outer check with its arguments reduced. `obtainable` (`obtain.rs`) is the common argument-recovery cascade, memoised within a `DeductionMemo` scope; a search node keeps its own `SavedMemo`. Decomposition returns a **set** of reveals covering everything the legitimate holder learns (`KEM_ENCAP` reveals the secret **and** the randomness).
 
 - Rewrite matching is a **bijection** onto distinct inner positions (`ringsign_ring_collapse.vp`).
 - `can_reconstruct_primitive` refuses irreducible core applications. A failing unchecked application is an ordinary value; a failing checked one is not, since its run halts.
@@ -277,26 +297,26 @@ A scenario entry rebinds one principal's `knows` values throughout that principa
 
 Add a primitive with `build_primitive_specs` (core entries: `build_core_specs`, `core_rule_*`), then add model tests.
 
-### Result-writing boundaries (query.rs::tcb_tests)
+### Result-writing boundaries (verify/record.rs::tcb_tests)
 
 Source-level tests pin these boundaries; they do **not** prove evaluator correctness. `results_put` requires a `Verdict` token that only `Judge::evaluate` constructs and only `engine::report` records. The evaluator is handed one `Execution`, never `VerifyContext`, and executions come only from `execute`. The receive arm gates installs on derivability, and a receive without an install takes the sender's recorded send. Adding a query kind must update `Judge::evaluate`, `Violation`, `report` and `goals_for_query`.
 
 ### Supporting modules
 
-- `parser.rs` preserves comments and indexes tokens even for failed parses. `pretty.rs` is pure, idempotent, golden-tested and **not sanity-gated**; it owns AST `Display`.
-- `update.rs` makes the sole outbound request (GitHub tags), only when stdout is a terminal.
-- `lsp/`: stdio server, debounced worker analysis, documents keyed by URI, no filesystem access. **Both threads set Silent verbosity**, or thread-local output corrupts stdout. Keyword prose lives in `docs.rs`; primitive docs come from specs.
-- `report.rs` builds JSON/HTML/TeX/LSP from one `Run::of` parse; renderers never parse and share its derived facts and `msc::Chart`. **No HTML/LaTeX markup in Rust**: embed templates; `Val::Text` escapes, `Val::Raw` does not. The LaTeX preamble lays out and paginates charts itself. Preserve the no-proof disclaimer. Bless goldens with `VERIFPAL_BLESS_HTML`/`VERIFPAL_BLESS_TEX`; `VERIFPAL_TECTONIC=1` compiles them.
+- `syntax/parser/` preserves comments and indexes tokens even for failed parses. `syntax/pretty.rs` is pure, idempotent, golden-tested and **not sanity-gated**; it owns AST `Display`.
+- `console/update.rs` makes the sole outbound request (GitHub tags), only when stdout is a terminal.
+- `lsp/`: stdio server, debounced worker analysis, documents keyed by URI, no filesystem access. **Both threads set Silent verbosity**, or thread-local output corrupts stdout. Keyword prose lives in `lsp/docs.rs`; primitive docs come from specs.
+- `report/mod.rs` builds JSON/HTML/TeX/LSP from one `Run::of` parse; renderers never parse and share its derived facts and `msc::Chart`. **No HTML/LaTeX markup in Rust**: embed templates; `Val::Text` escapes, `Val::Raw` does not. The LaTeX preamble lays out and paginates charts itself. Preserve the no-proof disclaimer. Bless goldens with `VERIFPAL_BLESS_HTML`/`VERIFPAL_BLESS_TEX`; `VERIFPAL_TECTONIC=1` compiles them.
 - **Do not add `Span` to `Constant` or process-global mutable state.**
 
 ## Testing conventions
 
-- Unit tests are module-local; shared builders live in `src/testutil.rs` (unique constant names per test; `trace_constant` after parsing). End-to-end: `run_model("foo.vp", "c0a1")` at two sessions, `run_model_sessions(path, 1, code)`, `run_model_err(path, substring)`, and `run_model_at` outside `examples/test/`.
+- Unit tests are module-local; shared builders live in `src/testing/mod.rs` (unique constant names per test; `trace_constant` after parsing). End-to-end: `run_model("foo.vp", "c0a1")` at two sessions, `run_model_sessions(path, 1, code)`, `run_model_err(path, substring)`, and `run_model_at` outside `examples/test/`.
 - Codes follow query order (`c/a/f/u/e`; `0` holds, `1` attack). For each regression obtain `--result-code | tail -1`, **read the trace to justify every bit**, wire its test and write its `// Expected:` header. Pretty goldens live in `examples/test/golden_pretty/`.
 - Engine changes need before/after **full-output** diffs over `examples/` at one and two sessions, not just codes. **Always exclude `tls13.vp`, `pqxdh.vp` and `signal_twelve.vp`** from sweeps and benchmarks.
 - `attack_traces_keep_their_shape_and_name_only_wires_that_exist` sweeps `examples/test/` and selected other models at both counts: `// Expected:` headers must match, the count of undocumented models is a ratchet, every attack carries a trace, and every replaced or replayed slot must be one an unguarded message carries to that recipient.
 
-### Metamorphic harness (src/metamorphic.rs)
+### Metamorphic harness (src/testing/metamorphic.rs)
 
 Missed attacks show up under language-preserving or monotone transforms: parse → transform → `pretty_model` → **re-parse** → `analyze_sessions`, from one-session baselines.
 
@@ -327,4 +347,4 @@ Changing candidate generation, union absorption, memos or ordering changes what 
 
 - Every source file starts with an SPDX header (`GPL-3.0-only` for code, `CC-BY-SA-4.0` for prose), including `.vp` test models.
 - rustfmt with **hard tabs** and Unix newlines; clippy is a hard gate (`-D warnings`).
-- **Do not write comments.** Reasoning belongs in the commit message and in this file, where it cannot drift silently against the source. `sessions.rs` keeps a module-level doc and `solve/mod.rs` a few item-level docs from before that rule; add none, including to code touched in passing. `.vp` test models are the exception: a new one must carry a `// Expected:` header arguing its code.
+- **Do not write comments.** Reasoning belongs in the commit message and in this file, where it cannot drift silently against the source. `protocol/sessions.rs` keeps a module-level doc and `solve/free.rs` and `solve/deduce/rules.rs` a few item-level docs from before that rule; add none, including to code touched in passing. `.vp` test models are the exception: a new one must carry a `// Expected:` header arguing its code.

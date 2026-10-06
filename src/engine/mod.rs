@@ -2,20 +2,22 @@
  * SPDX-License-Identifier: GPL-3.0-only */
 
 pub(crate) mod exec;
+pub(crate) mod judgment;
 pub(crate) mod knowledge;
 pub(crate) mod narrate;
 pub(crate) mod program;
-pub(crate) mod query;
 pub(crate) mod search;
 pub(crate) mod unlink;
 
-use crate::context::VerifyContext;
-use crate::info::info_message;
-use crate::types::*;
-
+use crate::console::{InfoLevel, info_message};
+use crate::protocol::ProtocolTrace;
+use crate::syntax::{AttackerKind, Model, PrincipalId, Query, VResult, VerifpalError};
+use crate::term::{Constant, Value};
+use crate::verify::context::VerifyContext;
+use crate::verify::{QueryOptionResult, Subtype, VerifyResult};
 use exec::{Context, Execution, Installs, execute};
+use judgment::{Judge, Violation};
 use program::Program;
-use query::{Judge, Violation};
 
 pub(crate) fn verify(ctx: &VerifyContext, m: &Model, km: &ProtocolTrace) -> VResult<()> {
 	let program = Program::of(m, km);
@@ -31,10 +33,10 @@ pub(crate) fn verify(ctx: &VerifyContext, m: &Model, km: &ProtocolTrace) -> VRes
 		if matches!(root.knowledge.origin(i), knowledge::Origin::Initial) {
 			continue;
 		}
-		crate::info::info_deduction(|| {
+		crate::console::info_deduction(|| {
 			format!(
 				"{} is obtained by the attacker.",
-				crate::info::info_output_text(v)
+				crate::console::info_output_text(v)
 			)
 		});
 	}
@@ -66,12 +68,15 @@ fn check_honest_run(
 	if let Some((slot, run)) = failed
 		&& let Some(Value::Primitive(p)) = run.held(slot).map(|held| &held.value)
 	{
-		return Err(located(crate::sanity::honest_check_failure(p), slot));
+		return Err(located(
+			crate::protocol::sanity::honest_check_failure(p),
+			slot,
+		));
 	}
 	for run in &root.runs {
 		for (slot, held) in run.env.iter().enumerate() {
 			if let Some(held) = held {
-				crate::sanity::sanity_check_argument_restrictions(&held.value)
+				crate::protocol::sanity::sanity_check_argument_restrictions(&held.value)
 					.map_err(|e| located(e, slot))?;
 			}
 		}
@@ -79,7 +84,7 @@ fn check_honest_run(
 	Ok(())
 }
 
-type Found = (Violation, query::Verdict);
+type Found = (Violation, judgment::Verdict);
 
 fn minimal(
 	cx: &Context,
@@ -151,7 +156,7 @@ fn carries_a_secret(v: &Value, km: &ProtocolTrace) -> bool {
 }
 
 fn recipient_contributed(c: &Constant, km: &ProtocolTrace, recipient: PrincipalId) -> bool {
-	crate::value::resolve_trace_constant(c, km)
+	crate::protocol::trace::resolve_trace_constant(c, km)
 		.constant_leaves()
 		.any(|inner| {
 			km.index_of(inner).is_some_and(|i| {
@@ -262,8 +267,8 @@ fn report(
 				name(*run),
 				times(*emissions),
 				times(*acceptances),
-				s = crate::util::copy_base_name(&q.message.sender_name),
-				r = crate::util::copy_base_name(&q.message.recipient_name),
+				s = crate::syntax::names::copy_base_name(&q.message.sender_name),
+				r = crate::syntax::names::copy_base_name(&q.message.recipient_name),
 			)
 		}
 		Violation::Substituted {
@@ -341,5 +346,5 @@ fn report(
 		std::mem::take(&mut narrator.steps),
 		&conclusion,
 	);
-	crate::query::record_verdict(ctx, &out, verdict);
+	crate::verify::record::record_verdict(ctx, &out, verdict);
 }

@@ -4,8 +4,8 @@
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
-use crate::types::*;
-use crate::value::value_nil;
+use crate::term::{Value, VariableId, value_nil};
+use crate::util::{IdHasher, IdMap, IdSet};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct FreshVariables {
@@ -99,7 +99,7 @@ fn collect_var_ids(v: &Value, out: &mut Vec<VariableId>, include: fn(&VariableId
 	if !contains_var(v) {
 		return;
 	}
-	for term in crate::value::subterms(v) {
+	for term in crate::term::subterms(v) {
 		if let Value::Variable(id) = term
 			&& include(id)
 			&& !out.contains(id)
@@ -432,7 +432,9 @@ pub(crate) fn dedupe(candidates: Vec<Substitution>) -> Vec<Substitution> {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::testutil::test_value_id;
+	use crate::primitive::Capabilities;
+	use crate::term::{Constant, HashCell, Primitive};
+	use crate::testing::test_value_id;
 
 	#[test]
 	fn canonical_slots_ignore_existential_names_and_unused_bindings() {
@@ -481,7 +483,7 @@ mod tests {
 			assert!(Arc::ptr_eq(original, retained));
 			assert!(args[1].equivalent(&filler, true));
 			assert_eq!(as_var(&args[2]), Some(attacker_var_id(0)));
-			assert!(crate::theory::structurally_identical(
+			assert!(crate::term::equivalence::structurally_identical(
 				&ground_free_as(&ground, &filler),
 				&ground
 			));
@@ -505,7 +507,7 @@ mod tests {
 		let right = canonical_slots(&make(100));
 		assert!(same_substitution(&left, &right));
 		assert_eq!(
-			crate::value::subterms(&left[&attacker_var_id(0)])
+			crate::term::subterms(&left[&attacker_var_id(0)])
 				.filter(|v| matches!(v, Value::Primitive(_)))
 				.count(),
 			40
@@ -754,6 +756,6 @@ mod tests {
 			&crate::solve::vars::as_var(&free).expect("is a variable")
 		));
 		let grounded = crate::solve::vars::ground_free(&free);
-		assert!(grounded.equivalent(&crate::value::value_nil(), true));
+		assert!(grounded.equivalent(&crate::term::value_nil(), true));
 	}
 }

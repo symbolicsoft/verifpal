@@ -6,9 +6,13 @@ use std::sync::Arc;
 use super::exec::{Context, Execution};
 use super::knowledge::Origin;
 use super::program::Event;
-use crate::primitive::primitive_name;
-use crate::types::*;
-use crate::util::copy_base_name;
+use crate::primitive::{Capability, primitive_name};
+use crate::syntax::Span;
+use crate::syntax::names::copy_base_name;
+use crate::term::{Constant, Primitive, Value, ValueId};
+use crate::theory::{AttackerState, DerivationRecord};
+use crate::util::IdMap;
+use crate::verify::{TraceStep, TraceValue};
 
 pub(crate) struct Narrator<'a, 'b> {
 	cx: &'a Context<'b>,
@@ -20,7 +24,7 @@ pub(crate) struct Narrator<'a, 'b> {
 	cutoff: usize,
 	gated: Vec<(usize, usize)>,
 	pub(crate) steps: Vec<TraceStep>,
-	explained: crate::hashing::TermSet,
+	explained: crate::term::hashing::TermSet,
 }
 
 struct Names {
@@ -48,7 +52,7 @@ impl Names {
 					continue;
 				};
 				let constant = &cx.km.slots[slot].constant;
-				if h.authored || crate::util::is_anonymous_name(&constant.name) {
+				if h.authored || crate::syntax::names::is_anonymous_name(&constant.name) {
 					continue;
 				}
 				let name = constant.to_string();
@@ -129,7 +133,7 @@ impl<'a, 'b> Narrator<'a, 'b> {
 			cutoff: ex.order.len(),
 			gated: Vec::new(),
 			steps: Vec::new(),
-			explained: crate::hashing::TermSet::default(),
+			explained: crate::term::hashing::TermSet::default(),
 		}
 	}
 

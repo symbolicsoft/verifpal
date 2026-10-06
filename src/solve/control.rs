@@ -3,13 +3,16 @@
 
 use std::sync::Arc;
 
-use crate::theory::reduce_once;
-use crate::types::*;
-use crate::value::{resolve_trace_constant, resolve_trace_term};
+use crate::protocol::ProtocolTrace;
+use crate::protocol::trace::{resolve_trace_constant, resolve_trace_term};
+use crate::syntax::PrincipalId;
+use crate::term::{Value, ValueId, VariableId};
+use crate::theory::{AttackerState, reduce_once};
+use crate::util::IdMap;
 
 thread_local! {
-	static HONEST_REDUCTS: std::cell::RefCell<crate::context::Generational<IdMap<usize, Value>>> =
-		std::cell::RefCell::new(crate::context::Generational::default());
+	static HONEST_REDUCTS: std::cell::RefCell<crate::util::generation::Generational<IdMap<usize, Value>>> =
+		std::cell::RefCell::new(crate::util::generation::Generational::default());
 }
 
 pub(crate) struct Controllable {
@@ -51,7 +54,7 @@ pub(crate) struct TermBound {
 }
 
 struct Deep {
-	protocol: crate::hashing::TermSet,
+	protocol: crate::term::hashing::TermSet,
 	ids: Vec<ValueId>,
 	creators: Vec<PrincipalId>,
 	consumes: Vec<Option<ValueId>>,
@@ -66,11 +69,11 @@ impl TermBound {
 			.map(|slot| term_depth(&resolve_trace_constant(&slot.constant, km)))
 			.max()
 			.unwrap_or(0);
-		let mut protocol = crate::hashing::TermSet::default();
+		let mut protocol = crate::term::hashing::TermSet::default();
 		for slot in &km.slots {
 			let term = resolve_trace_constant(&slot.constant, km);
-			protocol.extend(crate::value::subterms(&term).cloned());
-			protocol.extend(crate::value::subterms(&reduce_once(&term)).cloned());
+			protocol.extend(crate::term::subterms(&term).cloned());
+			protocol.extend(crate::term::subterms(&reduce_once(&term)).cloned());
 		}
 		TermBound {
 			max_depth,
@@ -98,7 +101,7 @@ impl TermBound {
 			&& deep.depth_over_protocol(v) <= self.max_depth
 	}
 
-	pub(crate) fn protocol(&self) -> &crate::hashing::TermSet {
+	pub(crate) fn protocol(&self) -> &crate::term::hashing::TermSet {
 		&self.deep.protocol
 	}
 
@@ -220,14 +223,14 @@ fn unwrapped_by(v: &Value) -> Option<ValueId> {
 pub(crate) fn term_depth(v: &Value) -> usize {
 	term_depth_outside(
 		v,
-		&crate::hashing::TermSet::default(),
+		&crate::term::hashing::TermSet::default(),
 		&mut IdMap::default(),
 	)
 }
 
 fn term_depth_outside(
 	v: &Value,
-	basis: &crate::hashing::TermSet,
+	basis: &crate::term::hashing::TermSet,
 	memo: &mut IdMap<usize, usize>,
 ) -> usize {
 	match v {
@@ -303,13 +306,13 @@ mod tests {
 	use super::*;
 	use crate::primitive::{PRIM_CONCAT, PRIM_DEC, PRIM_ENC, PRIM_HASH, PRIM_SPLIT};
 	use crate::solve::vars::{Substitution, apply, attacker_var, attacker_var_id};
-	use crate::testutil::*;
+	use crate::testing::*;
 
 	#[test]
 	fn a_partial_depth_bound_preserves_later_reductions() {
 		let x = attacker_var(0);
 		let y = attacker_var(1);
-		let nil = crate::value::value_nil();
+		let nil = crate::term::value_nil();
 		let hash = |v: Value| Value::primitive(PRIM_HASH, vec![v], 0);
 		let cipher = Value::primitive(PRIM_ENC, vec![x.clone(), y.clone()], 0);
 		let opened = Value::primitive(PRIM_DEC, vec![x.clone(), cipher], 0);

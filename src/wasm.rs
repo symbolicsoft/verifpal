@@ -7,11 +7,12 @@ use lsp_types::{Position, PositionEncodingKind, Range, Uri};
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 
-use crate::info;
+use crate::console;
 use crate::lsp::state::Document;
+use crate::protocol::sessions::{DEFAULT_SESSIONS, MAX_SESSIONS};
 use crate::report::{Assumption, ModelReport, Run};
-use crate::sessions::{DEFAULT_SESSIONS, MAX_SESSIONS};
-use crate::types::*;
+use crate::syntax::VResult;
+use crate::verify::{ScenarioSummary, VerifyResult};
 
 const FILE_NAME: &str = "workbench.vp";
 
@@ -136,13 +137,13 @@ fn scenarios_of(scenarios: &[ScenarioSummary]) -> Vec<WasmScenario> {
 }
 
 fn begin() {
-	info::wasm_messages_init();
+	console::wasm_messages_init();
 	#[cfg(target_arch = "wasm32")]
 	progress_reset();
 }
 
 fn wasm_verify_inner(input: &str) -> VResult<WasmVerify> {
-	let m = crate::parser::parse_string(FILE_NAME, input)?;
+	let m = crate::syntax::parser::parse_string(FILE_NAME, input)?;
 	let ctx = crate::verify::analyze(&m).map_err(|e| e.located(&m.file_name, &m.source))?;
 	let results = ctx.results_get();
 	Ok(WasmVerify {
@@ -152,7 +153,7 @@ fn wasm_verify_inner(input: &str) -> VResult<WasmVerify> {
 		results: results_of(&results),
 		assumptions: Assumption::list(ctx.assumptions()),
 		scenarios: scenarios_of(ctx.scenarios()),
-		messages: info::wasm_messages_drain(),
+		messages: console::wasm_messages_drain(),
 	})
 }
 
@@ -166,7 +167,7 @@ pub fn wasm_verify(input: &str) -> String {
 		code: String::new(),
 		assumptions: vec![],
 		scenarios: vec![],
-		messages: info::wasm_messages_drain(),
+		messages: console::wasm_messages_drain(),
 	});
 	serialize(
 		&payload,
@@ -176,8 +177,8 @@ pub fn wasm_verify(input: &str) -> String {
 
 #[wasm_bindgen]
 pub fn wasm_pretty(input: &str) -> String {
-	let payload = match crate::parser::parse_string(FILE_NAME, input)
-		.map(|m| crate::pretty::pretty_model(&m))
+	let payload = match crate::syntax::parser::parse_string(FILE_NAME, input)
+		.map(|m| crate::syntax::pretty::pretty_model(&m))
 	{
 		Ok(output) => WasmPretty {
 			ok: true,
@@ -222,7 +223,7 @@ fn analyze_options(options: &str) -> Result<(u8, AnalyzeOptions), String> {
 }
 
 fn analyze(input: &str, sessions: u8, options: &AnalyzeOptions) -> WasmAnalyze {
-	let analyzed = crate::parser::parse_string(FILE_NAME, input)
+	let analyzed = crate::syntax::parser::parse_string(FILE_NAME, input)
 		.and_then(|m| crate::verify::verify_parsed(m, sessions, options.auto_queries));
 	let (payload, outcome) = match analyzed {
 		Ok((report, _)) => (
@@ -250,11 +251,13 @@ fn analyze(input: &str, sessions: u8, options: &AnalyzeOptions) -> WasmAnalyze {
 		&[(FILE_NAME.to_string(), outcome)],
 		&[input.to_string()],
 	);
-	let html = options.report.then(|| crate::html::html_report(&run));
+	let html = options
+		.report
+		.then(|| crate::report::html::html_report(&run));
 	WasmAnalyze {
 		report: run.models.into_iter().next(),
 		html,
-		messages: info::wasm_messages_drain(),
+		messages: console::wasm_messages_drain(),
 		..payload
 	}
 }
@@ -282,7 +285,7 @@ pub fn wasm_analyze(input: &str, options: &str) -> String {
 	let payload = match analyze_options(options) {
 		Ok((sessions, options)) => analyze(input, sessions, &options),
 		Err(error) => WasmAnalyze {
-			messages: info::wasm_messages_drain(),
+			messages: console::wasm_messages_drain(),
 			..WasmAnalyze::failed(error)
 		},
 	};
@@ -304,7 +307,7 @@ fn document(input: &str) -> Option<Document> {
 
 #[wasm_bindgen]
 pub fn wasm_check(input: &str) -> String {
-	let _quiet = info::InfoQuiet::new();
+	let _quiet = console::InfoQuiet::new();
 	let diagnostics = document(input)
 		.map(|doc| crate::lsp::diagnostics::for_document(&doc))
 		.unwrap_or_default();
@@ -354,7 +357,7 @@ fn language(doc: &Document, request: &LanguageRequest) -> WasmLanguage {
 
 #[wasm_bindgen]
 pub fn wasm_language(input: &str, request: &str) -> String {
-	let _quiet = info::InfoQuiet::new();
+	let _quiet = console::InfoQuiet::new();
 	let payload = match serde_json::from_str::<LanguageRequest>(request) {
 		Ok(request) => match document(input) {
 			Some(doc) => language(&doc, &request),
@@ -369,9 +372,9 @@ pub fn wasm_language(input: &str, request: &str) -> String {
 }
 
 fn suggest(input: &str) -> VResult<Vec<String>> {
-	let m = crate::parser::parse_string_queries_optional(FILE_NAME, input)?;
-	let km = crate::sanity::sanity(&m).map_err(|e| e.located(&m.file_name, &m.source))?;
-	Ok(crate::autoquery::auto_queries(&m, &km)
+	let m = crate::syntax::parser::parse_string_queries_optional(FILE_NAME, input)?;
+	let km = crate::protocol::sanity::sanity(&m).map_err(|e| e.located(&m.file_name, &m.source))?;
+	Ok(crate::protocol::autoquery::auto_queries(&m, &km)
 		.iter()
 		.map(|q| q.to_string())
 		.collect())
@@ -379,7 +382,7 @@ fn suggest(input: &str) -> VResult<Vec<String>> {
 
 #[wasm_bindgen]
 pub fn wasm_suggest_queries(input: &str) -> String {
-	let _quiet = info::InfoQuiet::new();
+	let _quiet = console::InfoQuiet::new();
 	let payload = match suggest(input) {
 		Ok(queries) => WasmSuggest {
 			ok: true,
@@ -436,7 +439,7 @@ pub(crate) fn progress_message(line: &str) {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::tokens::TokenKind;
+	use crate::syntax::tokens::TokenKind;
 
 	const DH: &str = "attacker[active]\n\
 		principal Alice[\n\
@@ -898,7 +901,7 @@ mod tests {
 	}
 
 	fn with_queries(source: &str, lines: &[String]) -> String {
-		let (_, index) = crate::parser::parse_string_indexed(FILE_NAME, source);
+		let (_, index) = crate::syntax::parser::parse_string_indexed(FILE_NAME, source);
 		let start = index
 			.tokens()
 			.iter()
@@ -937,9 +940,9 @@ mod tests {
 				"{lines:?}"
 			);
 			let text = with_queries(&source, &lines);
-			let m = crate::parser::parse_string(FILE_NAME, &text)
+			let m = crate::syntax::parser::parse_string(FILE_NAME, &text)
 				.unwrap_or_else(|e| panic!("the suggestions do not parse: {e}\n{text}"));
-			crate::sanity::sanity(&m).expect("the suggestions pass sanity");
+			crate::protocol::sanity::sanity(&m).expect("the suggestions pass sanity");
 			let reparsed: Vec<String> = m.queries.iter().map(|q| q.to_string()).collect();
 			assert_eq!(reparsed, lines);
 		}
@@ -986,13 +989,13 @@ mod tests {
 			}
 			assert!(lines.iter().all(|l| !l.contains('\n')), "{display}");
 			let text = with_queries(&source, &lines);
-			let m = crate::parser::parse_string(FILE_NAME, &text)
+			let m = crate::syntax::parser::parse_string(FILE_NAME, &text)
 				.unwrap_or_else(|e| panic!("{display}: the suggestions do not parse: {e}"));
-			crate::sanity::sanity(&m)
+			crate::protocol::sanity::sanity(&m)
 				.unwrap_or_else(|e| panic!("{display}: the suggestions fail sanity: {e}"));
 			let reparsed: Vec<String> = m.queries.iter().map(|q| q.to_string()).collect();
 			assert_eq!(reparsed, lines, "{display}");
-			let canonical = crate::pretty::pretty_model(&m);
+			let canonical = crate::syntax::pretty::pretty_model(&m);
 			assert!(
 				lines
 					.iter()

@@ -4,8 +4,7 @@
 use std::sync::Arc;
 
 use super::*;
-use crate::types::*;
-use crate::value::value_nil;
+use crate::term::{Primitive, PrimitiveId, Value, value_nil};
 
 pub(crate) const PRIM_ASSERT: PrimitiveId = 1;
 pub(crate) const PRIM_CONCAT: PrimitiveId = 2;
@@ -702,7 +701,9 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::testutil::*;
+	use crate::primitive::Capabilities;
+	use crate::term::HashCell;
+	use crate::testing::*;
 
 	#[test]
 	fn extract_exponent_rejects_a_bare_constant() {

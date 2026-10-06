@@ -3,7 +3,7 @@
 
 use lsp_types::{Position, PositionEncodingKind, Range};
 
-use crate::types::Span;
+use crate::syntax::Span;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Units {

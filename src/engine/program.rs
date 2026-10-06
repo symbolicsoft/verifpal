@@ -1,7 +1,10 @@
 /* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
  * SPDX-License-Identifier: GPL-3.0-only */
 
-use crate::types::*;
+use crate::protocol::ProtocolTrace;
+use crate::syntax::{Block, Declaration, Model, PrincipalId};
+use crate::term::Value;
+use crate::util::IdMap;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Event {

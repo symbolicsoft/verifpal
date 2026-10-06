@@ -8,10 +8,10 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use lsp_server::Message;
 use lsp_types::Uri;
 
-use crate::lsp::line::LineIndex;
-use crate::lsp::proto::{AnalysisReport, notify};
+use super::line::LineIndex;
+use super::proto::{AnalysisReport, notify};
 use crate::report::Analysis;
-use crate::types::VResult;
+use crate::syntax::VResult;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum LiveState {
@@ -21,7 +21,7 @@ enum LiveState {
 }
 
 fn analyze(name: &str, text: &str, sessions: u8, cancel: &Arc<AtomicBool>) -> VResult<Analysis> {
-	let model = crate::parser::parse_string(name, text)?;
+	let model = crate::syntax::parser::parse_string(name, text)?;
 	let started = std::time::Instant::now();
 	let ctx = crate::verify::analyze_sessions_cancellable(&model, sessions, Arc::clone(cancel))
 		.map_err(|e| e.located(&model.file_name, &model.source))?;
@@ -171,7 +171,7 @@ impl Runner {
 		let worker = std::thread::Builder::new().stack_size(ANALYSIS_STACK);
 		let spawned = worker.spawn(move || {
 			let _done = Finished(Arc::clone(&live));
-			crate::info::set_verbosity(crate::info::Verbosity::Silent);
+			crate::console::set_verbosity(crate::console::Verbosity::Silent);
 			let name = crate::lsp::state::file_name(&job.uri);
 			if job.progress {
 				progress(
@@ -184,8 +184,9 @@ impl Runner {
 					}),
 				);
 			}
-			let outcome = analyze(&name, job.line.text(), job.sessions, &cancel)
-				.map_err(|e| (e.kind != crate::types::ErrorKind::Cancelled).then(|| e.to_string()));
+			let outcome = analyze(&name, job.line.text(), job.sessions, &cancel).map_err(|e| {
+				(e.kind != crate::syntax::ErrorKind::Cancelled).then(|| e.to_string())
+			});
 			let report = job.report(outcome);
 			if job.progress {
 				progress(&sender, &job.token, serde_json::json!({"kind": "end"}));

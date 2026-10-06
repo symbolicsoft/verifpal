@@ -15,9 +15,8 @@ use lsp_types::{
 	TextDocumentSyncKind, TextDocumentSyncOptions, TextDocumentSyncSaveOptions, TextEdit,
 };
 
-use crate::lsp::language;
-use crate::lsp::proto;
-use crate::lsp::state::Document;
+use super::state::Document;
+use super::{language, proto};
 
 type Fallible = Result<(), Box<dyn Error + Sync + Send>>;
 
@@ -32,7 +31,7 @@ pub fn run() -> Fallible {
 }
 
 fn serve(connection: &Connection) -> Fallible {
-	crate::info::set_verbosity(crate::info::Verbosity::Silent);
+	crate::console::set_verbosity(crate::console::Verbosity::Silent);
 	let (id, params) = connection.initialize_start()?;
 	let params: InitializeParams = serde_json::from_value(params)?;
 	let encoding = negotiate_encoding(&params);
@@ -530,9 +529,9 @@ impl Server {
 		let token = format!("verifpal-analysis-{}", self.next_token);
 		let sessions = args
 			.sessions
-			.map_or(crate::sessions::DEFAULT_SESSIONS, |s| {
+			.map_or(crate::protocol::sessions::DEFAULT_SESSIONS, |s| {
 				s.round()
-					.clamp(1.0, f64::from(crate::sessions::MAX_SESSIONS)) as u8
+					.clamp(1.0, f64::from(crate::protocol::sessions::MAX_SESSIONS)) as u8
 			});
 		let job = crate::lsp::analysis::Job {
 			uri: doc.uri.clone(),
@@ -579,7 +578,7 @@ fn format(doc: &Document) -> Vec<TextEdit> {
 	let Some(model) = &doc.model else {
 		return Vec::new();
 	};
-	let mut text = crate::pretty::pretty_model(model).replace("\r\n", "\n");
+	let mut text = crate::syntax::pretty::pretty_model(model).replace("\r\n", "\n");
 	if doc.text().contains("\r\n") {
 		text = text.replace('\n', "\r\n");
 	}
@@ -606,7 +605,7 @@ fn code_lenses(doc: &Document) -> Vec<lsp_types::CodeLens> {
 	vec![lsp_types::CodeLens {
 		range: doc
 			.line
-			.range(crate::types::Span::new(first.span.start, first.span.start)),
+			.range(crate::syntax::Span::new(first.span.start, first.span.start)),
 		command: Some(lsp_types::Command {
 			title: "Run attacker analysis".to_string(),
 			command: "verifpal.analyze".to_string(),
@@ -651,8 +650,8 @@ fn code_actions(doc: &Document, params: &CodeActionParams) -> Vec<lsp_types::Cod
 fn diagram(doc: &Document) -> Option<proto::DiagramResult> {
 	let model = doc.model.as_ref()?;
 	Some(proto::DiagramResult {
-		mermaid: crate::pretty::mermaid_of(model),
-		readable: crate::pretty::pretty_diagram(model),
+		mermaid: crate::syntax::pretty::mermaid_of(model),
+		readable: crate::syntax::pretty::pretty_diagram(model),
 	})
 }
 
@@ -950,7 +949,7 @@ mod tests {
 	fn an_out_of_range_session_count_is_clamped_rather_than_reported_as_run() {
 		let (client, handle, _) = start(ClientCapabilities::default());
 		open(&client, "file:///s.vp", VALID);
-		for (asked, ran) in [(0u8, 1u8), (200u8, crate::sessions::MAX_SESSIONS)] {
+		for (asked, ran) in [(0u8, 1u8), (200u8, crate::protocol::sessions::MAX_SESSIONS)] {
 			let accepted = request(
 				&client,
 				1,
@@ -1226,8 +1225,8 @@ mod tests {
 	fn formatting_keeps_crlf_line_endings_and_leaves_a_formatted_file_alone() {
 		let (sender, _receiver) = crossbeam_channel::unbounded();
 		let mut server = Server::new(sender, PositionEncodingKind::UTF8);
-		let model = crate::parser::parse_string("crlf.vp", VALID).expect("parses");
-		let canonical = crate::pretty::pretty_model(&model).replace('\n', "\r\n");
+		let model = crate::syntax::parser::parse_string("crlf.vp", VALID).expect("parses");
+		let canonical = crate::syntax::pretty::pretty_model(&model).replace('\n', "\r\n");
 		open_here(&mut server, "file:///crlf.vp", &canonical);
 		assert!(format(&server.docs["file:///crlf.vp"]).is_empty());
 		open_here(&mut server, "file:///ugly.vp", &VALID.replace('\n', "\r\n"));

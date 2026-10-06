@@ -3,9 +3,10 @@
 
 use lsp_types::{PositionEncodingKind, Uri};
 
-use crate::lsp::line::LineIndex;
-use crate::tokens::TokenIndex;
-use crate::types::{Model, ProtocolTrace, VerifpalError};
+use super::line::LineIndex;
+use crate::protocol::ProtocolTrace;
+use crate::syntax::tokens::TokenIndex;
+use crate::syntax::{Model, VerifpalError};
 
 pub(crate) struct Document {
 	pub uri: Uri,
@@ -26,15 +27,15 @@ impl Document {
 		encoding: &PositionEncodingKind,
 	) -> Document {
 		let line = LineIndex::new(&text, encoding);
-		let (parsed, tokens) = crate::parser::parse_string_indexed(&file_name(&uri), &text);
+		let (parsed, tokens) = crate::syntax::parser::parse_string_indexed(&file_name(&uri), &text);
 		let (model, trace, error) = match parsed {
 			Err(e) => (None, None, Some(e)),
 			Ok(m) => {
-				let (trace, error) = match crate::sanity::sanity(&m) {
+				let (trace, error) = match crate::protocol::sanity::sanity(&m) {
 					Ok(t) => (
 						Some(t),
-						crate::verify::expand(&m, crate::sessions::DEFAULT_SESSIONS)
-							.and_then(|e| crate::sanity::sanity(&e.model))
+						crate::verify::expand(&m, crate::protocol::sessions::DEFAULT_SESSIONS)
+							.and_then(|e| crate::protocol::sanity::sanity(&e.model))
 							.err(),
 					),
 					Err(e) => (None, Some(e)),

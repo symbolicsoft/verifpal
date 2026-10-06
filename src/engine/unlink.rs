@@ -5,14 +5,19 @@ use std::sync::Arc;
 
 use super::exec::{Context, Execution, Held};
 use super::program::Event;
-use crate::context::Generational;
-use crate::hashing::TermSet;
 use crate::primitive::{
-	PrimitiveSpec, Reveal, RewriteRule, primitive_check_undoing, primitive_core_reveals_args,
-	primitive_get, primitive_name,
+	CapabilityIndex, PrimitiveSpec, Reveal, RewriteRule, primitive_check_undoing,
+	primitive_core_reveals_args, primitive_get, primitive_name,
 };
-use crate::theory::{can_recompose, can_reconstruct_primitive, obtainable};
-use crate::types::*;
+use crate::protocol::ProtocolTrace;
+use crate::syntax::Qualifier;
+use crate::term::hashing::TermSet;
+use crate::term::{Constant, Primitive, PrimitiveId, Value, ValueId};
+use crate::theory::{
+	AttackerState, KnownIdx, can_recompose, can_reconstruct_primitive, obtainable,
+};
+use crate::util::IdSet;
+use crate::util::generation::Generational;
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum LinkKind {
@@ -79,7 +84,7 @@ impl<'a> Linker<'a> {
 }
 
 pub(crate) fn honest_reduct(km: &ProtocolTrace, slot: usize) -> Value {
-	crate::theory::reduce_once(&crate::value::resolve_trace_constant(
+	crate::theory::reduce_once(&crate::protocol::trace::resolve_trace_constant(
 		&km.slots[slot].constant,
 		km,
 	))
@@ -383,7 +388,7 @@ fn projected(v: &Value) -> Value {
 fn shared_secret_leaves(scope: &Scope, a: usize, b: usize) -> IdSet<ValueId> {
 	let km = scope.km;
 	let of = |slot: usize| {
-		crate::value::subterms(&projected(&crate::value::resolve_trace_constant(
+		crate::term::subterms(&projected(&crate::protocol::trace::resolve_trace_constant(
 			&km.slots[slot].constant,
 			km,
 		)))
@@ -502,7 +507,7 @@ fn runnable(scope: &Scope, check: &PrimitiveSpec, rule: &RewriteRule, p: &Primit
 	let Some(&arity) = check.arity.last() else {
 		return false;
 	};
-	let mut arguments = vec![crate::value::value_nil(); arity as usize];
+	let mut arguments = vec![crate::term::value_nil(); arity as usize];
 	let Some(source) = arguments.get_mut(rule.from) else {
 		return false;
 	};
@@ -539,7 +544,8 @@ fn runnable(scope: &Scope, check: &PrimitiveSpec, rule: &RewriteRule, p: &Primit
 	})
 }
 
-type Leaves = Generational<crate::context::Recent<u64, u64, Vec<(Value, Option<Vec<Value>>)>>>;
+type Leaves =
+	Generational<crate::util::generation::Recent<u64, u64, Vec<(Value, Option<Vec<Value>>)>>>;
 
 thread_local! {
 	static LEAVES: std::cell::RefCell<Leaves> =
@@ -557,7 +563,7 @@ fn origin_leaves(scope: &Scope, v: &Value) -> Option<Vec<Value>> {
 			.and_then(|bucket| {
 				bucket
 					.iter()
-					.find(|(seen, _)| crate::theory::structurally_identical(seen, v))
+					.find(|(seen, _)| crate::term::equivalence::structurally_identical(seen, v))
 					.map(|(_, leaves)| leaves.clone())
 			})
 	});
@@ -672,13 +678,13 @@ mod tests {
 
 	#[test]
 	fn supplied_components_use_the_knowledge_at_the_receive() {
-		let _generation = crate::context::GenerationGuard::enter();
-		let model = crate::parser::parse_string(
+		let _generation = crate::util::generation::GenerationGuard::enter();
+		let model = crate::syntax::parser::parse_string(
 			"supplied.vp",
 			include_str!("../../examples/test/unlink_supplied_wrapper_late_key.vp"),
 		)
 		.expect("parses");
-		let km = crate::sanity::sanity(&model).expect("sane");
+		let km = crate::protocol::sanity::sanity(&model).expect("sane");
 		let program = Program::of(&model, &km);
 		let cx = Context::new(&program, &km);
 		let bob = program.runs.iter().position(|r| r.name == "Bob").unwrap();
@@ -690,8 +696,8 @@ mod tests {
 		};
 		let honest = execute(&cx, &vec![]);
 		let y = honest.runs[bob].held(slot("y")).unwrap().value.clone();
-		let s = crate::testutil::trace_constant(&km, "s");
-		let wrap = |v: Value| Value::primitive(PRIM_HASH, vec![v, crate::value::value_nil()], 0);
+		let s = crate::testing::trace_constant(&km, "s");
+		let wrap = |v: Value| Value::primitive(PRIM_HASH, vec![v, crate::term::value_nil()], 0);
 		let inner = wrap(y.clone());
 		for value in [y.clone(), wrap(inner.clone())] {
 			let ex = execute(&cx, &vec![(bob, slot("x"), value.clone())]);
@@ -718,9 +724,9 @@ mod tests {
 	}
 
 	fn observed_in(src: &str, install: Option<(&str, &str)>, phase: i32, target: &str) -> bool {
-		let _generation = crate::context::GenerationGuard::enter();
-		let m = crate::parser::parse_string("ul.vp", src).expect("parses");
-		let km = crate::sanity::sanity(&m).expect("sane");
+		let _generation = crate::util::generation::GenerationGuard::enter();
+		let m = crate::syntax::parser::parse_string("ul.vp", src).expect("parses");
+		let km = crate::protocol::sanity::sanity(&m).expect("sane");
 		let program = Program::of(&m, &km);
 		let cx = Context::new(&program, &km);
 		let slot = |name: &str| {
@@ -736,7 +742,7 @@ mod tests {
 					.iter()
 					.position(|r| r.name == principal)
 					.expect("run");
-				(run, slot(name), crate::value::value_nil())
+				(run, slot(name), crate::term::value_nil())
 			})
 			.into_iter()
 			.collect();
@@ -746,7 +752,7 @@ mod tests {
 			km: &km,
 			attacker: &ex.knowledge.state,
 		};
-		let value = crate::theory::reduce_once(&crate::value::resolve_trace_constant(
+		let value = crate::theory::reduce_once(&crate::protocol::trace::resolve_trace_constant(
 			&km.slots[slot(target)].constant,
 			&km,
 		));

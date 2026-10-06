@@ -8,11 +8,12 @@ use lsp_types::{
 	SignatureHelp, SignatureInformation, SymbolKind, TextEdit,
 };
 
-use crate::lsp::docs;
-use crate::lsp::state::Document;
+use super::docs;
+use super::state::Document;
 use crate::primitive::PrimitiveDefinition;
-use crate::tokens::{Token, TokenKind};
-use crate::types::{Block, Declaration, PrimitiveId, Span};
+use crate::syntax::tokens::{Token, TokenKind};
+use crate::syntax::{Block, Declaration, Span};
+use crate::term::PrimitiveId;
 
 pub(crate) const TOKEN_TYPES: &[&str] = &[
 	"namespace",
@@ -160,7 +161,7 @@ fn documentation(value: String) -> Documentation {
 
 fn counted(counts: &[i32], noun: &str) -> String {
 	match counts {
-		[n] => format!("{n} {noun}{}", crate::util::plural(*n as usize)),
+		[n] => format!("{n} {noun}{}", crate::util::text::plural(*n as usize)),
 		_ => format!("{}\u{2013}{} {noun}s", counts[0], counts[counts.len() - 1]),
 	}
 }
@@ -175,9 +176,9 @@ fn primitive_facts(name: &str) -> Option<String> {
 	if def.definition_check() {
 		notes.push("may be checked with `?`".to_string());
 	}
-	let accepted: Vec<&str> = crate::types::Capability::ALL
+	let accepted: Vec<&str> = crate::primitive::Capability::ALL
 		.iter()
-		.filter(|c| crate::capability::supports(id, **c))
+		.filter(|c| crate::primitive::capability::supports(id, **c))
 		.map(|c| c.name())
 		.collect();
 	if !accepted.is_empty() {
@@ -331,13 +332,13 @@ fn valid_rename(doc: &Document, token: &Token, new_name: &str) -> bool {
 		TokenKind::ConstantName => {
 			if new_name == "_"
 				|| is_nil(new_name)
-				|| crate::parser::check_reserved(new_name).is_err()
+				|| crate::syntax::parser::check_reserved(new_name).is_err()
 			{
 				return false;
 			}
 		}
 		TokenKind::PrincipalName => {
-			if crate::parser::is_reserved_word(&new_name.to_ascii_lowercase()) {
+			if crate::syntax::parser::is_reserved_word(&new_name.to_ascii_lowercase()) {
 				return false;
 			}
 		}
@@ -469,7 +470,7 @@ pub(crate) fn document_symbols(doc: &Document) -> Vec<DocumentSymbol> {
 			}
 			Block::Message(m) => symbols.push(symbol(
 				format!("{} \u{2192} {}", m.sender_name, m.recipient_name),
-				crate::pretty::pretty_constants(&m.constants),
+				crate::syntax::pretty::pretty_constants(&m.constants),
 				SymbolKind::EVENT,
 				doc.line.range(m.span),
 				Vec::new(),
@@ -488,7 +489,7 @@ pub(crate) fn document_symbols(doc: &Document) -> Vec<DocumentSymbol> {
 		.iter()
 		.map(|q| {
 			symbol(
-				crate::pretty::query_display(q),
+				crate::syntax::pretty::query_display(q),
 				String::new(),
 				SymbolKind::BOOLEAN,
 				doc.line.range(q.span),
@@ -508,7 +509,7 @@ pub(crate) fn document_symbols(doc: &Document) -> Vec<DocumentSymbol> {
 	symbols
 }
 
-fn expression_detail(e: &crate::types::Expression) -> String {
+fn expression_detail(e: &crate::syntax::Expression) -> String {
 	match (&e.kind, &e.assigned) {
 		(Declaration::Assignment, Some(v)) => v.to_string(),
 		(Declaration::Knows, _) => match &e.qualifier {
