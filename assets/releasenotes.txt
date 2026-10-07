@@ -1,4 +1,20 @@
-Verifpal 1.6.3
+Verifpal 1.6.4
+
+Changes since v1.6.3:
+
+- Code quality pass
+- Cargo update
+- Major source refactoring/reorganization
+- Search: the rerouted pass bypasses the stuck run's own later send
+- Search: the rerouted pass uses only sends that reach past the wait
+- Deducer: reuse goals whose cycle cuts recur; fail clashing equations early
+- Search: a rerouted send can supply a stuck receive
+- Performance improvements
+- ePassport models
+- Unlinkability fixes
+- Cargo update
+- Scenario analysis bug found by Heba Ajjour
+- Fix #45, #46, #47
 
 Changes since v1.6.2:
 
