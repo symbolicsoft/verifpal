@@ -34,34 +34,8 @@ pub(crate) fn expand_scenarios(m: &Model, sessions: u8) -> VResult<Expansion> {
 		});
 	}
 	sanity_scenarios(m)?;
-	let analyzed = count as u32 * sessions as u32;
-	if analyzed > MAX_COPIES + 1 {
-		return Err(VerifpalError::sanity(
-			format!(
-				"{count} scenarios at {sessions} sessions would analyze {analyzed} copies \
-				 of every principal, which exceeds the {} the id space holds",
-				MAX_COPIES + 1
-			)
-			.into(),
-		)
-		.note("scenarios and sessions multiply: each scenario runs every session")
-		.help(format!(
-			"declare fewer scenarios, or analyze with `--sessions {}` or fewer",
-			((MAX_COPIES + 1) / count as u32).max(1)
-		)));
-	}
 	let principals = m.declared_principals();
-	let expanded = principals.len() * count;
-	if expanded > MAX_PRINCIPALS {
-		return Err(VerifpalError::sanity(
-			format!(
-				"model declares {} principals; {count} scenarios would analyze {expanded}, \
-				 which exceeds the {MAX_PRINCIPALS}-principal cap",
-				principals.len()
-			)
-			.into(),
-		));
-	}
+	check_scale(count, sessions, principals.len())?;
 
 	let corruption = Corruption::of(m);
 	let mut scenarios: Vec<(&Scenario, i32)> = m
@@ -80,20 +54,7 @@ pub(crate) fn expand_scenarios(m: &Model, sessions: u8) -> VResult<Expansion> {
 		)?)
 		.collect();
 
-	let mut blocks: Vec<Block> = Vec::with_capacity(m.blocks.len() * count);
-	for block in &m.blocks {
-		match block {
-			Block::Principal(p) => {
-				blocks.extend(copies.iter().zip(&scenarios).map(|(copy, (scenario, _))| {
-					Block::Principal(copy.principal(&bound(p, scenario)))
-				}));
-			}
-			Block::Message(msg) => {
-				blocks.extend(copies.iter().map(|copy| Block::Message(copy.message(msg))));
-			}
-			Block::Phase(_) => blocks.push(block.clone()),
-		}
-	}
+	let blocks = scenario_blocks(m, &copies, &scenarios);
 
 	let mut corrupt_from: IdMap<PrincipalId, i32> = IdMap::default();
 	for (copy, &(_, from)) in copies.iter().zip(&scenarios) {
@@ -104,22 +65,7 @@ pub(crate) fn expand_scenarios(m: &Model, sessions: u8) -> VResult<Expansion> {
 		}
 	}
 
-	let any_honest = scenarios[0].1 > 0;
-	let query_variants: Vec<Vec<Query>> = m
-		.queries
-		.iter()
-		.map(|query| {
-			copies
-				.iter()
-				.zip(&scenarios)
-				.skip(1)
-				.filter(|&(_, &(_, corrupt_from))| !any_honest || corrupt_from > 0)
-				.map(|(copy, _)| copy.query(query))
-				.filter(|variant| !query.same_shape(variant))
-				.collect()
-		})
-		.collect();
-
+	let query_variants = scenario_query_variants(m, &copies, &scenarios);
 	let summaries: Vec<ScenarioSummary> = scenarios
 		.iter()
 		.map(|&(s, corrupt_from)| ScenarioSummary {
@@ -137,7 +83,7 @@ pub(crate) fn expand_scenarios(m: &Model, sessions: u8) -> VResult<Expansion> {
 		.iter()
 		.filter(|s| s.corrupt_from.is_some())
 		.count();
-	crate::console::info_message(
+	crate::console::message(
 		&format!(
 			"Analyzing {count} peer scenarios per principal, {corrupt} of them with a \
 			 corrupt peer; per-scenario values and principals are suffixed @2 onward.",
@@ -166,6 +112,75 @@ pub(crate) fn expand_scenarios(m: &Model, sessions: u8) -> VResult<Expansion> {
 			.map(|(_, value)| value.id)
 			.collect(),
 	})
+}
+
+fn check_scale(count: usize, sessions: u8, principals: usize) -> VResult<()> {
+	let analyzed = count as u32 * sessions as u32;
+	if analyzed > MAX_COPIES + 1 {
+		return Err(VerifpalError::sanity(
+			format!(
+				"{count} scenarios at {sessions} sessions would analyze {analyzed} copies \
+				 of every principal, which exceeds the {} the id space holds",
+				MAX_COPIES + 1
+			)
+			.into(),
+		)
+		.note("scenarios and sessions multiply: each scenario runs every session")
+		.help(format!(
+			"declare fewer scenarios, or analyze with `--sessions {}` or fewer",
+			((MAX_COPIES + 1) / count as u32).max(1)
+		)));
+	}
+	let expanded = principals * count;
+	if expanded > MAX_PRINCIPALS {
+		return Err(VerifpalError::sanity(
+			format!(
+				"model declares {principals} principals; {count} scenarios would analyze \
+				 {expanded}, which exceeds the {MAX_PRINCIPALS}-principal cap",
+			)
+			.into(),
+		));
+	}
+	Ok(())
+}
+
+fn scenario_blocks(m: &Model, copies: &[ModelCopy], scenarios: &[(&Scenario, i32)]) -> Vec<Block> {
+	let mut blocks: Vec<Block> = Vec::with_capacity(m.blocks.len() * scenarios.len());
+	for block in &m.blocks {
+		match block {
+			Block::Principal(p) => {
+				blocks.extend(copies.iter().zip(scenarios).map(|(copy, (scenario, _))| {
+					Block::Principal(copy.principal(&bound(p, scenario)))
+				}));
+			}
+			Block::Message(msg) => {
+				blocks.extend(copies.iter().map(|copy| Block::Message(copy.message(msg))));
+			}
+			Block::Phase(_) => blocks.push(block.clone()),
+		}
+	}
+	blocks
+}
+
+fn scenario_query_variants(
+	m: &Model,
+	copies: &[ModelCopy],
+	scenarios: &[(&Scenario, i32)],
+) -> Vec<Vec<Query>> {
+	let any_honest = scenarios[0].1 > 0;
+	m.queries
+		.iter()
+		.map(|query| {
+			copies
+				.iter()
+				.zip(scenarios)
+				.skip(1)
+				.filter(|&(_, &(_, corrupt_from))| !any_honest || corrupt_from > 0)
+				.map(|(copy, _)| copy.query(query))
+				.filter(|variant| !query.same_shape(variant))
+				.collect()
+		})
+		.collect()
 }
 
 fn rebindings(scenario: &Scenario) -> impl Iterator<Item = &(Constant, Constant)> {
@@ -339,77 +354,16 @@ fn sanity_scenarios(m: &Model) -> VResult<()> {
 			.iter()
 			.find(|(_, name)| name.as_str() == &*scenario.principal_name)
 		else {
-			let names: Vec<String> = principals.iter().map(|(_, n)| n.clone()).collect();
-			let mut e = VerifpalError::sanity(
-				format!(
-					"scenario names principal `{}`, which the model does not declare",
-					scenario.principal_name
-				)
-				.into(),
-			)
-			.note(
-				"a scenario binds constants inside a principal that exists, so a name no \
-				 principal carries would substitute nothing and silently analyze the model \
-				 as written",
-			);
-			match did_you_mean(&scenario.principal_name, names.iter().map(|n| n.as_str())) {
-				Some(suggestion) => e = e.help(format!("did you mean `{suggestion}`?")),
-				None => e = e.help(format!("declared principals: {}", quoted_list(&names))),
-			}
-			return Err(e.or_span(scenario.span));
+			return Err(unknown_principal(scenario, &principals));
 		};
 		let known = known_constants(m, id);
 		let mut bound: Vec<ValueId> = Vec::new();
 		for (target, value) in &scenario.bindings {
 			if !known.contains(&target.id) {
-				let names: Vec<String> = declared
-					.iter()
-					.filter(|(cid, _)| known.contains(cid))
-					.map(|(_, name)| name.clone())
-					.collect();
-				let mut e = VerifpalError::sanity(
-					format!(
-						"scenario binds `{}`, which {} does not declare with `knows`",
-						target.name, scenario.principal_name
-					)
-					.into(),
-				)
-				.note(
-					"a scenario replaces a constant the principal is given, so the target \
-					 must be one that principal `knows`",
-				);
-				match did_you_mean(&target.name, names.iter().map(|n| n.as_str())) {
-					Some(suggestion) => e = e.help(format!("did you mean `{suggestion}`?")),
-					None if !names.is_empty() => {
-						e = e.help(format!(
-							"{} knows {}",
-							scenario.principal_name,
-							quoted_list(&names)
-						));
-					}
-					None => {}
-				}
-				return Err(e.or_span(scenario.span));
+				return Err(unknown_target(scenario, target, &declared, &known));
 			}
 			if !declared.iter().any(|(cid, _)| *cid == value.id) {
-				let names: Vec<String> = declared.iter().map(|(_, name)| name.clone()).collect();
-				let mut e = VerifpalError::sanity(
-					format!(
-						"scenario binds `{}` to `{}`, which no principal declares",
-						target.name, value.name
-					)
-					.into(),
-				)
-				.note(
-					"a scenario substitutes one of the model's own constants, so the value \
-					 must be introduced by `knows`, `generates`, or an assignment",
-				);
-				if let Some(suggestion) =
-					did_you_mean(&value.name, names.iter().map(|n| n.as_str()))
-				{
-					e = e.help(format!("did you mean `{suggestion}`?"));
-				}
-				return Err(e.or_span(scenario.span));
+				return Err(undeclared_value(scenario, target, value, &declared));
 			}
 			if let Some(sender) = message_carrying(m, target.id) {
 				return Err(VerifpalError::sanity(
@@ -445,6 +399,87 @@ fn sanity_scenarios(m: &Model) -> VResult<()> {
 		}
 	}
 	Ok(())
+}
+
+fn unknown_principal(scenario: &Scenario, principals: &[(PrincipalId, String)]) -> VerifpalError {
+	let names: Vec<String> = principals.iter().map(|(_, n)| n.clone()).collect();
+	let mut e = VerifpalError::sanity(
+		format!(
+			"scenario names principal `{}`, which the model does not declare",
+			scenario.principal_name
+		)
+		.into(),
+	)
+	.note(
+		"a scenario binds constants inside a principal that exists, so a name no \
+		 principal carries would substitute nothing and silently analyze the model \
+		 as written",
+	);
+	match did_you_mean(&scenario.principal_name, names.iter().map(|n| n.as_str())) {
+		Some(suggestion) => e = e.help(format!("did you mean `{suggestion}`?")),
+		None => e = e.help(format!("declared principals: {}", quoted_list(&names))),
+	}
+	e.or_span(scenario.span)
+}
+
+fn unknown_target(
+	scenario: &Scenario,
+	target: &Constant,
+	declared: &[(ValueId, String)],
+	known: &IdSet<ValueId>,
+) -> VerifpalError {
+	let names: Vec<String> = declared
+		.iter()
+		.filter(|(cid, _)| known.contains(cid))
+		.map(|(_, name)| name.clone())
+		.collect();
+	let mut e = VerifpalError::sanity(
+		format!(
+			"scenario binds `{}`, which {} does not declare with `knows`",
+			target.name, scenario.principal_name
+		)
+		.into(),
+	)
+	.note(
+		"a scenario replaces a constant the principal is given, so the target \
+		 must be one that principal `knows`",
+	);
+	match did_you_mean(&target.name, names.iter().map(|n| n.as_str())) {
+		Some(suggestion) => e = e.help(format!("did you mean `{suggestion}`?")),
+		None if !names.is_empty() => {
+			e = e.help(format!(
+				"{} knows {}",
+				scenario.principal_name,
+				quoted_list(&names)
+			));
+		}
+		None => {}
+	}
+	e.or_span(scenario.span)
+}
+
+fn undeclared_value(
+	scenario: &Scenario,
+	target: &Constant,
+	value: &Constant,
+	declared: &[(ValueId, String)],
+) -> VerifpalError {
+	let names: Vec<String> = declared.iter().map(|(_, name)| name.clone()).collect();
+	let mut e = VerifpalError::sanity(
+		format!(
+			"scenario binds `{}` to `{}`, which no principal declares",
+			target.name, value.name
+		)
+		.into(),
+	)
+	.note(
+		"a scenario substitutes one of the model's own constants, so the value \
+		 must be introduced by `knows`, `generates`, or an assignment",
+	);
+	if let Some(suggestion) = did_you_mean(&value.name, names.iter().map(|n| n.as_str())) {
+		e = e.help(format!("did you mean `{suggestion}`?"));
+	}
+	e.or_span(scenario.span)
 }
 
 fn message_carrying(m: &Model, target: ValueId) -> Option<String> {
@@ -498,7 +533,7 @@ fn secret_declarations(m: &Model) -> IdSet<ValueId> {
 		}
 		for term in expr.assigned.iter().flat_map(crate::term::subterms) {
 			if let Value::Primitive(inner) = term
-				&& crate::primitive::primitive_is_key_derivation(inner.id)
+				&& crate::primitive::is_key_derivation(inner.id)
 				&& let Some(Value::Constant(c)) = inner.arguments.first()
 			{
 				out.insert(c.id);
@@ -533,7 +568,7 @@ fn key_material_constants(m: &Model) -> IdSet<ValueId> {
 		let before = out.len();
 		for expr in expressions(m) {
 			if let Some(Value::Primitive(inner)) = &expr.assigned
-				&& crate::primitive::primitive_is_key_derivation(inner.id)
+				&& crate::primitive::is_key_derivation(inner.id)
 				&& let Some(Value::Constant(c)) = inner.arguments.first()
 				&& out.contains(&c.id)
 			{
@@ -680,13 +715,13 @@ impl Disclosure {
 							expose(named, at, &mut seen);
 						}
 					}
-					if crate::primitive::primitive_core_reveals_args(p.id) {
+					if crate::primitive::core_reveals_arguments(p.id) {
 						pending.extend(p.arguments.iter().map(|a| (a.clone(), at)));
 					} else if let Some((opened, reveals)) = self.opened(p) {
 						pending.extend(reveals.into_iter().map(|a| (a, at.max(opened))));
 					}
 					if let Some(onset) = self.capabilities.lookup(p).onset(Capability::Weak)
-						&& let Ok(spec) = crate::primitive::primitive_get(p.id)
+						&& let Ok(spec) = crate::primitive::spec(p.id)
 					{
 						pending.extend(
 							crate::theory::revealed(p, &spec.weak_reveals)
@@ -701,10 +736,7 @@ impl Disclosure {
 	}
 
 	fn opened(&self, p: &Primitive) -> Option<(i32, Vec<Value>)> {
-		let rule = crate::primitive::primitive_get(p.id)
-			.ok()?
-			.decompose
-			.as_ref()?;
+		let rule = crate::primitive::spec(p.id).ok()?.decompose.as_ref()?;
 		if rule.output.is_some_and(|output| output != p.output) {
 			return None;
 		}

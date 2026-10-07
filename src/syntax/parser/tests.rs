@@ -246,12 +246,12 @@ fn nested_dh_kex_parses_as_a_nested_primitive() {
 	let Value::Primitive(outer) = assigned else {
 		panic!("expected a primitive, got {:?}", assigned);
 	};
-	assert_eq!(outer.id, primitive_get_enum("DH_KEX").unwrap());
+	assert_eq!(outer.id, crate::primitive::id_of("DH_KEX").unwrap());
 	assert_eq!(outer.arguments.len(), 2);
 	let Value::Primitive(inner) = &outer.arguments[0] else {
 		panic!("expected PUBKEY in argument 0");
 	};
-	assert_eq!(inner.id, primitive_get_enum("PUBKEY").unwrap());
+	assert_eq!(inner.id, crate::primitive::id_of("PUBKEY").unwrap());
 }
 
 fn model_error(src: &str) -> String {
@@ -447,7 +447,7 @@ fn every_keyword_is_recognised_whatever_its_case() {
 
 #[test]
 fn every_primitive_name_is_reserved() {
-	let shadowable: Vec<&str> = crate::primitive::primitive_names()
+	let shadowable: Vec<&str> = crate::primitive::names()
 		.into_iter()
 		.filter(|name| check_reserved(&name.to_lowercase()).is_ok())
 		.collect();

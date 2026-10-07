@@ -3,13 +3,14 @@
 
 use super::{Constant, Primitive, Value};
 use crate::util::IdMap;
+use crate::util::generation::{AnalysisKey, AnalysisLocal};
 
 pub(crate) fn primitive_hash(p: &Primitive) -> u64 {
-	if let Some(cached) = p.hash.get() {
+	if let Some(cached) = p.cache().get() {
 		return cached;
 	}
 	let computed = primitive_hash_at_output(p, p.output);
-	p.hash.set(computed);
+	p.cache().set(computed);
 	computed
 }
 
@@ -37,19 +38,18 @@ pub(crate) fn primitive_hash_at_output(p: &Primitive, output: usize) -> u64 {
 }
 
 thread_local! {
-	static TERMS: std::cell::RefCell<crate::util::generation::Generational<Interner>> =
-		std::cell::RefCell::new(crate::util::generation::Generational::default());
+	static TERMS: AnalysisLocal<Interner> = AnalysisLocal::default();
 }
 
 pub(crate) fn hashcons(v: &Value) -> Value {
 	match v {
-		Value::Primitive(_) => TERMS.with(|terms| terms.borrow_mut().fresh().intern(v)),
+		Value::Primitive(_) => TERMS.with_current(|terms| terms.intern(v)),
 		Value::Constant(_) | Value::Variable(_) => v.clone(),
 	}
 }
 
 pub(crate) fn hashconsed(p: &std::sync::Arc<Primitive>) -> bool {
-	TERMS.with(|terms| terms.borrow_mut().fresh().holds(p))
+	TERMS.with_current(|terms| terms.holds(p))
 }
 
 #[derive(Default)]
@@ -231,7 +231,7 @@ mod tests {
 	fn term_membership_confirms_equality_after_a_hash_collision() {
 		let left = make_primitive(PRIM_HASH, vec![make_constant("collision_left")], 0);
 		let right = make_primitive(PRIM_HASH, vec![make_constant("collision_right")], 0);
-		right.as_primitive().unwrap().hash.set(left.hash_value());
+		right.as_primitive().unwrap().cache().set(left.hash_value());
 		let mut set = TermSet::default();
 		set.insert(left.clone());
 		assert!(set.contains(&left));
@@ -243,8 +243,16 @@ mod tests {
 	}
 
 	fn dh_kex(pubkey_inner: Value, bare: Value) -> Value {
-		let pk = make_primitive(primitive_get_enum("PUBKEY").unwrap(), vec![pubkey_inner], 0);
-		make_primitive(primitive_get_enum("DH_KEX").unwrap(), vec![pk, bare], 0)
+		let pk = make_primitive(
+			crate::primitive::id_of("PUBKEY").unwrap(),
+			vec![pubkey_inner],
+			0,
+		);
+		make_primitive(
+			crate::primitive::id_of("DH_KEX").unwrap(),
+			vec![pk, bare],
+			0,
+		)
 	}
 
 	#[test]

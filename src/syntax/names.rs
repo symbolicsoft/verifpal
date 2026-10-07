@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use super::{PrincipalId, VResult, VerifpalError};
-use crate::term::{COPY_STRIDE, ValueId};
+use crate::term::{COPY_STRIDE, NIL_ID, ValueId};
 
 pub(crate) const ATTACKER_ID: PrincipalId = 0;
 pub(crate) const ATTACKER_NAME: &str = "Attacker";
@@ -74,8 +74,11 @@ impl Default for ValueNames {
 impl ValueNames {
 	pub(crate) fn new() -> Self {
 		let mut map = HashMap::new();
-		map.insert(Arc::from("nil"), 1);
-		ValueNames { map, counter: 2 }
+		map.insert(Arc::from("nil"), NIL_ID);
+		ValueNames {
+			map,
+			counter: NIL_ID + 1,
+		}
 	}
 
 	pub(crate) fn intern(&mut self, name: &str) -> VResult<ValueId> {

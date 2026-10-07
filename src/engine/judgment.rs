@@ -2,9 +2,10 @@
  * SPDX-License-Identifier: GPL-3.0-only */
 
 use super::exec::{Context, Execution, Held, RunState};
-use super::program::Event;
+use super::program::{DeliveryIdx, Event, RunIdx, StepIdx};
 use super::unlink::{Link, Linker};
 use crate::protocol::ProtocolTrace;
+use crate::protocol::SlotIdx;
 use crate::protocol::trace::mentions_across_principals;
 use crate::syntax::{PrincipalId, Query, QueryKind};
 use crate::term::{Constant, Value, ValueId};
@@ -13,36 +14,36 @@ use crate::theory::{can_rewrite, obtainable, reduce_once};
 #[derive(Clone, Debug)]
 pub(crate) enum Violation {
 	Disclosed {
-		run: usize,
-		slot: usize,
+		run: RunIdx,
+		slot: SlotIdx,
 		value: Value,
 	},
 	Forged {
-		run: usize,
-		slot: usize,
+		run: RunIdx,
+		slot: SlotIdx,
 		value: Value,
-		used: usize,
+		used: SlotIdx,
 	},
 	Replayed {
-		run: usize,
-		slot: usize,
+		run: RunIdx,
+		slot: SlotIdx,
 		value: Value,
-		used: usize,
+		used: SlotIdx,
 		emissions: usize,
 		acceptances: usize,
 	},
 	Substituted {
-		run: usize,
-		slot: usize,
-		sender: usize,
-		used: usize,
+		run: RunIdx,
+		slot: SlotIdx,
+		sender: RunIdx,
+		used: SlotIdx,
 	},
 	Stale {
-		run: usize,
-		slot: usize,
+		run: RunIdx,
+		slot: SlotIdx,
 		value: Value,
-		used: usize,
-		repeated: Option<usize>,
+		used: SlotIdx,
+		repeated: Option<RunIdx>,
 	},
 	Linked {
 		link: Link,
@@ -124,20 +125,20 @@ impl<'a, 'b> Judge<'a, 'b> {
 		})
 	}
 
-	fn claimed_runs(&self) -> impl Iterator<Item = usize> + '_ {
-		(0..self.ex.runs.len()).filter(|&r| self.state(r).is_some())
+	fn claimed_runs(&self) -> impl Iterator<Item = RunIdx> + '_ {
+		self.ex.runs.indices().filter(|&r| self.state(r).is_some())
 	}
 
-	fn state(&self, r: usize) -> Option<&RunState> {
+	fn state(&self, r: RunIdx) -> Option<&RunState> {
 		let phase = (self.claims)(self.cx.program.runs[r].id)?;
 		Some(&self.whole.at(phase).runs[r])
 	}
 
-	fn creator_run(&self, slot: usize) -> Option<usize> {
+	fn creator_run(&self, slot: SlotIdx) -> Option<RunIdx> {
 		self.cx.program.run_index(self.km().slots[slot].creator)
 	}
 
-	fn claimed(&self, r: usize, slot: usize) -> Option<&Held> {
+	fn claimed(&self, r: RunIdx, slot: SlotIdx) -> Option<&Held> {
 		self.state(r)?
 			.held(slot)
 			.or_else(|| self.state(self.creator_run(slot)?)?.held(slot))
@@ -157,14 +158,13 @@ impl<'a, 'b> Judge<'a, 'b> {
 		})
 	}
 
-	fn first_use(&self, now: &RunState, run: usize, target: ValueId) -> Option<usize> {
+	fn first_use(&self, now: &RunState, run: RunIdx, target: ValueId) -> Option<SlotIdx> {
 		let km = self.km();
 		let program = &self.cx.program.runs[run];
-		let sites = |mentioned: &dyn Fn(&Value) -> bool| -> Vec<(usize, usize)> {
+		let sites = |mentioned: &dyn Fn(&Value) -> bool| -> Vec<(StepIdx, SlotIdx)> {
 			program
 				.steps
-				.iter()
-				.enumerate()
+				.iter_enumerated()
 				.filter_map(|(i, step)| match step.event {
 					Event::Assign(slot)
 						if matches!(km.slots[slot].initial_value, Value::Primitive(_))
@@ -241,7 +241,7 @@ impl<'a, 'b> Judge<'a, 'b> {
 		})
 	}
 
-	fn emissions(&self, q: &Query, siblings: &[usize], reduct: &Value) -> usize {
+	fn emissions(&self, q: &Query, siblings: &[SlotIdx], reduct: &Value) -> usize {
 		let km = self.km();
 		let program = self.cx.program;
 		let sends = program
@@ -266,10 +266,10 @@ impl<'a, 'b> Judge<'a, 'b> {
 
 	fn reaches(
 		&self,
-		d: usize,
-		slot: usize,
+		d: DeliveryIdx,
+		slot: SlotIdx,
 		recipient: PrincipalId,
-		seen: &mut Vec<usize>,
+		seen: &mut Vec<DeliveryIdx>,
 	) -> bool {
 		let program = self.cx.program;
 		let to = program.deliveries[d].recipient;
@@ -282,8 +282,7 @@ impl<'a, 'b> Judge<'a, 'b> {
 		seen.push(d);
 		program
 			.deliveries
-			.iter()
-			.enumerate()
+			.iter_enumerated()
 			.any(|(next, delivery)| {
 				delivery.sender == to
 					&& delivery.slots.iter().any(|&(s, _)| s == slot)
@@ -294,11 +293,13 @@ impl<'a, 'b> Judge<'a, 'b> {
 	fn accepting<'s>(
 		&'s self,
 		actor: PrincipalId,
-		siblings: &'s [usize],
+		siblings: &'s [SlotIdx],
 		reduct: &'s Value,
-	) -> impl Iterator<Item = usize> + 's {
+	) -> impl Iterator<Item = RunIdx> + 's {
 		let km = self.km();
-		(0..self.ex.runs.len())
+		self.ex
+			.runs
+			.indices()
 			.filter(move |&r| km.same_actor(self.cx.program.runs[r].id, actor))
 			.flat_map(move |r| siblings.iter().map(move |&s| (r, s)))
 			.filter(move |&(r, s)| {
@@ -375,7 +376,7 @@ impl<'a, 'b> Judge<'a, 'b> {
 		let km = self.km();
 		let linker = Linker::new(self.cx, self.ex);
 		for r in self.claimed_runs() {
-			let claimed: Vec<(&Constant, usize, &Held)> = q
+			let claimed: Vec<(&Constant, SlotIdx, &Held)> = q
 				.constants
 				.iter()
 				.filter_map(|c| {

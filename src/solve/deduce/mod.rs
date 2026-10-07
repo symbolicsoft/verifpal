@@ -109,20 +109,14 @@ impl<'a> Deducer<'a> {
 		}
 		let wire_terms = km
 			.slots
-			.iter()
-			.enumerate()
+			.iter_enumerated()
 			.filter(|(idx, slot)| slot.disclosed() && !sym.is_var_slot(*idx))
 			.filter_map(|(idx, _)| sym.terms.get(idx).cloned())
 			.collect();
 		let slot_terms = sym
-			.var_slots
-			.iter()
-			.filter_map(|&slot| match sym.var_terms.get(slot) {
-				Some(Some(term)) if as_var(term).is_none() => {
-					Some((super::vars::attacker_var_id(slot), term.clone()))
-				}
-				_ => None,
-			})
+			.variables()
+			.filter(|(_, term)| as_var(term).is_none())
+			.map(|(slot, term)| (super::vars::attacker_var_id(slot), term.clone()))
 			.collect();
 		let mut by_head = HeldByHead::default();
 		for (at, held) in attacker.known.iter().enumerate() {

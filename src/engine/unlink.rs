@@ -3,13 +3,11 @@
 
 use std::sync::Arc;
 
-use super::exec::{Context, Execution, Held};
+use super::exec::{Context, Execution, Held, Taken};
 use super::program::Event;
-use crate::primitive::{
-	CapabilityIndex, PrimitiveSpec, Reveal, RewriteRule, primitive_check_undoing,
-	primitive_core_reveals_args, primitive_get, primitive_name,
-};
+use crate::primitive::{CapabilityIndex, PrimitiveSpec, Reveal, RewriteRule};
 use crate::protocol::ProtocolTrace;
+use crate::protocol::SlotIdx;
 use crate::syntax::Qualifier;
 use crate::term::hashing::TermSet;
 use crate::term::{Constant, Primitive, PrimitiveId, Value, ValueId};
@@ -17,7 +15,7 @@ use crate::theory::{
 	AttackerState, KnownIdx, can_recompose, can_reconstruct_primitive, obtainable,
 };
 use crate::util::IdSet;
-use crate::util::generation::Generational;
+use crate::util::generation::{AnalysisKey, AnalysisLocal, Recent};
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum LinkKind {
@@ -66,7 +64,7 @@ impl<'a> Linker<'a> {
 		}
 	}
 
-	pub(crate) fn link(&self, pair: [(usize, &Held); 2]) -> Option<Link> {
+	pub(crate) fn link(&self, pair: [(SlotIdx, &Held); 2]) -> Option<Link> {
 		let scope = Scope {
 			km: self.cx.km,
 			attacker: &self.ex.knowledge.state,
@@ -83,7 +81,7 @@ impl<'a> Linker<'a> {
 	}
 }
 
-pub(crate) fn honest_reduct(km: &ProtocolTrace, slot: usize) -> Value {
+pub(crate) fn honest_reduct(km: &ProtocolTrace, slot: SlotIdx) -> Value {
 	crate::theory::reduce_once(&crate::protocol::trace::resolve_trace_constant(
 		&km.slots[slot].constant,
 		km,
@@ -94,7 +92,7 @@ fn link<'s>(
 	scope: &Scope,
 	observed: impl FnOnce() -> &'s TermSet,
 	supplied: impl FnOnce() -> &'s TermSet,
-	[(a, ha), (b, hb)]: [(usize, &Held); 2],
+	[(a, ha), (b, hb)]: [(SlotIdx, &Held); 2],
 ) -> Option<Link> {
 	if ha.authored || hb.authored {
 		return None;
@@ -158,7 +156,7 @@ fn ties(scope: &Scope, v: &Value, via: Option<&Value>) -> Vec<Tied> {
 	let Value::Primitive(p) = v else {
 		return out;
 	};
-	let Some((check, rule)) = primitive_check_undoing(p.id) else {
+	let Some((check, rule)) = crate::primitive::check_undoing(p.id) else {
 		return out;
 	};
 	if !runnable(scope, check, rule, p) {
@@ -280,21 +278,21 @@ impl Link {
 			(LinkKind::IdentifyingCheck(id), None) => {
 				format!(
 					"because {} succeeds for both under {term}",
-					primitive_name(id)
+					crate::primitive::name(id)
 				)
 			}
 			(LinkKind::IdentifyingCheck(id), Some(components)) => format!(
 				"{}, for which {} succeeds under {term}",
 				through(components),
-				primitive_name(id)
+				crate::primitive::name(id)
 			),
 			(LinkKind::RecognizedSecret(id), None) => {
-				format!("via {term}, which {} confirms", primitive_name(id))
+				format!("via {term}, which {} confirms", crate::primitive::name(id))
 			}
 			(LinkKind::RecognizedSecret(id), Some(components)) => format!(
 				"{}, linked via {term}, which {} confirms",
 				through(components),
-				primitive_name(id)
+				crate::primitive::name(id)
 			),
 		}
 	}
@@ -323,7 +321,7 @@ fn public(v: &Value, km: &ProtocolTrace) -> bool {
 
 fn observed(scope: &Scope, cx: &Context, ex: &Execution) -> TermSet {
 	let mut pending: Vec<Value> = ex.sent.iter().flatten().flatten().cloned().collect();
-	for &(run, step, _) in &ex.order {
+	for &Taken { run, step, .. } in &ex.order {
 		if let Event::Leak(slot) = cx.program.runs[run].steps[step].event
 			&& let Some(held) = ex.runs[run].held(slot)
 		{
@@ -339,7 +337,7 @@ fn observed(scope: &Scope, cx: &Context, ex: &Execution) -> TermSet {
 		let Value::Primitive(p) = &value else {
 			continue;
 		};
-		if primitive_core_reveals_args(p.id) {
+		if crate::primitive::core_reveals_arguments(p.id) {
 			pending.extend(p.arguments.iter().cloned());
 		}
 		if let Some(opened) = crate::theory::can_decompose(p, &scope.km.capabilities, attacker) {
@@ -366,7 +364,7 @@ fn observable(scope: &Scope, observed: &TermSet, v: &Value) -> bool {
 	if observed.contains(v) || public(v, scope.km) {
 		return true;
 	}
-	matches!(v, Value::Primitive(p) if primitive_core_reveals_args(p.id)
+	matches!(v, Value::Primitive(p) if crate::primitive::core_reveals_arguments(p.id)
 		&& p.arguments.iter().all(|arg| observable(scope, observed, arg)))
 }
 
@@ -376,7 +374,7 @@ fn projected(v: &Value) -> Value {
 	};
 	let arguments: Vec<Value> = p.arguments.iter().map(projected).collect();
 	let rebuilt = std::sync::Arc::new(p.with_arguments(arguments));
-	if crate::primitive::primitive_is_projection(p.id) {
+	if crate::primitive::is_projection(p.id) {
 		let (reduced, value) = crate::theory::can_rewrite(&rebuilt);
 		if reduced {
 			return value;
@@ -385,9 +383,9 @@ fn projected(v: &Value) -> Value {
 	Value::Primitive(rebuilt)
 }
 
-fn shared_secret_leaves(scope: &Scope, a: usize, b: usize) -> IdSet<ValueId> {
+fn shared_secret_leaves(scope: &Scope, a: SlotIdx, b: SlotIdx) -> IdSet<ValueId> {
 	let km = scope.km;
-	let of = |slot: usize| {
+	let of = |slot: SlotIdx| {
 		crate::term::subterms(&projected(&crate::protocol::trace::resolve_trace_constant(
 			&km.slots[slot].constant,
 			km,
@@ -427,7 +425,7 @@ fn parts(scope: &Scope, v: &Value) -> Vec<Value> {
 			continue;
 		}
 		if let Value::Primitive(p) = &value
-			&& primitive_core_reveals_args(p.id)
+			&& crate::primitive::core_reveals_arguments(p.id)
 		{
 			pending.extend(p.arguments.iter().cloned());
 		}
@@ -444,7 +442,7 @@ fn withholding(attacker: &AttackerState, of: &Value) -> Vec<bool> {
 	for i in 0..attacker.known.len() {
 		if !dropped[i] {
 			dropped[i] = attacker.derivation(KnownIdx(i)).is_some_and(|derivation| {
-				derivation.ingredients().iter().any(|ingredient| {
+				derivation.ingredients().any(|ingredient| {
 					attacker
 						.knows(ingredient)
 						.is_some_and(|at| dropped[at.get()])
@@ -544,28 +542,22 @@ fn runnable(scope: &Scope, check: &PrimitiveSpec, rule: &RewriteRule, p: &Primit
 	})
 }
 
-type Leaves =
-	Generational<crate::util::generation::Recent<u64, u64, Vec<(Value, Option<Vec<Value>>)>>>;
+type Leaves = Recent<u64, u64, Vec<(Value, Option<Vec<Value>>)>>;
 
 thread_local! {
-	static LEAVES: std::cell::RefCell<Leaves> =
-		std::cell::RefCell::new(Generational::default());
+	static LEAVES: AnalysisLocal<Leaves> = AnalysisLocal::default();
 }
 
 fn origin_leaves(scope: &Scope, v: &Value) -> Option<Vec<Value>> {
 	let key = v.hash_value();
 	let group = scope.attacker.chain;
-	let remembered = LEAVES.with(|memo| {
-		memo.borrow_mut()
-			.fresh()
-			.group(group)
-			.get(&key)
-			.and_then(|bucket| {
-				bucket
-					.iter()
-					.find(|(seen, _)| crate::term::equivalence::structurally_identical(seen, v))
-					.map(|(_, leaves)| leaves.clone())
-			})
+	let remembered = LEAVES.with_current(|memo| {
+		memo.group(group).get(&key).and_then(|bucket| {
+			bucket
+				.iter()
+				.find(|(seen, _)| crate::term::equivalence::structurally_identical(seen, v))
+				.map(|(_, leaves)| leaves.clone())
+		})
 	});
 	if let Some(leaves) = remembered {
 		return leaves;
@@ -599,10 +591,8 @@ fn origin_leaves(scope: &Scope, v: &Value) -> Option<Vec<Value>> {
 			}
 			inside
 		});
-	LEAVES.with(|memo| {
-		memo.borrow_mut()
-			.fresh()
-			.group(group)
+	LEAVES.with_current(|memo| {
+		memo.group(group)
 			.entry(key)
 			.or_default()
 			.push((v.clone(), leaves.clone()));
@@ -618,7 +608,7 @@ fn contents(
 	let Value::Primitive(p) = v else {
 		return None;
 	};
-	let rule = primitive_get(p.id).ok()?.decompose.as_ref()?;
+	let rule = crate::primitive::spec(p.id).ok()?.decompose.as_ref()?;
 	if rule.output.is_some_and(|output| p.output != output) {
 		return None;
 	}
@@ -652,7 +642,7 @@ fn collect_leaves(
 	}
 	expanded.push(v.clone());
 	let Some(used) = can_reconstruct_primitive(p, capabilities, attacker)
-		.map(|r| r.from)
+		.map(|r| r.supplied().to_vec())
 		.or_else(|| can_recompose(p, attacker).map(|r| r.used))
 	else {
 		return held;
@@ -672,7 +662,7 @@ fn push_leaf(out: &mut Vec<Value>, v: &Value) {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::engine::exec::{Installs, execute};
+	use crate::engine::exec::{Install, Installs, execute};
 	use crate::engine::program::Program;
 	use crate::primitive::PRIM_HASH;
 
@@ -687,10 +677,9 @@ mod tests {
 		let km = crate::protocol::sanity::sanity(&model).expect("sane");
 		let program = Program::of(&model, &km);
 		let cx = Context::new(&program, &km);
-		let bob = program.runs.iter().position(|r| r.name == "Bob").unwrap();
+		let bob = program.runs.position(|r| r.name == "Bob").unwrap();
 		let slot = |name: &str| {
 			km.slots
-				.iter()
 				.position(|s| s.constant.name.as_ref() == name)
 				.unwrap()
 		};
@@ -700,7 +689,14 @@ mod tests {
 		let wrap = |v: Value| Value::primitive(PRIM_HASH, vec![v, crate::term::value_nil()], 0);
 		let inner = wrap(y.clone());
 		for value in [y.clone(), wrap(inner.clone())] {
-			let ex = execute(&cx, &vec![(bob, slot("x"), value.clone())]);
+			let ex = execute(
+				&cx,
+				&vec![Install::Value {
+					run: bob,
+					slot: slot("x"),
+					value: value.clone(),
+				}],
+			);
 			assert!(ex.runs[bob].held(slot("x")).unwrap().installed.is_some());
 			assert!(ex.knowledge.state.knows(&s).is_some());
 			let supplied = supplied(&ex);
@@ -708,15 +704,20 @@ mod tests {
 			assert!(supplied.contains(&y));
 			assert!(!supplied.contains(&s));
 			assert_eq!(supplied.contains(&inner), !value.equivalent(&y, true));
-			let (_, _, known) = ex
+			let known = ex
 				.order
 				.iter()
-				.find(|&&(run, step, _)| {
-					run == bob && matches!(program.runs[run].steps[step].event, Event::Recv(_))
+				.find(|taken| {
+					taken.run == bob
+						&& matches!(
+							program.runs[taken.run].steps[taken.step].event,
+							Event::Recv(_)
+						)
 				})
-				.unwrap();
+				.unwrap()
+				.known;
 			assert!(
-				ex.knowledge.state.known[..*known]
+				ex.knowledge.state.known[..known]
 					.iter()
 					.all(|v| !v.equivalent(&s, true) && !v.equivalent(&inner, true))
 			);
@@ -731,18 +732,17 @@ mod tests {
 		let cx = Context::new(&program, &km);
 		let slot = |name: &str| {
 			km.slots
-				.iter()
 				.position(|s| s.constant.name.as_ref() == name)
 				.expect("declared")
 		};
 		let installs: Installs = install
 			.map(|(principal, name)| {
-				let run = program
-					.runs
-					.iter()
-					.position(|r| r.name == principal)
-					.expect("run");
-				(run, slot(name), crate::term::value_nil())
+				let run = program.runs.position(|r| r.name == principal).expect("run");
+				Install::Value {
+					run,
+					slot: slot(name),
+					value: crate::term::value_nil(),
+				}
 			})
 			.into_iter()
 			.collect();

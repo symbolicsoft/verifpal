@@ -3,10 +3,7 @@
 
 use std::sync::Arc;
 
-use crate::primitive::{
-	CombineBinding, CombineRule, RewriteRule, combine_rules, primitive_core_get, primitive_get,
-	primitive_is_core, recompose_rule,
-};
+use crate::primitive::{CombineBinding, CombineRule, RewriteRule, combine_rules, recompose_rule};
 use crate::term::equivalence::equivalent_primitives;
 use crate::term::{Primitive, PrimitiveId, Value};
 use crate::util::IdSet;
@@ -55,7 +52,7 @@ pub(crate) fn reduce_once(v: &Value) -> Value {
 }
 
 pub(crate) fn can_rewrite(p: &Arc<Primitive>) -> (bool, Value) {
-	let (rewritten, value) = match p.hash.reduct() {
+	let (rewritten, value) = match p.cache().reduct() {
 		Some(hit) => hit,
 		None => {
 			let (rewritten, value) = can_rewrite_uncached(p);
@@ -63,7 +60,7 @@ pub(crate) fn can_rewrite(p: &Arc<Primitive>) -> (bool, Value) {
 				Value::Primitive(output) if Arc::ptr_eq(p, &output) => None,
 				value => Some(value),
 			};
-			p.hash.set_reduct((rewritten, value))
+			p.cache().set_reduct((rewritten, value))
 		}
 	};
 	(
@@ -92,8 +89,8 @@ fn can_rewrite_uncached(p: &Arc<Primitive>) -> (bool, Value) {
 		return (true, rewritten_or_original(&combined));
 	}
 	let wrap = || Value::Primitive(Arc::clone(pc));
-	if primitive_is_core(pc.id) {
-		let prim = match primitive_core_get(pc.id) {
+	if crate::primitive::is_core(pc.id) {
+		let prim = match crate::primitive::core_spec(pc.id) {
 			Ok(s) => s,
 			Err(_) => return (false, wrap()),
 		};
@@ -102,7 +99,7 @@ fn can_rewrite_uncached(p: &Arc<Primitive>) -> (bool, Value) {
 		}
 		return (!prim.definition_check, wrap());
 	}
-	let prim = match primitive_get(pc.id) {
+	let prim = match crate::primitive::spec(pc.id) {
 		Ok(s) => s,
 		Err(_) => return (false, wrap()),
 	};
@@ -210,10 +207,10 @@ pub(super) fn combine_with(p: &Primitive, rule: &CombineRule) -> Option<Value> {
 }
 
 fn can_rebuild(p: &Primitive) -> Option<Value> {
-	if primitive_is_core(p.id) {
+	if crate::primitive::is_core(p.id) {
 		return None;
 	}
-	let rule = primitive_get(p.id).ok()?.rebuild.as_ref()?;
+	let rule = crate::primitive::spec(p.id).ok()?.rebuild.as_ref()?;
 	let shares = shares_of_one_split(&p.arguments, rule.id)?;
 	Some(shares[0].arguments[rule.reveal].clone())
 }

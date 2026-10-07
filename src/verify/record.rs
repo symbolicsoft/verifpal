@@ -14,14 +14,14 @@ pub(crate) fn record_verdict(ctx: &VerifyContext, result: &VerifyResult, verdict
 		}
 		let headline = crate::syntax::pretty::query_line(&result.query);
 		let qualifier = result.subtype.map(Subtype::qualifier).unwrap_or_default();
-		crate::console::info_analysis_result(&headline, || {
+		crate::console::analysis_result(&headline, || {
 			format!("{}{}{}", headline, qualifier, result.summary)
 		});
 	}
 }
 
 fn note_origin_only(query: &Query) {
-	crate::console::info_message(
+	crate::console::message(
 		&format!(
 			"{} reports a duplicate that {} cannot rule out on its own: it contributes \
 			 nothing to {} before accepting it, so any run of it takes the same message \

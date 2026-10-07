@@ -6,7 +6,7 @@ use std::sync::Arc;
 use super::sanity::{
 	sanity_assignment_constants, sanity_message_principals, sanity_primitive, unknown_constant,
 };
-use super::{LeakEvent, ProtocolTrace, SendEvent, TraceSlot};
+use super::{LeakEvent, ProtocolTrace, SendEvent, SlotIdx, TraceSlot};
 use crate::primitive::CapabilityIndex;
 use crate::syntax::names::{ATTACKER_ID, base_name};
 use crate::syntax::{
@@ -29,7 +29,7 @@ fn declared_as(c: &Constant) -> String {
 	}
 }
 
-fn holders_of(trace: &ProtocolTrace, idx: usize) -> String {
+fn holders_of(trace: &ProtocolTrace, idx: SlotIdx) -> String {
 	let slot = &trace.slots[idx];
 	let mut names: Vec<String> = vec![base_name(trace.principal_name(slot.creator)).to_string()];
 	for &(recipient, _) in &slot.known_by {
@@ -330,10 +330,11 @@ fn construct_trace_render_knows(
 	Ok(())
 }
 
-fn trace_declare(trace: &mut ProtocolTrace, slot: TraceSlot) -> usize {
-	trace.index.insert(slot.constant.id, trace.slots.len());
-	trace.slots.push(slot);
-	trace.slots.len() - 1
+fn trace_declare(trace: &mut ProtocolTrace, slot: TraceSlot) -> SlotIdx {
+	let id = slot.constant.id;
+	let at = trace.slots.push(slot);
+	trace.index.insert(id, at);
+	at
 }
 
 fn declare_by(
@@ -343,7 +344,7 @@ fn declare_by(
 	declared_at: i32,
 	initial_value: Value,
 	constant: Constant,
-) -> usize {
+) -> SlotIdx {
 	trace_declare(
 		trace,
 		TraceSlot {
@@ -396,7 +397,7 @@ fn model_declarations(m: &Model) -> Declarations {
 	out
 }
 
-fn trace_slot_of(trace: &ProtocolTrace, declared: &Declarations, c: &Constant) -> VResult<usize> {
+fn trace_slot_of(trace: &ProtocolTrace, declared: &Declarations, c: &Constant) -> VResult<SlotIdx> {
 	if let Some(idx) = trace.index_of(c) {
 		return Ok(idx);
 	}
@@ -638,7 +639,7 @@ fn construct_trace_render_message(
 
 #[cfg(test)]
 mod tests {
-	use crate::protocol::ProtocolTrace;
+	use crate::protocol::{ProtocolTrace, SlotIdx};
 	use crate::syntax::Qualifier;
 
 	const SRC: &str = "attacker[active]\n\
@@ -678,9 +679,8 @@ mod tests {
 		assert!(trace.capabilities.is_empty());
 	}
 
-	fn slot(km: &ProtocolTrace, name: &str) -> usize {
+	fn slot(km: &ProtocolTrace, name: &str) -> SlotIdx {
 		km.slots
-			.iter()
 			.position(|s| &*s.constant.name == name)
 			.unwrap_or_else(|| panic!("no slot named {name}"))
 	}
@@ -688,7 +688,7 @@ mod tests {
 	#[test]
 	fn every_trace_opens_with_the_built_in_nil_every_principal_holds() {
 		let km = fixture();
-		let nil = &km.slots[0];
+		let nil = km.slots.iter().next().expect("nil");
 		assert!(nil.constant.is_nil());
 		assert_eq!(nil.constant.qualifier, Some(Qualifier::Public));
 		for &pid in &km.principal_ids {

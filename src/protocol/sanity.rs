@@ -2,11 +2,8 @@
  * SPDX-License-Identifier: GPL-3.0-only */
 
 use super::construct::construct_protocol_trace;
-use super::{ProtocolTrace, TraceSlot};
-use crate::primitive::{
-	argument_restrictions, primitive_arity_help, primitive_checkable_names, primitive_name,
-	primitive_output_spec, primitive_projects, primitive_signature,
-};
+use super::{ProtocolTrace, SlotIdx, TraceSlot};
+use crate::primitive::argument_restrictions;
 use crate::syntax::names::base_name;
 use crate::syntax::pretty::{pretty_arity, pretty_constants};
 use crate::syntax::{
@@ -48,8 +45,8 @@ fn restriction_note(outer: PrimitiveId, inner: PrimitiveId, position: usize) -> 
 		Some(note) => note.to_string(),
 		None => format!(
 			"the term space stays finite only if `{}` is never applied on top of `{}` here",
-			primitive_name(outer),
-			primitive_name(inner)
+			crate::primitive::name(outer),
+			crate::primitive::name(inner)
 		),
 	}
 }
@@ -98,7 +95,7 @@ fn sanity_capabilities_value(v: &Value, km: &ProtocolTrace) -> VResult<()> {
 				format!(
 					"`{}` on {} comes into force at phase {}, which the model never reaches",
 					cap.name(),
-					crate::primitive::primitive_name(p.id),
+					crate::primitive::name(p.id),
 					onset
 				)
 				.into(),
@@ -173,20 +170,27 @@ pub(crate) fn sanity_assignment_constants(
 			}
 		}
 		Value::Primitive(p) => {
-			let arity = crate::primitive::primitive_def(p.id)?.arity();
+			let arity = crate::primitive::definition(p.id)?.arity();
 			let arg_count = p.arguments.len() as i32;
 			if arg_count == 0 {
 				return Err(VerifpalError::sanity(
-					format!("`{}` is called with no arguments", primitive_name(p.id)).into(),
+					format!(
+						"`{}` is called with no arguments",
+						crate::primitive::name(p.id)
+					)
+					.into(),
 				)
-				.narrow(primitive_name(p.id))
-				.note(format!("its signature is `{}`", primitive_signature(p.id))));
+				.narrow(crate::primitive::name(p.id))
+				.note(format!(
+					"its signature is `{}`",
+					crate::primitive::signature(p.id)
+				)));
 			}
 			if !arity.contains(&arg_count) {
 				let err = VerifpalError::sanity(
 					format!(
 						"`{}` takes {} argument{}, but {} {} given",
-						primitive_name(p.id),
+						crate::primitive::name(p.id),
 						pretty_arity(arity),
 						if arity == [1] { "" } else { "s" },
 						arg_count,
@@ -194,9 +198,12 @@ pub(crate) fn sanity_assignment_constants(
 					)
 					.into(),
 				)
-				.narrow(primitive_name(p.id))
-				.note(format!("its signature is `{}`", primitive_signature(p.id)));
-				return Err(match primitive_arity_help(p.id, arg_count) {
+				.narrow(crate::primitive::name(p.id))
+				.note(format!(
+					"its signature is `{}`",
+					crate::primitive::signature(p.id)
+				));
+				return Err(match crate::primitive::arity_help(p.id, arg_count) {
 					Some(help) => err.help(help),
 					None => err,
 				});
@@ -210,20 +217,23 @@ pub(crate) fn sanity_assignment_constants(
 }
 
 pub(crate) fn sanity_primitive(p: &Primitive, outputs: &[Constant]) -> VResult<()> {
-	let (output, definition_check) = primitive_output_spec(p.id)?;
+	let (output, definition_check) = crate::primitive::output_spec(p.id)?;
 	if !output.contains(&(outputs.len() as i32)) {
 		return Err(VerifpalError::sanity(
 			format!(
 				"`{}` produces {} outputs, but {} constant{} bound here",
-				primitive_name(p.id),
+				crate::primitive::name(p.id),
 				pretty_arity(output),
 				outputs.len(),
 				if outputs.len() == 1 { " is" } else { "s are" }
 			)
 			.into(),
 		)
-		.narrow(primitive_name(p.id))
-		.note(format!("its signature is `{}`", primitive_signature(p.id)))
+		.narrow(crate::primitive::name(p.id))
+		.note(format!(
+			"its signature is `{}`",
+			crate::primitive::signature(p.id)
+		))
 		.help(format!(
 			"bind {} on the left of the `=`, e.g. `{} = {}(…)`",
 			match output.first() {
@@ -235,14 +245,14 @@ pub(crate) fn sanity_primitive(p: &Primitive, outputs: &[Constant]) -> VResult<(
 				.map(|i| format!("out{}", i + 1))
 				.collect::<Vec<String>>()
 				.join(", "),
-			primitive_name(p.id)
+			crate::primitive::name(p.id)
 		)));
 	}
-	if crate::primitive::primitive_threshold(p.id).is_some() && p.threshold > outputs.len() {
+	if crate::primitive::threshold(p.id).is_some() && p.threshold > outputs.len() {
 		return Err(VerifpalError::sanity(
 			format!(
 				"`{}[{}]` needs at least {} shares, but {} {} bound here",
-				primitive_name(p.id),
+				crate::primitive::name(p.id),
 				p.threshold,
 				p.threshold,
 				outputs.len(),
@@ -250,7 +260,7 @@ pub(crate) fn sanity_primitive(p: &Primitive, outputs: &[Constant]) -> VResult<(
 			)
 			.into(),
 		)
-		.narrow(primitive_name(p.id))
+		.narrow(crate::primitive::name(p.id))
 		.note(
 			"the threshold is how many shares recover the secret, so it cannot exceed the number of shares",
 		)
@@ -261,12 +271,16 @@ pub(crate) fn sanity_primitive(p: &Primitive, outputs: &[Constant]) -> VResult<(
 	}
 	if p.instance_check && !definition_check {
 		return Err(VerifpalError::sanity(
-			format!("`{}` cannot be checked with `?`", primitive_name(p.id)).into(),
+			format!(
+				"`{}` cannot be checked with `?`",
+				crate::primitive::name(p.id)
+			)
+			.into(),
 		)
-		.narrow(primitive_name(p.id))
+		.narrow(crate::primitive::name(p.id))
 		.note(format!(
 			"only a primitive that can fail may be checked: {}",
-			quoted_list(&primitive_checkable_names())
+			quoted_list(&crate::primitive::checkable_names())
 		))
 		.help("remove the `?`"));
 	}
@@ -311,7 +325,7 @@ pub(crate) fn unknown_constant(c: &Constant, km: &ProtocolTrace) -> VerifpalErro
 		.suggest(did_you_mean(&c.name, trace_constant_names(km)))
 }
 
-fn slot_of(c: &Constant, km: &ProtocolTrace) -> VResult<usize> {
+fn slot_of(c: &Constant, km: &ProtocolTrace) -> VResult<SlotIdx> {
 	km.index_of(c).ok_or_else(|| unknown_constant(c, km))
 }
 
@@ -540,8 +554,7 @@ fn sanity_queries_check_known(
 fn sanity_declared_principals(m: &Model) -> VResult<(Vec<String>, Vec<PrincipalId>)> {
 	let mut declared_names: Vec<String> = vec![];
 	let mut declared_ids: Vec<PrincipalId> = vec![];
-	let mut principals: Vec<PrincipalId> = vec![];
-	let mut seen_names: Vec<(PrincipalId, String, Span)> = vec![];
+	let mut mentions = Mentions::default();
 	for block in &m.blocks {
 		if let Block::Principal(p) = block {
 			if p.id == crate::syntax::names::ATTACKER_ID
@@ -556,84 +569,18 @@ fn sanity_declared_principals(m: &Model) -> VResult<(Vec<String>, Vec<PrincipalI
 				.labelled("this name belongs to the protocol attacker")
 				.help("choose a role name other than `Attacker`"));
 			}
-			seen_names.push((p.id, p.name.clone(), p.span));
-			append_unique(&mut principals, p.id);
+			mentions.note(p.id, p.name.clone(), p.span);
 			append_unique(&mut declared_names, p.name.clone());
 			append_unique(&mut declared_ids, p.id);
 		}
 	}
-	for block in &m.blocks {
-		if let Block::Message(msg) = block {
-			seen_names.push((msg.sender, msg.sender_name.to_string(), msg.span));
-			seen_names.push((msg.recipient, msg.recipient_name.to_string(), msg.span));
-			append_unique(&mut principals, msg.sender);
-			append_unique(&mut principals, msg.recipient);
-		}
-	}
-	for query in &m.queries {
-		if query.kind == QueryKind::Authentication {
-			seen_names.push((
-				query.message.sender,
-				query.message.sender_name.to_string(),
-				query.span,
-			));
-			seen_names.push((
-				query.message.recipient,
-				query.message.recipient_name.to_string(),
-				query.span,
-			));
-			append_unique(&mut principals, query.message.sender);
-			append_unique(&mut principals, query.message.recipient);
-		}
-		for option in &query.options {
-			seen_names.push((
-				option.message.sender,
-				option.message.sender_name.to_string(),
-				option.message.span,
-			));
-			seen_names.push((
-				option.message.recipient,
-				option.message.recipient_name.to_string(),
-				option.message.span,
-			));
-			append_unique(&mut principals, option.message.sender);
-			append_unique(&mut principals, option.message.recipient);
-		}
-	}
-	for &p in &principals {
-		if !declared_ids.contains(&p) {
-			let (name, span) = seen_names
-				.iter()
-				.find(|(id, _, _)| *id == p)
-				.map(|(_, name, span)| (base_name(name).to_string(), *span))
-				.unwrap_or_default();
-			let declared: Vec<&str> = declared_names
-				.iter()
-				.map(|n| base_name(n))
-				.collect::<std::collections::BTreeSet<&str>>()
-				.into_iter()
-				.collect();
-			return Err(VerifpalError::sanity(
-				format!("`{}` is never declared as a principal", name).into(),
-			)
-			.at(span)
-			.narrow(name.clone())
-			.labelled("no block declares this principal")
-			.note(format!(
-				"this model declares {}",
-				quoted_list(
-					&declared
-						.iter()
-						.map(|n| (*n).to_string())
-						.collect::<Vec<String>>()
-				)
-			))
-			.help(format!(
-				"add a block for it, e.g. `principal {}[ … ]`",
-				name
-			))
-			.suggest(did_you_mean(&name, declared)));
-		}
+	mentions.note_uses(m);
+	if let Some(&p) = mentions
+		.principals
+		.iter()
+		.find(|p| !declared_ids.contains(p))
+	{
+		return Err(mentions.undeclared(p, &declared_names));
 	}
 	if declared_names.is_empty() {
 		return Err(
@@ -663,10 +610,89 @@ fn sanity_declared_principals(m: &Model) -> VResult<(Vec<String>, Vec<PrincipalI
 	Ok((declared_names, declared_ids))
 }
 
+#[derive(Default)]
+struct Mentions {
+	principals: Vec<PrincipalId>,
+	seen: Vec<(PrincipalId, String, Span)>,
+}
+
+impl Mentions {
+	fn note(&mut self, id: PrincipalId, name: String, span: Span) {
+		self.seen.push((id, name, span));
+		append_unique(&mut self.principals, id);
+	}
+
+	fn note_uses(&mut self, m: &Model) {
+		for block in &m.blocks {
+			if let Block::Message(msg) = block {
+				self.note(msg.sender, msg.sender_name.to_string(), msg.span);
+				self.note(msg.recipient, msg.recipient_name.to_string(), msg.span);
+			}
+		}
+		for query in &m.queries {
+			if query.kind == QueryKind::Authentication {
+				let message = &query.message;
+				self.note(message.sender, message.sender_name.to_string(), query.span);
+				self.note(
+					message.recipient,
+					message.recipient_name.to_string(),
+					query.span,
+				);
+			}
+			for option in &query.options {
+				let message = &option.message;
+				self.note(
+					message.sender,
+					message.sender_name.to_string(),
+					message.span,
+				);
+				self.note(
+					message.recipient,
+					message.recipient_name.to_string(),
+					message.span,
+				);
+			}
+		}
+	}
+
+	fn undeclared(&self, p: PrincipalId, declared_names: &[String]) -> VerifpalError {
+		let (name, span) = self
+			.seen
+			.iter()
+			.find(|(id, _, _)| *id == p)
+			.map(|(_, name, span)| (base_name(name).to_string(), *span))
+			.unwrap_or_default();
+		let declared: Vec<&str> = declared_names
+			.iter()
+			.map(|n| base_name(n))
+			.collect::<std::collections::BTreeSet<&str>>()
+			.into_iter()
+			.collect();
+		VerifpalError::sanity(format!("`{}` is never declared as a principal", name).into())
+			.at(span)
+			.narrow(name.clone())
+			.labelled("no block declares this principal")
+			.note(format!(
+				"this model declares {}",
+				quoted_list(
+					&declared
+						.iter()
+						.map(|n| (*n).to_string())
+						.collect::<Vec<String>>()
+				)
+			))
+			.help(format!(
+				"add a block for it, e.g. `principal {}[ … ]`",
+				name
+			))
+			.suggest(did_you_mean(&name, declared))
+	}
+}
+
 pub(crate) const MAX_PRINCIPALS: usize = 128;
 
 fn checked_examples() -> String {
-	primitive_checkable_names()
+	crate::primitive::checkable_names()
 		.iter()
 		.take(2)
 		.map(|name| format!("`{}(…)?`", name))
@@ -675,7 +701,7 @@ fn checked_examples() -> String {
 }
 
 fn split_beyond_concat(p: &Primitive) -> Option<VerifpalError> {
-	let tuple = primitive_projects(p.id)?;
+	let tuple = crate::primitive::projects(p.id)?;
 	let Some(Value::Primitive(inner)) = p.arguments.first() else {
 		return None;
 	};
@@ -694,7 +720,7 @@ fn split_beyond_concat(p: &Primitive) -> Option<VerifpalError> {
 			)
 			.into(),
 		)
-		.narrow(primitive_name(p.id))
+		.narrow(crate::primitive::name(p.id))
 		.labelled("this projection has no field to take")
 		.note(format!(
 			"`{}` packs {} field{}, so only that many constants can be bound on \
@@ -711,9 +737,13 @@ fn split_beyond_concat(p: &Primitive) -> Option<VerifpalError> {
 pub(crate) fn honest_check_failure(p: &Primitive) -> VerifpalError {
 	split_beyond_concat(p).unwrap_or_else(|| {
 		VerifpalError::sanity(
-			format!("`{}` cannot succeed as written", primitive_name(p.id)).into(),
+			format!(
+				"`{}` cannot succeed as written",
+				crate::primitive::name(p.id)
+			)
+			.into(),
 		)
-		.narrow(primitive_name(p.id))
+		.narrow(crate::primitive::name(p.id))
 		.labelled("this check fails in the honest run")
 		.note(format!(
 			"`{}` is checked with `?`, so the principal halts when it fails; \
@@ -733,21 +763,21 @@ fn sanity_check_primitive_arguments(p: &Primitive) -> VResult<()> {
 		let Value::Primitive(arg_prim) = arg else {
 			continue;
 		};
-		let (output, _) = primitive_output_spec(arg_prim.id)?;
+		let (output, _) = crate::primitive::output_spec(arg_prim.id)?;
 		if !output.contains(&1) {
 			return Err(VerifpalError::sanity(
 				format!(
 					"`{}` produces more than one output, so it cannot be an \
 					 argument to `{}`",
-					primitive_name(arg_prim.id),
-					primitive_name(p.id)
+					crate::primitive::name(arg_prim.id),
+					crate::primitive::name(p.id)
 				)
 				.into(),
 			)
-			.narrow(primitive_name(arg_prim.id))
+			.narrow(crate::primitive::name(arg_prim.id))
 			.note(format!(
 				"`{}` has to be bound first, so that each of its outputs has a name",
-				primitive_name(arg_prim.id)
+				crate::primitive::name(arg_prim.id)
 			))
 			.help(format!(
 				"assign it on its own line, e.g. `{} = {}` and then pass those names",
@@ -762,24 +792,24 @@ fn sanity_check_primitive_arguments(p: &Primitive) -> VResult<()> {
 			return Err(VerifpalError::sanity(
 				format!(
 					"`{}` is checked with `?` inside another primitive",
-					primitive_name(arg_prim.id)
+					crate::primitive::name(arg_prim.id)
 				)
 				.into(),
 			)
-			.narrow(primitive_name(arg_prim.id))
+			.narrow(crate::primitive::name(arg_prim.id))
 			.labelled("this check can never halt the principal")
 			.note(format!(
 				"`?` halts the principal at the declaration it heads, and only the \
 				 outermost primitive of an assignment heads one; here `{}` is an \
 				 argument to `{}`",
-				primitive_name(arg_prim.id),
-				primitive_name(p.id)
+				crate::primitive::name(arg_prim.id),
+				crate::primitive::name(p.id)
 			))
 			.help(format!(
 				"bind it on its own line first, e.g. `checked = {}`, and pass \
 				 `checked` to `{}`",
 				arg_prim,
-				primitive_name(p.id)
+				crate::primitive::name(p.id)
 			)));
 		}
 		sanity_check_primitive_arguments(arg_prim)?;
@@ -799,17 +829,17 @@ pub(crate) fn sanity_check_argument_restrictions(value: &Value) -> VResult<()> {
 				return Err(VerifpalError::sanity(
 					format!(
 						"`{}` cannot take `{}` as its {} argument",
-						primitive_name(p.id),
-						primitive_name(inner.id),
+						crate::primitive::name(p.id),
+						crate::primitive::name(inner.id),
 						ordinal(restriction.position + 1)
 					)
 					.into(),
 				)
-				.narrow(primitive_name(inner.id))
+				.narrow(crate::primitive::name(inner.id))
 				.note(restriction_note(p.id, inner.id, restriction.position))
 				.help(format!(
 					"pass a value the principal holds directly; the signature is `{}`",
-					primitive_signature(p.id)
+					crate::primitive::signature(p.id)
 				)));
 			}
 		}
@@ -820,7 +850,7 @@ pub(crate) fn sanity_check_argument_restrictions(value: &Value) -> VResult<()> {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::primitive::{PRIM_HASH, primitive_get_enum};
+	use crate::primitive::PRIM_HASH;
 	use crate::testing::*;
 
 	#[test]
@@ -848,11 +878,11 @@ mod tests {
 	}
 
 	fn pubkey(inner: Value) -> Value {
-		make_primitive(primitive_get_enum("PUBKEY").unwrap(), vec![inner], 0)
+		make_primitive(crate::primitive::id_of("PUBKEY").unwrap(), vec![inner], 0)
 	}
 
 	fn dh_kex(a: Value, b: Value) -> Value {
-		make_primitive(primitive_get_enum("DH_KEX").unwrap(), vec![a, b], 0)
+		make_primitive(crate::primitive::id_of("DH_KEX").unwrap(), vec![a, b], 0)
 	}
 
 	#[test]
@@ -865,14 +895,18 @@ mod tests {
 
 	fn kem_encap(ek: Value, r: Value, output: usize) -> Value {
 		make_primitive(
-			primitive_get_enum("KEM_ENCAP").unwrap(),
+			crate::primitive::id_of("KEM_ENCAP").unwrap(),
 			vec![ek, r],
 			output,
 		)
 	}
 
 	fn kem_decap(dk: Value, ct: Value) -> Value {
-		make_primitive(primitive_get_enum("KEM_DECAP").unwrap(), vec![dk, ct], 0)
+		make_primitive(
+			crate::primitive::id_of("KEM_DECAP").unwrap(),
+			vec![dk, ct],
+			0,
+		)
 	}
 
 	#[test]

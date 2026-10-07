@@ -1,7 +1,6 @@
 /* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
  * SPDX-License-Identifier: GPL-3.0-only */
 
-use std::fmt;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -10,38 +9,19 @@ use crate::term::Value;
 use crate::util::IdMap;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct SlotIdx(pub usize);
-
-impl SlotIdx {
-	pub fn get(self) -> usize {
-		self.0
-	}
-}
-
-impl fmt::Display for SlotIdx {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		write!(f, "{}", self.0)
-	}
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct KnownIdx(pub usize);
+pub(crate) struct KnownIdx(pub usize);
 
 impl KnownIdx {
-	pub fn get(self) -> usize {
+	pub(crate) fn get(self) -> usize {
 		self.0
 	}
 }
 
 #[derive(Clone, Debug)]
-pub enum DerivationRecord {
+pub(crate) enum DerivationRecord {
 	Initial,
-	Leaked {
-		slot: SlotIdx,
-	},
-	Obtained {
-		slot: SlotIdx,
-	},
+	Leaked,
+	Obtained,
 	Decomposed {
 		of: Value,
 		using: Vec<Value>,
@@ -53,7 +33,6 @@ pub enum DerivationRecord {
 		from: Vec<Value>,
 	},
 	Recomposed {
-		of: Value,
 		using: Vec<Value>,
 	},
 	Fragment {
@@ -62,7 +41,6 @@ pub enum DerivationRecord {
 	Rewritten {
 		of: Value,
 		using: Vec<Value>,
-		built: bool,
 	},
 	Broken {
 		of: Value,
@@ -80,46 +58,60 @@ pub enum DerivationRecord {
 }
 
 impl DerivationRecord {
-	pub fn ingredients(&self) -> Vec<&Value> {
+	fn parts(&self) -> ([&[Value]; 2], &[Value]) {
+		const NONE: &[Value] = &[];
 		match self {
-			DerivationRecord::Decomposed { of, using } => {
-				let mut v = vec![of];
-				v.extend(using.iter());
-				v
-			}
+			DerivationRecord::Decomposed { of, using } => ([std::slice::from_ref(of), NONE], using),
 			DerivationRecord::Recomposed { using, .. }
-			| DerivationRecord::Rewritten { using, .. } => using.iter().collect(),
-			DerivationRecord::Broken {
-				of,
+			| DerivationRecord::Rewritten { using, .. }
+			| DerivationRecord::Broken {
+				capability: Capability::Forgeable,
 				using,
-				capability,
-			} => {
-				let mut v = Vec::new();
-				if matches!(capability, Capability::Weak | Capability::Malleable) {
-					v.push(of);
-				}
-				v.extend(using.iter());
-				v
+				..
+			} => ([NONE, NONE], using),
+			DerivationRecord::Broken { of, using, .. } => ([std::slice::from_ref(of), NONE], using),
+			DerivationRecord::Reused { of, with } => {
+				([std::slice::from_ref(of), std::slice::from_ref(with)], NONE)
 			}
-			DerivationRecord::Reused { of, with } => vec![of, with],
-			DerivationRecord::ReusedForge { with, using } => {
-				let mut v: Vec<&Value> = with.iter().collect();
-				v.extend(using.iter());
-				v
-			}
+			DerivationRecord::ReusedForge { with, using } => ([with, NONE], using),
 			DerivationRecord::Reconstructed { from } | DerivationRecord::Combined { from } => {
-				from.iter().collect()
+				([NONE, NONE], from)
 			}
-			DerivationRecord::Fragment { of } => vec![of],
-			DerivationRecord::Initial
-			| DerivationRecord::Leaked { .. }
-			| DerivationRecord::Obtained { .. } => vec![],
+			DerivationRecord::Fragment { of } => ([std::slice::from_ref(of), NONE], NONE),
+			DerivationRecord::Initial | DerivationRecord::Leaked | DerivationRecord::Obtained => {
+				([NONE, NONE], NONE)
+			}
 		}
+	}
+
+	pub(crate) fn ingredients(&self) -> impl Iterator<Item = &Value> {
+		let ([first, second], supplied) = self.parts();
+		first.iter().chain(second).chain(supplied)
+	}
+
+	pub(crate) fn recipe(&self) -> impl Iterator<Item = &Value> {
+		let ([first, second], supplied) = self.parts();
+		supplied.iter().chain(first).chain(second)
+	}
+
+	pub(crate) fn supplied(&self) -> &[Value] {
+		self.parts().1
+	}
+
+	pub(crate) fn forged(&self) -> bool {
+		matches!(
+			self,
+			DerivationRecord::ReusedForge { .. }
+				| DerivationRecord::Broken {
+					capability: Capability::Forgeable | Capability::Malleable,
+					..
+				}
+		)
 	}
 }
 
 #[derive(Clone, Debug)]
-pub struct AttackerState {
+pub(crate) struct AttackerState {
 	pub current_phase: i32,
 	pub known: Arc<Vec<Value>>,
 	pub known_map: Arc<IdMap<u64, Vec<usize>>>,
@@ -147,23 +139,12 @@ impl Default for AttackerState {
 	}
 }
 
-pub struct DecomposeResult {
+pub(crate) struct DecomposeResult {
 	pub revealed: Vec<Value>,
 	pub used: Vec<Value>,
 }
 
-pub enum Forged {
-	Assumption { capability: Capability, of: Value },
-	Reuse([Value; 2]),
-}
-
-pub struct ReconstructResult {
-	pub from: Vec<Value>,
-	pub forged: Option<Forged>,
-	pub combined: bool,
-}
-
-pub struct RecomposeResult {
+pub(crate) struct RecomposeResult {
 	pub revealed: Value,
 	pub used: Vec<Value>,
 }
@@ -202,15 +183,15 @@ impl AttackerState {
 		})
 	}
 
-	pub fn derivation(&self, idx: KnownIdx) -> Option<&DerivationRecord> {
+	pub(crate) fn derivation(&self, idx: KnownIdx) -> Option<&DerivationRecord> {
 		self.derivations.get(idx.get())
 	}
 
-	pub fn knows(&self, v: &Value) -> Option<KnownIdx> {
+	pub(crate) fn knows(&self, v: &Value) -> Option<KnownIdx> {
 		self.knows_hashed(v, v.hash_value())
 	}
 
-	pub fn knows_hashed(&self, v: &Value, h: u64) -> Option<KnownIdx> {
+	pub(crate) fn knows_hashed(&self, v: &Value, h: u64) -> Option<KnownIdx> {
 		self.known_map
 			.get(&h)?
 			.iter()
@@ -244,12 +225,12 @@ mod tests {
 			of: e1.clone(),
 			with: e2.clone(),
 		};
-		assert_eq!(reuse.ingredients().len(), 2);
+		assert_eq!(reuse.ingredients().count(), 2);
 		let forged = DerivationRecord::ReusedForge {
 			with: [e1, e2],
 			using: vec![ad],
 		};
-		assert_eq!(forged.ingredients().len(), 3);
+		assert_eq!(forged.ingredients().count(), 3);
 	}
 
 	#[test]

@@ -48,7 +48,6 @@ fn golden_run() -> Run {
 		subtype: None,
 		steps: vec![],
 		preconditions: vec!["Bob still sends ack to Alice, so the failure counts.".to_string()],
-		notes: vec![],
 		generated: false,
 		variants: 1,
 	};
@@ -119,7 +118,6 @@ fn golden_run() -> Run {
 		subtype: None,
 		steps: vec![],
 		preconditions: vec![],
-		notes: vec![],
 		generated: false,
 		variants: 1,
 	};

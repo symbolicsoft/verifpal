@@ -13,34 +13,45 @@ mod worklist;
 
 use std::sync::Arc;
 
-use super::exec::{Context, Execution, Installs, UNSTARTED, install_at};
+use super::exec::{Context, Execution, Install, Installs, install_at};
 use super::knowledge::{Knowledge, Origin};
-use super::program::Event;
+use super::program::{DeliveryIdx, Event, RunIdx, StepIdx};
+use crate::protocol::SlotIdx;
 use crate::solve::symbolic;
 use crate::syntax::QueryKind;
 use crate::term::Value;
 use crate::theory::AttackerState;
 use crate::theory::attacker::next_chain;
+use crate::util::index::{Idx, IndexVec, index_type};
 use crate::util::{IdMap, IdSet};
 use crate::verify::context::VerifyContext;
 
+index_type!(
+	struct NodeIdx;
+);
+index_type!(
+	struct AttemptIdx;
+);
+
+const HONEST_NODE: NodeIdx = NodeIdx(0);
+
 struct Node {
 	installs: Installs,
-	held: Vec<Vec<HeldValue>>,
-	sent: Vec<Option<Vec<Value>>>,
+	held: IndexVec<RunIdx, Vec<HeldValue>>,
+	sent: IndexVec<DeliveryIdx, Option<Vec<Value>>>,
 	knowledge: Vec<Arc<AttackerState>>,
 	memo: std::cell::RefCell<crate::theory::SavedMemo>,
 }
 
 struct HeldValue {
-	slot: usize,
+	slot: SlotIdx,
 	value: Value,
 	received: bool,
 	installed: bool,
 }
 
 impl Node {
-	fn of(installs: Installs, ex: &Execution, queried: &IdSet<usize>) -> Self {
+	fn of(installs: Installs, ex: &Execution, queried: &IdSet<SlotIdx>) -> Self {
 		Self {
 			installs,
 			held: ex
@@ -48,8 +59,7 @@ impl Node {
 				.iter()
 				.map(|run| {
 					run.env
-						.iter()
-						.enumerate()
+						.iter_enumerated()
 						.filter_map(|(slot, held)| {
 							let held = held.as_ref()?;
 							(held.sender.is_some() || queried.contains(&slot)).then(|| HeldValue {
@@ -90,7 +100,7 @@ impl Node {
 		}
 	}
 
-	fn held(&self, run: usize, slot: usize) -> Option<&HeldValue> {
+	fn held(&self, run: RunIdx, slot: SlotIdx) -> Option<&HeldValue> {
 		let values = &self.held[run];
 		values
 			.binary_search_by_key(&slot, |held| held.slot)
@@ -113,54 +123,89 @@ impl Node {
 pub(crate) struct Search<'a, 'b> {
 	ctx: &'a VerifyContext,
 	cx: &'a Context<'b>,
-	relevant: Vec<usize>,
-	queried: IdSet<usize>,
 	honest: Execution,
-	nodes: Vec<Node>,
-	union: Knowledge,
+	facts: Facts,
+	nodes: IndexVec<NodeIdx, Node>,
+	union: Union,
+	attempts: Attempts,
+	retries: Retries,
+	memo: Memo,
+	log: Log,
+}
+
+struct Facts {
+	relevant: IndexVec<RunIdx, StepIdx>,
+	queried: IdSet<SlotIdx>,
+	receivers: IndexVec<SlotIdx, Vec<RunIdx>>,
+	honest_at: IdMap<(RunIdx, StepIdx), usize>,
+}
+
+struct Union {
+	knowledge: Knowledge,
 	honest_known: usize,
-	by_cost: Vec<Vec<Vec<usize>>>,
+	by_cost: Vec<Vec<Vec<NodeIdx>>>,
 	closed: Knowledge,
-	closed_at: (usize, usize),
-	tried: Tried<Attempt>,
-	pending: Vec<usize>,
-	probed: Tried,
+	closed_at: (usize, NodeIdx),
 	protocol_seen: IdMap<u64, Vec<(Value, Value)>>,
-	fresh: IdMap<u64, Vec<(Value, Source, Vec<usize>)>>,
-	stuck: Vec<Stuck>,
-	by_install: IdMap<(usize, usize, u64), Vec<usize>>,
+}
+
+struct Attempts {
+	tried: Tried<Attempt>,
+	pending: Vec<AttemptIdx>,
+	probed: Tried,
 	drops: Vec<Installs>,
-	executed: usize,
-	current: usize,
-	debug: bool,
+	merged: IdMap<(u64, NodeIdx), Vec<Value>>,
 	family: Family,
-	stats: Vec<(Family, usize, usize)>,
-	receivers: Vec<Vec<usize>>,
-	derivable: std::cell::RefCell<IdMap<(usize, usize), bool>>,
-	cheapest: std::cell::RefCell<IdMap<usize, Cheapest>>,
-	holders: IdMap<(usize, QueryKind), Holders>,
-	merged_targets: IdMap<(u64, usize), Vec<Value>>,
+	executed: usize,
+}
+
+#[derive(Default)]
+struct Retries {
+	stuck: Vec<Stuck>,
+	fresh: IdMap<u64, Vec<(Value, Source, Vec<RunIdx>)>>,
+	by_install: IdMap<(RunIdx, Option<SlotIdx>, u64), Vec<NodeIdx>>,
 	routes: Vec<Route>,
 	rerouting: bool,
-	honest_at: IdMap<(usize, usize), usize>,
+}
+
+#[derive(Default)]
+struct Memo {
+	derivable: std::cell::RefCell<IdMap<(NodeIdx, usize), bool>>,
+	cheapest: std::cell::RefCell<IdMap<usize, Cheapest>>,
+	holders: IdMap<(SlotIdx, QueryKind), Holders>,
+}
+
+struct Log {
+	debug: bool,
+	proposer: RunIdx,
+	stats: Vec<(Family, usize, usize)>,
 }
 
 struct Cheapest {
 	used: Vec<usize>,
-	scanned: usize,
-	best: Option<usize>,
+	scanned: NodeIdx,
+	best: Option<NodeIdx>,
 }
 
-#[derive(Default)]
 struct Holders {
-	scanned: usize,
-	values: Vec<(Value, usize)>,
+	scanned: NodeIdx,
+	values: Vec<(Value, NodeIdx)>,
 	index: IdMap<u64, Vec<usize>>,
+}
+
+impl Default for Holders {
+	fn default() -> Self {
+		Holders {
+			scanned: NodeIdx::new(0),
+			values: Vec::new(),
+			index: IdMap::default(),
+		}
+	}
 }
 
 #[derive(Clone)]
 struct Outcome {
-	halts: Vec<(usize, usize)>,
+	halts: Vec<(RunIdx, SlotIdx)>,
 	settled: bool,
 }
 
@@ -171,16 +216,16 @@ struct Attempt {
 
 #[derive(Clone, Copy)]
 struct Source {
-	node: usize,
-	run: usize,
-	slot: usize,
+	node: NodeIdx,
+	run: RunIdx,
+	slot: SlotIdx,
 }
 
 struct Stuck {
 	installs: Installs,
-	slots: Vec<(usize, usize)>,
-	tried_with: IdSet<usize>,
-	supply: Vec<(usize, usize)>,
+	slots: Vec<(RunIdx, SlotIdx)>,
+	tried_with: IdSet<NodeIdx>,
+	supply: Vec<(usize, NodeIdx)>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -216,14 +261,14 @@ impl Family {
 }
 
 struct Tried<T = ()> {
-	entries: Vec<(Installs, T)>,
-	index: IdMap<u64, Vec<usize>>,
+	entries: IndexVec<AttemptIdx, (Installs, T)>,
+	index: IdMap<u64, Vec<AttemptIdx>>,
 }
 
 impl<T> Default for Tried<T> {
 	fn default() -> Self {
 		Self {
-			entries: Vec::new(),
+			entries: IndexVec::new(),
 			index: IdMap::default(),
 		}
 	}
@@ -235,7 +280,7 @@ impl<T> Tried<T> {
 		self.position(installs).map(|at| &self.entries[at].1)
 	}
 
-	fn position(&self, installs: &Installs) -> Option<usize> {
+	fn position(&self, installs: &Installs) -> Option<AttemptIdx> {
 		self.index
 			.get(&installs_hash(installs))?
 			.iter()
@@ -250,7 +295,7 @@ impl<T> Tried<T> {
 		self.index
 			.entry(installs_hash(installs))
 			.or_default()
-			.push(self.entries.len());
+			.push(self.entries.next_index());
 		self.entries.push((installs.clone(), value));
 		true
 	}
@@ -268,32 +313,42 @@ impl Tried {
 
 fn installs_hash(installs: &Installs) -> u64 {
 	let mut acc: u64 = 0x9E37_79B9_7F4A_7C15;
-	for (run, slot, value) in installs {
+	for install in installs {
+		let run = (install.run().index() as u64) << 32;
+		let (input, value) = match install {
+			Install::Value { slot, value, .. } => (run | slot.index() as u64, value.hash_value()),
+			Install::Idle { .. } => (run | u64::from(u32::MAX), 0),
+		};
 		acc = acc
 			.rotate_left(13)
-			.wrapping_add(((*run as u64) << 32 | *slot as u64).wrapping_mul(0xC2B2_AE3D_27D4_EB4F))
-			^ value.hash_value();
+			.wrapping_add(input.wrapping_mul(0xC2B2_AE3D_27D4_EB4F))
+			^ value;
 	}
 	acc
 }
 
 fn same_installs(a: &Installs, b: &Installs) -> bool {
-	a.len() == b.len()
-		&& a.iter()
-			.zip(b)
-			.all(|((r1, s1, v1), (r2, s2, v2))| r1 == r2 && s1 == s2 && v1.equivalent(v2, true))
+	a.len() == b.len() && a.iter().zip(b).all(|(x, y)| x.same(y))
 }
 
-fn runs_of(installs: &Installs) -> Vec<usize> {
-	let mut runs: Vec<usize> = installs.iter().map(|(run, _, _)| *run).collect();
+fn install_key(install: &Install) -> (RunIdx, Option<SlotIdx>, u64) {
+	(
+		install.run(),
+		install.slot(),
+		install.value().map_or(0, Value::hash_value),
+	)
+}
+
+fn runs_of(installs: &Installs) -> Vec<RunIdx> {
+	let mut runs: Vec<RunIdx> = installs.iter().map(Install::run).collect();
 	runs.sort_unstable();
 	runs.dedup();
 	runs
 }
 
 fn normalize(mut installs: Installs) -> Installs {
-	installs.sort_by_key(|(run, slot, _)| (*run, *slot));
-	installs.dedup_by(|a, b| a.0 == b.0 && a.1 == b.1);
+	installs.sort_by_key(Install::order);
+	installs.dedup_by(|a, b| a.same_input(b));
 	installs
 }
 
@@ -311,69 +366,75 @@ impl<'a, 'b> Search<'a, 'b> {
 			.flat_map(|query| query.constants)
 			.filter_map(|constant| cx.km.index_of(&constant))
 			.collect();
-		let mut union = Knowledge::new(cx.km.max_phase);
+		let mut knowledge = Knowledge::new(cx.km.max_phase);
 		let mut by_cost = Vec::new();
 		for v in root.knowledge.state.known.iter() {
-			if union.learn(v, Origin::Initial) {
-				by_cost.push(vec![vec![0]]);
+			if knowledge.learn(v, Origin::Initial) {
+				by_cost.push(vec![vec![HONEST_NODE]]);
 			}
 		}
 		let honest_at = root
 			.order
 			.iter()
 			.enumerate()
-			.map(|(i, &(run, step, _))| ((run, step), i))
+			.map(|(i, taken)| ((taken.run, taken.step), i))
+			.collect();
+		let receivers = cx
+			.km
+			.slots
+			.indices()
+			.map(|slot| {
+				let mut out = Vec::new();
+				for delivery in &cx.program.deliveries {
+					if delivery
+						.slots
+						.iter()
+						.any(|&(s, guarded)| s == slot && !guarded)
+						&& !out.contains(&delivery.recipient)
+					{
+						out.push(delivery.recipient);
+					}
+				}
+				out
+			})
 			.collect();
 		let mut search = Search {
 			ctx,
 			cx,
-			relevant: relevant_prefixes(ctx, cx),
-			nodes: Vec::new(),
-			queried,
 			honest: root,
-			closed: Knowledge::new(cx.km.max_phase),
-			closed_at: (0, 0),
-			honest_known: union.len(),
-			union,
-			by_cost,
-			tried: Tried::default(),
-			pending: Vec::new(),
-			probed: Tried::default(),
-			protocol_seen: IdMap::default(),
-			fresh: IdMap::default(),
-			stuck: Vec::new(),
-			by_install: IdMap::default(),
-			drops: Vec::new(),
-			executed: 0,
-			current: 0,
-			debug: std::env::var("VERIFPAL_SOLVE_DEBUG").is_ok(),
-			family: Family::Base,
-			stats: Vec::new(),
-			receivers: (0..cx.km.slots.len())
-				.map(|slot| {
-					let mut out = Vec::new();
-					for delivery in &cx.program.deliveries {
-						if delivery
-							.slots
-							.iter()
-							.any(|&(s, guarded)| s == slot && !guarded)
-							&& !out.contains(&delivery.recipient)
-						{
-							out.push(delivery.recipient);
-						}
-					}
-					out
-				})
-				.collect(),
-			derivable: std::cell::RefCell::default(),
-			cheapest: std::cell::RefCell::default(),
-			holders: IdMap::default(),
-			merged_targets: IdMap::default(),
-			routes: Vec::new(),
-			rerouting: false,
-			honest_at,
+			facts: Facts {
+				relevant: relevant_prefixes(ctx, cx),
+				queried,
+				receivers,
+				honest_at,
+			},
+			nodes: IndexVec::new(),
+			union: Union {
+				honest_known: knowledge.len(),
+				knowledge,
+				by_cost,
+				closed: Knowledge::new(cx.km.max_phase),
+				closed_at: (0, NodeIdx::new(0)),
+				protocol_seen: IdMap::default(),
+			},
+			attempts: Attempts {
+				tried: Tried::default(),
+				pending: Vec::new(),
+				probed: Tried::default(),
+				drops: Vec::new(),
+				merged: IdMap::default(),
+				family: Family::Base,
+				executed: 0,
+			},
+			retries: Retries::default(),
+			memo: Memo::default(),
+			log: Log {
+				debug: std::env::var("VERIFPAL_SOLVE_DEBUG").is_ok(),
+				proposer: RunIdx::new(0),
+				stats: Vec::new(),
+			},
 		};
-		let root = Node::of(Vec::new(), &search.honest, &search.queried);
+		let root = Node::of(Vec::new(), &search.honest, &search.facts.queried);
 		search.push_node(root);
 		search.absorb_terms(&search.honest.knowledge.clone());
 		search.close_union();
@@ -384,36 +445,35 @@ impl<'a, 'b> Search<'a, 'b> {
 		self.ctx.all_resolved() || self.ctx.cancelled()
 	}
 
-	fn relevant_input(&self, run: usize, slot: usize) -> bool {
-		if slot == UNSTARTED {
-			return self.relevant[run] > 0;
-		}
+	fn relevant_input(&self, run: RunIdx, slot: SlotIdx) -> bool {
 		self.cx.program.runs[run]
 			.step_of_slot
 			.get(&slot)
-			.is_some_and(|&step| step < self.relevant[run])
+			.is_some_and(|&step| step < self.facts.relevant[run])
+	}
+
+	fn relevant(&self, install: &Install) -> bool {
+		match install {
+			Install::Value { run, slot, .. } => self.relevant_input(*run, *slot),
+			Install::Idle { run } => self.facts.relevant[*run] > StepIdx::new(0),
+		}
 	}
 
 	fn project(&mut self, mut installs: Installs) -> Installs {
-		installs.retain(|(run, slot, _)| self.relevant_input(*run, *slot));
-		for (_, _, value) in &mut installs {
-			*value = crate::term::hashing::hashcons(value);
+		installs.retain(|install| self.relevant(install));
+		for install in &mut installs {
+			if let Install::Value { value, .. } = install {
+				*value = crate::term::hashing::hashcons(value);
+			}
 		}
 		normalize(installs)
 	}
 
-	fn describe(&self, node: usize) -> String {
+	fn describe(&self, node: NodeIdx) -> String {
 		let shown: Vec<String> = self.nodes[node]
 			.installs
 			.iter()
-			.map(|(run, slot, value)| {
-				format!(
-					"{}'s {} is {}",
-					self.cx.program.runs[*run].name,
-					self.slot_name(*slot),
-					value
-				)
-			})
+			.map(|install| self.spoken(install))
 			.collect();
 		if shown.is_empty() {
 			"the protocol runs honestly".to_string()
@@ -427,9 +487,9 @@ impl<'a, 'b> Search<'a, 'b> {
 		if self.done() {
 			return;
 		}
-		let before = self.union.len();
+		let before = self.union.knowledge.len();
 		self.fixpoint(Mode::Refined);
-		if self.union.len() != before && !self.done() {
+		if self.union.knowledge.len() != before && !self.done() {
 			self.fixpoint(Mode::Plain);
 		}
 		self.idle();
@@ -439,70 +499,83 @@ impl<'a, 'b> Search<'a, 'b> {
 		self.reroute();
 	}
 
+	fn spoken(&self, install: &Install) -> String {
+		let name = &self.cx.program.runs[install.run()].name;
+		match install {
+			Install::Value { slot, value, .. } => {
+				format!("{name}'s {} is {value}", self.cx.km.slots[*slot].constant)
+			}
+			Install::Idle { .. } => format!("{name} never starts"),
+		}
+	}
+
 	fn shown(&self, installs: &Installs) -> String {
 		installs
 			.iter()
-			.map(|(run, slot, v)| {
-				format!(
-					"{}.{}={}",
-					self.cx.program.runs[*run].name,
-					self.slot_name(*slot),
-					v
-				)
+			.map(|install| {
+				let name = &self.cx.program.runs[install.run()].name;
+				match install {
+					Install::Value { slot, value, .. } => {
+						format!("{name}.{}={value}", self.cx.km.slots[*slot].constant)
+					}
+					Install::Idle { .. } => format!("{name}.unstarted"),
+				}
 			})
 			.collect::<Vec<String>>()
 			.join(" ")
 	}
 
-	fn slot_name(&self, slot: usize) -> String {
-		match slot {
-			UNSTARTED => "unstarted".to_string(),
-			slot => self.cx.km.slots[slot].constant.to_string(),
-		}
-	}
-
 	fn tally(&mut self, family: Family, accepted: bool) {
-		let at = match self.stats.iter().position(|(seen, _, _)| *seen == family) {
+		let at = match self
+			.log
+			.stats
+			.iter()
+			.position(|(seen, _, _)| *seen == family)
+		{
 			Some(at) => at,
 			None => {
-				self.stats.push((family, 0, 0));
-				self.stats.len() - 1
+				self.log.stats.push((family, 0, 0));
+				self.log.stats.len() - 1
 			}
 		};
-		self.stats[at].1 += 1;
-		self.stats[at].2 += usize::from(accepted);
+		self.log.stats[at].1 += 1;
+		self.log.stats[at].2 += usize::from(accepted);
 	}
 
 	pub(crate) fn report_stats(&self) {
-		if !self.debug {
+		if !self.log.debug {
 			return;
 		}
-		for (family, tried, accepted) in &self.stats {
+		for (family, tried, accepted) in &self.log.stats {
 			eprintln!("[search] family {family:?}: tried {tried}, accepted {accepted}");
 		}
 	}
 }
 
-type Bypassed = Vec<(usize, usize)>;
+type Bypassed = Vec<(RunIdx, usize)>;
 
-type Route = (Installs, Vec<(Value, usize, Bypassed)>);
+type Route = (Installs, Vec<(Value, RunIdx, Bypassed)>);
 
 fn compatible_with(plan: &Installs, source: &Installs) -> bool {
-	source.iter().all(|(run, slot, value)| {
-		install_at(plan, *run, *slot).is_none_or(|held| held.equivalent(value, true))
+	source.iter().all(|install| match install {
+		Install::Value { run, slot, value } => {
+			install_at(plan, *run, *slot).is_none_or(|held| held.equivalent(value, true))
+		}
+		Install::Idle { .. } => true,
 	})
 }
 
-fn relevant_prefixes(ctx: &VerifyContext, cx: &Context) -> Vec<usize> {
-	let mut ends: Vec<_> = cx
+fn relevant_prefixes(ctx: &VerifyContext, cx: &Context) -> IndexVec<RunIdx, StepIdx> {
+	let mut ends: IndexVec<RunIdx, StepIdx> = cx
 		.program
 		.runs
 		.iter()
 		.map(|run| {
 			run.steps
-				.iter()
-				.rposition(|step| matches!(step.event, Event::Send(_) | Event::Leak(_)))
-				.map_or(0, |step| step + 1)
+				.iter_enumerated()
+				.rev()
+				.find(|(_, step)| matches!(step.event, Event::Send(_) | Event::Leak(_)))
+				.map_or(StepIdx::new(0), |(step, _)| step.next())
 		})
 		.collect();
 	for query in ctx.open_queries() {
@@ -510,7 +583,7 @@ fn relevant_prefixes(ctx: &VerifyContext, cx: &Context) -> Vec<usize> {
 			let Some(slot) = cx.km.index_of(constant) else {
 				continue;
 			};
-			for (r, run) in cx.program.runs.iter().enumerate() {
+			for (r, run) in cx.program.runs.iter_enumerated() {
 				if query.kind == QueryKind::Unlinkability && run.id != cx.km.slots[slot].creator {
 					continue;
 				}
@@ -518,8 +591,8 @@ fn relevant_prefixes(ctx: &VerifyContext, cx: &Context) -> Vec<usize> {
 					continue;
 				};
 				let end = match query.kind {
-					QueryKind::Authentication | QueryKind::Freshness => run.steps.len(),
-					_ => step + 1,
+					QueryKind::Authentication | QueryKind::Freshness => run.steps.next_index(),
+					_ => step.next(),
 				};
 				ends[r] = ends[r].max(end);
 			}

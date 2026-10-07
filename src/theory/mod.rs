@@ -10,10 +10,7 @@ mod rewrite;
 #[cfg(test)]
 mod tests;
 
-pub use attacker::{
-	AttackerState, DecomposeResult, DerivationRecord, Forged, KnownIdx, RecomposeResult,
-	ReconstructResult, SlotIdx,
-};
+pub(crate) use attacker::{AttackerState, DerivationRecord, KnownIdx};
 pub(crate) use decompose::{
 	can_break_weak, can_decompose, decompose_rule, decomposition_reveals, revealed,
 };

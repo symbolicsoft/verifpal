@@ -4,19 +4,34 @@
 use std::sync::Arc;
 
 use super::{Deducer, match_each, refine_check};
-use crate::primitive::Capability;
-use crate::primitive::*;
+use crate::primitive::{Capability, Reveal, reuse_rule};
 use crate::solve::matching::match_values;
 use crate::solve::vars::{Substitution, contains_var, dedupe};
 use crate::term::equivalence::equivalent_primitives;
-use crate::term::{Primitive, Value};
+use crate::term::{Primitive, PrimitiveId, Value, ValueId};
 use crate::util::IdMap;
 
 pub(super) type DecompositionMemo = IdMap<usize, (Arc<Primitive>, Vec<Substitution>)>;
 
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum Head {
+	Constant(ValueId),
+	Primitive(PrimitiveId),
+}
+
+impl Head {
+	fn of(v: &Value) -> Option<Head> {
+		match v {
+			Value::Primitive(p) => Some(Head::Primitive(p.id)),
+			Value::Constant(c) => Some(Head::Constant(c.id)),
+			Value::Variable(_) => None,
+		}
+	}
+}
+
 #[derive(Default)]
 pub(super) struct Reach {
-	heads: Vec<u64>,
+	heads: Vec<Head>,
 	anything: bool,
 }
 
@@ -26,10 +41,10 @@ fn reach(p: &Arc<Primitive>, seen: &mut IdMap<usize, Arc<Reach>>) -> Arc<Reach> 
 		return Arc::clone(reach);
 	}
 	let mut reveals: Vec<Reveal> = Vec::new();
-	if primitive_core_reveals_args(p.id) {
+	if crate::primitive::core_reveals_arguments(p.id) {
 		reveals.extend((0..p.arguments.len()).map(Reveal::Argument));
 	}
-	if let Ok(spec) = primitive_get(p.id) {
+	if let Ok(spec) = crate::primitive::spec(p.id) {
 		if let Some(rule) = &spec.decompose {
 			reveals.extend(rule.reveals.iter().copied());
 		}
@@ -41,12 +56,12 @@ fn reach(p: &Arc<Primitive>, seen: &mut IdMap<usize, Arc<Reach>>) -> Arc<Reach> 
 	let mut out = Reach::default();
 	for reveal in reveals {
 		match reveal {
-			Reveal::Output(_) => out.heads.push(1 << 40 | u64::from(p.id)),
+			Reveal::Output(_) => out.heads.push(Head::Primitive(p.id)),
 			Reveal::Argument(index) => {
 				let Some(argument) = p.arguments.get(index) else {
 					continue;
 				};
-				match head_key(argument) {
+				match Head::of(argument) {
 					Some(head) => out.heads.push(head),
 					None => out.anything = true,
 				}
@@ -65,16 +80,8 @@ fn reach(p: &Arc<Primitive>, seen: &mut IdMap<usize, Arc<Reach>>) -> Arc<Reach> 
 	out
 }
 
-fn head_key(v: &Value) -> Option<u64> {
-	match v {
-		Value::Primitive(p) => Some(1 << 40 | u64::from(p.id)),
-		Value::Constant(c) => Some(u64::from(c.id)),
-		Value::Variable(_) => None,
-	}
-}
-
 pub(super) fn decomposition_targets(p: &Primitive) -> Option<(Vec<Value>, Vec<Value>)> {
-	if primitive_core_reveals_args(p.id) {
+	if crate::primitive::core_reveals_arguments(p.id) {
 		return Some((p.arguments.clone(), Vec::new()));
 	}
 	let rule = crate::theory::decompose_rule(p)?;
@@ -87,10 +94,10 @@ pub(super) fn decomposition_targets(p: &Primitive) -> Option<(Vec<Value>, Vec<Va
 		}
 		given.push(filtered);
 	}
-	Some((revealed_values(p, &rule.reveals), given))
+	Some((revealed_shapes(p, &rule.reveals), given))
 }
 
-fn revealed_values(p: &Primitive, reveals: &[Reveal]) -> Vec<Value> {
+fn revealed_shapes(p: &Primitive, reveals: &[Reveal]) -> Vec<Value> {
 	reveals
 		.iter()
 		.filter_map(|reveal| match *reveal {
@@ -110,7 +117,7 @@ impl<'a> Deducer<'a> {
 		out: &mut Vec<Substitution>,
 	) {
 		let mut memo = DecompositionMemo::default();
-		let wanted = head_key(goal);
+		let wanted = Head::of(goal);
 		let reaches = self.shared.wire_reach.get_or_init(|| {
 			let mut seen = IdMap::default();
 			self.shared
@@ -157,13 +164,13 @@ impl<'a> Deducer<'a> {
 		if let Some(rule) = reuse_rule(p.id)
 			&& crate::theory::reused(p, self.attacker).is_some()
 		{
-			routes.push((revealed_values(p, &rule.reveals), Vec::new(), None));
+			routes.push((revealed_shapes(p, &rule.reveals), Vec::new(), None));
 		}
 		let capabilities = self.shared.capabilities;
 		if !capabilities.is_empty()
-			&& let Ok(spec) = primitive_get(p.id)
+			&& let Ok(spec) = crate::primitive::spec(p.id)
 		{
-			let revealed = revealed_values(p, &spec.weak_reveals);
+			let revealed = revealed_shapes(p, &spec.weak_reveals);
 			if !revealed.is_empty() {
 				for (annotated, caps) in capabilities.annotated_terms() {
 					if caps.in_force(Capability::Weak, self.attacker.current_phase)
@@ -224,7 +231,7 @@ impl<'a> Deducer<'a> {
 		p: &Primitive,
 		s: &Substitution,
 	) -> Vec<(Arc<Primitive>, Substitution)> {
-		let Some(rule) = primitive_get(p.id)
+		let Some(rule) = crate::primitive::spec(p.id)
 			.ok()
 			.and_then(|spec| spec.decompose.as_ref())
 		else {

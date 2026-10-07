@@ -244,17 +244,7 @@ impl Chart {
 
 	pub(crate) fn attack(q: &QueryReport, model: &ModelReport) -> Option<Chart> {
 		let wires = hops(model);
-		let leaks: Vec<(&str, Vec<&str>)> = model
-			.diagram
-			.iter()
-			.filter_map(|row| match row {
-				DiagramRow::Leak { principal, values } => Some((
-					principal.as_str(),
-					values.iter().map(|v| v.name.as_str()).collect(),
-				)),
-				_ => None,
-			})
-			.collect();
+		let leaks = leaks(model);
 		let mut rows: Vec<Row> = Vec::new();
 		let mut cursor = 0usize;
 		let mut phase = 0i32;
@@ -263,20 +253,7 @@ impl Chart {
 			let (n, step) = match group {
 				Group::One(n, step) => (n, step),
 				Group::Run(held) => {
-					for (_, held_step) in &held {
-						for (principal, values) in &leaks {
-							if drawn.contains(principal)
-								|| !values.iter().any(|v| names_value(&held_step.text, v))
-							{
-								continue;
-							}
-							drawn.push(principal);
-							rows.push(Row::Leak {
-								principal: principal.to_string(),
-								values: values.iter().map(|v| v.to_string()).collect(),
-							});
-						}
-					}
+					leaks_held(&mut rows, &held, &leaks, &mut drawn);
 					rows.push(Row::Run {
 						first: held[0].0,
 						last: held[held.len() - 1].0,
@@ -301,43 +278,7 @@ impl Chart {
 					rows.push(Row::Phase { number: phase });
 				}
 			}
-			match step.kind {
-				"mutations" | "replay" | "received" => {
-					let Some(recipient) = recipient else { continue };
-					let route = match step.kind {
-						"replay" => Route::Replayed,
-						"mutations" => Route::Forged,
-						_ => Route::Direct,
-					};
-					rows.push(Row::Wire {
-						hop: found.map(|found| found.hop),
-						step: Some(n),
-						from: sender.unwrap_or(ATTACKER).to_string(),
-						to: recipient.to_string(),
-						route,
-						values: step
-							.values
-							.iter()
-							.map(|v| Value {
-								name: v.name.clone(),
-								guarded: v.guarded,
-								queries: Vec::new(),
-							})
-							.collect(),
-					});
-				}
-				"gate" | "bypass" => {
-					let Some(principal) = step.principal.as_deref() else {
-						continue;
-					};
-					rows.push(Row::Mark {
-						step: n,
-						principal: principal.to_string(),
-						bypass: step.kind == "bypass",
-					});
-				}
-				_ => {}
-			}
+			rows.extend(step_row(n, step, found.map(|found| found.hop)));
 		}
 		let mut lanes = Lanes::of(&rows);
 		if !lanes.is_empty() {
@@ -416,6 +357,76 @@ fn matches(hop: &Hop, sender: &str, recipient: &str, names: &[String]) -> bool {
 	names
 		.iter()
 		.any(|n| hop.values.contains(&copy_base_name(n)))
+}
+
+fn leaks(model: &ModelReport) -> Vec<(&str, Vec<&str>)> {
+	model
+		.diagram
+		.iter()
+		.filter_map(|row| match row {
+			DiagramRow::Leak { principal, values } => Some((
+				principal.as_str(),
+				values.iter().map(|v| v.name.as_str()).collect(),
+			)),
+			_ => None,
+		})
+		.collect()
+}
+
+fn leaks_held<'a>(
+	rows: &mut Vec<Row>,
+	held: &[(usize, &TraceStep)],
+	leaks: &[(&'a str, Vec<&'a str>)],
+	drawn: &mut Vec<&'a str>,
+) {
+	for (_, held_step) in held {
+		for (principal, values) in leaks {
+			if drawn.contains(principal) || !values.iter().any(|v| names_value(&held_step.text, v))
+			{
+				continue;
+			}
+			drawn.push(principal);
+			rows.push(Row::Leak {
+				principal: principal.to_string(),
+				values: values.iter().map(|v| v.to_string()).collect(),
+			});
+		}
+	}
+}
+
+fn step_row(n: usize, step: &TraceStep, hop: Option<usize>) -> Option<Row> {
+	match step.kind {
+		"mutations" | "replay" | "received" => {
+			let recipient = step.recipient.as_deref()?;
+			let route = match step.kind {
+				"replay" => Route::Replayed,
+				"mutations" => Route::Forged,
+				_ => Route::Direct,
+			};
+			Some(Row::Wire {
+				hop,
+				step: Some(n),
+				from: step.sender.as_deref().unwrap_or(ATTACKER).to_string(),
+				to: recipient.to_string(),
+				route,
+				values: step
+					.values
+					.iter()
+					.map(|v| Value {
+						name: v.name.clone(),
+						guarded: v.guarded,
+						queries: Vec::new(),
+					})
+					.collect(),
+			})
+		}
+		"gate" | "bypass" => Some(Row::Mark {
+			step: n,
+			principal: step.principal.as_deref()?.to_string(),
+			bypass: step.kind == "bypass",
+		}),
+		_ => None,
+	}
 }
 
 fn names_value(text: &str, value: &str) -> bool {
@@ -534,7 +545,6 @@ mod tests {
 				TraceStep::new("derive", "three".to_string()),
 			],
 			preconditions: vec![],
-			notes: vec![],
 			generated: false,
 			variants: 0,
 		};

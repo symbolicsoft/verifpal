@@ -2,11 +2,9 @@
  * SPDX-License-Identifier: GPL-3.0-only */
 
 use super::{Deducer, check_passes, refine_check};
-use crate::primitive::{
-	RewriteRule, primitive_extract_check_key, primitive_is_equality, primitive_is_projection,
-	rewrite_rule,
-};
+use crate::primitive::{RewriteRule, rewrite_rule};
 use crate::protocol::ProtocolTrace;
+use crate::protocol::SlotIdx;
 use crate::solve::symbolic::SymbolicState;
 use crate::solve::vars::{Distinct, Substitution, apply, as_var, contains_var, dedupe};
 use crate::syntax::{PrincipalId, Query};
@@ -18,9 +16,9 @@ pub(super) fn constraint_sets(
 	queries: &[Query],
 	km: &ProtocolTrace,
 	sym: &SymbolicState,
-) -> Vec<Vec<usize>> {
-	let mut checks: IdMap<PrincipalId, Vec<usize>> = IdMap::default();
-	for (slot, trace_slot) in km.slots.iter().enumerate() {
+) -> Vec<Vec<SlotIdx>> {
+	let mut checks: IdMap<PrincipalId, Vec<SlotIdx>> = IdMap::default();
+	for (slot, trace_slot) in km.slots.iter_enumerated() {
 		if let Value::Primitive(p) = &trace_slot.initial_value
 			&& p.instance_check
 		{
@@ -33,23 +31,23 @@ pub(super) fn constraint_sets(
 			slots.last().map(|slot| {
 				(
 					*owner,
-					(km.slots[*slot].declared_at, *slot + 1),
+					(km.slots[*slot].declared_at, Some(*slot)),
 					Some(*slot),
 				)
 			})
 		})
 		.collect();
-	for (index, slot) in km.slots.iter().enumerate() {
+	for (index, slot) in km.slots.iter_enumerated() {
 		endpoints.extend(
 			slot.sent_by
 				.iter()
-				.map(|event| (event.sender, (event.declared_at, 0), Some(index))),
+				.map(|event| (event.sender, (event.declared_at, None), Some(index))),
 		);
 	}
 	endpoints.extend(km.leaks.iter().map(|event| {
 		(
 			event.principal_id,
-			(event.declared_at, 0),
+			(event.declared_at, None),
 			km.index.get(&event.constant_id).copied(),
 		)
 	}));
@@ -58,7 +56,7 @@ pub(super) fn constraint_sets(
 			if let Some(slot) = km.index_of(constant) {
 				endpoints.push((
 					km.slots[slot].creator,
-					(km.slots[slot].declared_at, slot + 1),
+					(km.slots[slot].declared_at, Some(slot)),
 					Some(slot),
 				));
 			}
@@ -73,7 +71,7 @@ pub(super) fn constraint_sets(
 			.into_iter()
 			.flatten()
 			.copied()
-			.filter(|slot| (km.slots[*slot].declared_at, *slot) < at)
+			.filter(|slot| (km.slots[*slot].declared_at, Some(*slot)) <= at)
 			.collect();
 		pending.extend(target);
 		let mut visited = IdSet::default();
@@ -84,7 +82,7 @@ pub(super) fn constraint_sets(
 			}
 			let trace_slot = &km.slots[slot];
 			if let Value::Primitive(p) = &trace_slot.initial_value
-				&& primitive_is_projection(p.id)
+				&& crate::primitive::is_projection(p.id)
 			{
 				needed.insert(slot);
 			}
@@ -103,7 +101,7 @@ pub(super) fn constraint_sets(
 			}
 		}
 		let mut needed: Vec<_> = needed.into_iter().filter(|&slot| {
-			matches!(&sym.terms[slot], Value::Primitive(p) if (p.instance_check || primitive_is_projection(p.id)) && p.arguments.iter().any(contains_var))
+			matches!(&sym.terms[slot], Value::Primitive(p) if (p.instance_check || crate::primitive::is_projection(p.id)) && p.arguments.iter().any(contains_var))
 		}).collect();
 		needed.sort_unstable();
 		if !needed.is_empty() && !groups.contains(&needed) {
@@ -115,7 +113,10 @@ pub(super) fn constraint_sets(
 
 fn widest_checked_projections(mut checked: Vec<Primitive>) -> Vec<Primitive> {
 	let mut widest: Vec<Primitive> = Vec::new();
-	for p in checked.iter().filter(|p| primitive_is_projection(p.id)) {
+	for p in checked
+		.iter()
+		.filter(|p| crate::primitive::is_projection(p.id))
+	{
 		match widest.iter_mut().find(|q| {
 			q.arguments
 				.first()
@@ -131,7 +132,8 @@ fn widest_checked_projections(mut checked: Vec<Primitive>) -> Vec<Primitive> {
 		}
 	}
 	checked.retain(|p| {
-		!primitive_is_projection(p.id) || widest.iter().any(|q| equivalent_primitives(q, p, true))
+		!crate::primitive::is_projection(p.id)
+			|| widest.iter().any(|q| equivalent_primitives(q, p, true))
 	});
 	checked
 }
@@ -183,7 +185,7 @@ impl<'a> Deducer<'a> {
 							continue;
 						}
 						if !refined.arguments.iter().any(contains_var) {
-							if primitive_extract_check_key(&refined)
+							if crate::primitive::check_key(&refined)
 								.is_some_and(|key| self.obtainable(&key))
 							{
 								next.push(candidate);
@@ -211,7 +213,7 @@ impl<'a> Deducer<'a> {
 				checked.iter().all(|p| {
 					let refined = refine_check(p, candidate);
 					check_passes(&refined)
-						|| primitive_extract_check_key(&refined)
+						|| crate::primitive::check_key(&refined)
 							.is_some_and(|key| contains_var(&key) || self.obtainable(&key))
 				})
 			});
@@ -232,12 +234,12 @@ impl<'a> Deducer<'a> {
 	}
 
 	fn check_equations(&self, p: &Primitive, base: &Substitution) -> Vec<Substitution> {
-		if primitive_is_equality(p.id) && p.arguments.len() == 2 {
+		if crate::primitive::is_equality(p.id) && p.arguments.len() == 2 {
 			let mut out = self.invert(&p.arguments[0], &p.arguments[1], base);
 			out.extend(self.invert(&p.arguments[1], &p.arguments[0], base));
 			return dedupe(out);
 		}
-		if primitive_is_projection(p.id)
+		if crate::primitive::is_projection(p.id)
 			&& let Some(inner) = p.arguments.first()
 		{
 			return self
@@ -266,7 +268,7 @@ impl<'a> Deducer<'a> {
 	}
 
 	pub(crate) fn equality_shapes(&self, p: &Primitive) -> Vec<Substitution> {
-		if !(primitive_is_equality(p.id) && p.arguments.len() == 2) {
+		if !(crate::primitive::is_equality(p.id) && p.arguments.len() == 2) {
 			return Vec::new();
 		}
 		self.check_equations(p, &Substitution::default())
@@ -288,7 +290,8 @@ impl<'a> Deducer<'a> {
 		base: &Substitution,
 		may_shape: bool,
 	) -> Vec<Substitution> {
-		if (primitive_is_equality(p.id) && p.arguments.len() == 2) || primitive_is_projection(p.id)
+		if (crate::primitive::is_equality(p.id) && p.arguments.len() == 2)
+			|| crate::primitive::is_projection(p.id)
 		{
 			let out = self
 				.check_equations(p, base)

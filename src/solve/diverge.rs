@@ -3,7 +3,6 @@
 
 use super::symbolic::SymbolicState;
 use super::vars::{Substitution, apply, attacker_var_id, collect_free_vars, collect_vars, dedupe};
-use crate::primitive::{filler_primitive, primitive_def};
 use crate::term::{Value, VariableId, value_nil};
 
 pub(crate) fn solve_divergent(a: &Value, b: &Value, s: &Substitution) -> Vec<Substitution> {
@@ -34,10 +33,7 @@ pub(crate) fn solve_divergent(a: &Value, b: &Value, s: &Substitution) -> Vec<Sub
 
 pub(crate) fn distinguish(sym: &SymbolicState, proposal: &Substitution) -> Option<Substitution> {
 	let mut free = Vec::new();
-	for &slot in &sym.var_slots {
-		let Some(term) = sym.var_terms.get(slot).and_then(Option::as_ref) else {
-			continue;
-		};
+	for (slot, term) in sym.variables() {
 		if proposal.contains_key(&attacker_var_id(slot)) {
 			collect_free_vars(&apply(term, proposal), &mut free);
 		}
@@ -54,10 +50,10 @@ pub(crate) fn distinguish(sym: &SymbolicState, proposal: &Substitution) -> Optio
 }
 
 fn fillers() -> Vec<Value> {
-	let Some(filler) = filler_primitive() else {
+	let Some(filler) = crate::primitive::filler() else {
 		return vec![value_nil()];
 	};
-	let widths = primitive_def(filler)
+	let widths = crate::primitive::definition(filler)
 		.map(|d| d.arity().to_vec())
 		.unwrap_or_default();
 	std::iter::once(value_nil())
@@ -73,12 +69,15 @@ fn fillers() -> Vec<Value> {
 mod tests {
 	use super::*;
 	use crate::primitive::{PRIM_CONCAT, PRIM_DH_KEX, normalise_arguments};
+	use crate::protocol::SlotIdx;
 	use crate::solve::symbolic::SymbolicState;
 	use crate::solve::vars::{as_var, attacker_var, free_var};
 	use crate::term::PrimitiveId;
+	use crate::util::index::Idx;
+	use crate::util::index::IndexVec;
 
 	fn widest(id: PrimitiveId) -> usize {
-		primitive_def(id)
+		crate::primitive::definition(id)
 			.map(|d| d.arity().iter().copied().max().unwrap_or(0))
 			.unwrap_or(0) as usize
 	}
@@ -134,21 +133,20 @@ mod tests {
 
 	fn one_var_slot(term: Value) -> SymbolicState {
 		SymbolicState {
-			terms: vec![term.clone()],
-			var_slots: vec![0],
-			var_terms: vec![Some(term)],
+			terms: IndexVec::from(vec![term.clone()]),
+			var_terms: IndexVec::from(vec![Some(term)]),
 		}
 	}
 
 	fn install(v: Value) -> Substitution {
 		let mut s = Substitution::default();
-		s.insert(attacker_var_id(0), v);
+		s.insert(attacker_var_id(SlotIdx::new(0)), v);
 		s
 	}
 
 	#[test]
 	fn distinguish_declines_a_single_free_position() {
-		let sym = one_var_slot(attacker_var(0));
+		let sym = one_var_slot(attacker_var(SlotIdx::new(0)));
 		let proposal = install(Value::primitive(
 			PRIM_CONCAT,
 			vec![value_nil(), free_var(0)],
@@ -159,13 +157,13 @@ mod tests {
 
 	#[test]
 	fn distinguish_declines_a_slot_the_proposal_does_not_install_into() {
-		let sym = one_var_slot(attacker_var(0));
+		let sym = one_var_slot(attacker_var(SlotIdx::new(0)));
 		assert!(distinguish(&sym, &Substitution::default()).is_none());
 	}
 
 	#[test]
 	fn distinguish_gives_each_free_position_its_own_value() {
-		let sym = one_var_slot(attacker_var(0));
+		let sym = one_var_slot(attacker_var(SlotIdx::new(0)));
 		let arity = widest(PRIM_CONCAT);
 		let free: Vec<Value> = (0..arity).map(free_var).collect();
 		let proposal = install(Value::primitive(PRIM_CONCAT, free, 0));
@@ -178,11 +176,11 @@ mod tests {
 
 	#[test]
 	fn distinguish_keeps_the_bindings_the_solver_already_made() {
-		let sym = one_var_slot(attacker_var(0));
+		let sym = one_var_slot(attacker_var(SlotIdx::new(0)));
 		let installed =
 			Value::primitive(PRIM_CONCAT, vec![free_var(0), free_var(1), free_var(2)], 0);
 		let proposal = install(installed.clone());
 		let out = distinguish(&sym, &proposal).expect("distinguished");
-		assert!(out[&attacker_var_id(0)].equivalent(&installed, true));
+		assert!(out[&attacker_var_id(SlotIdx::new(0))].equivalent(&installed, true));
 	}
 }

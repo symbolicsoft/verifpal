@@ -8,8 +8,10 @@ use super::symbolic::SymbolicState;
 use super::vars::Substitution;
 use super::{Pass, debugging, diverge, vars};
 use crate::protocol::ProtocolTrace;
+use crate::protocol::SlotIdx;
 use crate::protocol::trace::resolve_trace_constant;
-use crate::syntax::{PrincipalId, QueryKind};
+use crate::syntax::{PrincipalId, Query, QueryKind};
+use crate::term::hashing::TermSet;
 use crate::term::{Value, VariableId, push_unique_value};
 use crate::theory::AttackerState;
 use crate::verify::Truncation;
@@ -25,44 +27,19 @@ pub(crate) fn propose(
 	deducer: Deducer,
 ) -> (Vec<Substitution>, Vec<Substitution>) {
 	let mut proposals: Vec<Substitution> = Vec::new();
-	let debug = debugging();
-
 	let open = ctx.open_queries();
 	let protocol = ctx.term_bound(km).protocol();
 	if pass == Pass::Targeted {
-		let lanes = deducer.lanes(open.len()).into_iter().zip(&open).collect();
-		let goals = crate::util::parallel::map_ordered(lanes, |(deducer, query)| {
-			let started = debug.then(std::time::Instant::now);
-			if debug {
-				eprintln!("[search] goals {principal} {:?}: start", query.kind);
-			}
-			let goals = goals_for_query(query, km, principal, sym, &deducer);
-			if let Some(started) = started {
-				eprintln!(
-					"[search] goals {principal} {:?}: {} in {:?}",
-					query.kind,
-					goals.len(),
-					started.elapsed()
-				);
-			}
-			goals
-		});
-		proposals.extend(goals.into_iter().flatten());
-		if debug {
-			eprintln!("[search] constraints {principal}: start");
-		}
-		proposals.extend(deducer.constraint_goals(&ctx.queries(), km, sym));
-		if debug {
-			eprintln!("[search] oracles {principal}: start");
-		}
-		proposals.extend(oracle_input_goals(km, principal, sym, attacker, &deducer));
+		proposals.extend(targeted_goals(
+			ctx, km, principal, attacker, sym, &deducer, &open,
+		));
 	}
 
 	let blanket = blanket_substitution(sym);
 	if pass == Pass::Targeted && !blanket.is_empty() {
 		proposals.push(blanket.clone());
 
-		for &slot in &sym.var_slots {
+		for slot in sym.var_slots() {
 			let single = slot_substitution(sym, slot);
 			if !single.is_empty() {
 				proposals.push(single);
@@ -71,35 +48,114 @@ pub(crate) fn propose(
 	}
 
 	if pass == Pass::Constructed {
-		proposals.extend(sibling_flight_substitutions(km, sym));
-		let lanes = deducer
-			.lanes(sym.var_slots.len())
-			.into_iter()
-			.zip(sym.var_slots.iter().copied())
-			.collect();
-		let candidates = crate::util::parallel::map_ordered(lanes, |(deducer, slot)| {
-			let Some(trace_slot) = km.slots.get(slot) else {
-				return Vec::new();
-			};
-			let honest = resolve_trace_constant(&trace_slot.constant, km);
-			slot_candidates(attacker, sym, &deducer, protocol, &honest, &blanket, slot)
-		});
-		for (&slot, candidates) in sym.var_slots.iter().zip(candidates) {
-			for candidate in candidates {
-				let var_id = vars::attacker_var_id(slot);
-				let mut alone = Substitution::default();
-				alone.insert(var_id.clone(), candidate.clone());
-				proposals.push(alone);
-				if !blanket.is_empty() {
-					let mut combined = blanket.clone();
-					combined.insert(var_id, candidate);
-					proposals.push(combined);
-				}
+		proposals.extend(constructed(km, attacker, sym, &deducer, protocol, &blanket));
+	}
+
+	let equivalence = open.iter().any(|q| q.kind == QueryKind::Equivalence);
+	let proposals = with_free_positions(km, attacker, sym, protocol, proposals, equivalence);
+
+	if deducer.declined_bound() {
+		ctx.note_truncation(Truncation::TermDepth);
+	}
+	let (replays, others): (Vec<Substitution>, Vec<Substitution>) = proposals
+		.into_iter()
+		.partition(|proposal| sibling_replay(km, sym, proposal));
+	let mut proposals = others;
+	match pass {
+		Pass::Targeted => (proposals, replays),
+		Pass::Constructed => {
+			proposals.extend(replays);
+			(proposals, Vec::new())
+		}
+	}
+}
+
+fn targeted_goals(
+	ctx: &VerifyContext,
+	km: &ProtocolTrace,
+	principal: PrincipalId,
+	attacker: &AttackerState,
+	sym: &SymbolicState,
+	deducer: &Deducer,
+	open: &[Query],
+) -> Vec<Substitution> {
+	let debug = debugging();
+	let mut proposals: Vec<Substitution> = Vec::new();
+	let lanes = deducer.lanes(open.len()).into_iter().zip(open).collect();
+	let goals = crate::util::parallel::map_ordered(lanes, |(deducer, query)| {
+		let started = debug.then(std::time::Instant::now);
+		if debug {
+			eprintln!("[search] goals {principal} {:?}: start", query.kind);
+		}
+		let goals = goals_for_query(query, km, principal, sym, &deducer);
+		if let Some(started) = started {
+			eprintln!(
+				"[search] goals {principal} {:?}: {} in {:?}",
+				query.kind,
+				goals.len(),
+				started.elapsed()
+			);
+		}
+		goals
+	});
+	proposals.extend(goals.into_iter().flatten());
+	if debug {
+		eprintln!("[search] constraints {principal}: start");
+	}
+	proposals.extend(deducer.constraint_goals(&ctx.queries(), km, sym));
+	if debug {
+		eprintln!("[search] oracles {principal}: start");
+	}
+	proposals.extend(oracle_input_goals(km, principal, sym, attacker, deducer));
+	proposals
+}
+
+fn constructed(
+	km: &ProtocolTrace,
+	attacker: &AttackerState,
+	sym: &SymbolicState,
+	deducer: &Deducer,
+	protocol: &TermSet,
+	blanket: &Substitution,
+) -> Vec<Substitution> {
+	let mut proposals = sibling_flight_substitutions(km, sym);
+	let lanes = deducer
+		.lanes(sym.var_slots().count())
+		.into_iter()
+		.zip(sym.var_slots())
+		.collect();
+	let candidates = crate::util::parallel::map_ordered(lanes, |(deducer, slot)| {
+		let Some(trace_slot) = km.slots.get(slot) else {
+			return Vec::new();
+		};
+		let honest = resolve_trace_constant(&trace_slot.constant, km);
+		slot_candidates(attacker, sym, &deducer, protocol, &honest, blanket, slot)
+	});
+	for (slot, candidates) in sym.var_slots().zip(candidates) {
+		for candidate in candidates {
+			let var_id = vars::attacker_var_id(slot);
+			let mut alone = Substitution::default();
+			alone.insert(var_id.clone(), candidate.clone());
+			proposals.push(alone);
+			if !blanket.is_empty() {
+				let mut combined = blanket.clone();
+				combined.insert(var_id, candidate);
+				proposals.push(combined);
 			}
 		}
 	}
+	proposals
+}
 
-	proposals = vars::dedupe_slots(proposals);
+fn with_free_positions(
+	km: &ProtocolTrace,
+	attacker: &AttackerState,
+	sym: &SymbolicState,
+	protocol: &TermSet,
+	proposals: Vec<Substitution>,
+	equivalence: bool,
+) -> Vec<Substitution> {
+	let mut proposals = vars::dedupe_slots(proposals);
 	let honest = honest_slot_terms(km, sym);
 	let keyed: Vec<Substitution> =
 		crate::util::parallel::map_ordered((0..proposals.len()).collect(), |at| {
@@ -121,7 +177,7 @@ pub(crate) fn propose(
 	let swapped = swapped_free(&honest, sym, &proposals, attacker, protocol);
 	proposals.extend(swapped);
 
-	if open.iter().any(|q| q.kind == QueryKind::Equivalence) {
+	if equivalence {
 		let distinguished: Vec<Substitution> =
 			crate::util::parallel::map_ordered((0..proposals.len()).collect(), |at| {
 				diverge::distinguish(sym, &proposals[at])
@@ -131,21 +187,7 @@ pub(crate) fn propose(
 			.collect();
 		proposals.extend(distinguished);
 	}
-
-	if deducer.declined_bound() {
-		ctx.note_truncation(Truncation::TermDepth);
-	}
-	let (replays, others): (Vec<Substitution>, Vec<Substitution>) = proposals
-		.into_iter()
-		.partition(|proposal| sibling_replay(km, sym, proposal));
-	let mut proposals = others;
-	match pass {
-		Pass::Targeted => (proposals, replays),
-		Pass::Constructed => {
-			proposals.extend(replays);
-			(proposals, Vec::new())
-		}
-	}
+	proposals
 }
 
 fn sibling_replay(km: &ProtocolTrace, sym: &SymbolicState, proposal: &Substitution) -> bool {
@@ -179,7 +221,8 @@ pub(crate) fn emissions_under(
 	sym: &SymbolicState,
 	binding: &Substitution,
 ) -> Vec<Value> {
-	(0..km.slots.len())
+	km.slots
+		.indices()
 		.filter(|&e| {
 			!sym.is_var_slot(e) && km.slots[e].disclosed() && vars::contains_var(&sym.terms[e])
 		})
@@ -196,12 +239,9 @@ pub(crate) fn leave_honest_slots(
 	proposal: Substitution,
 ) -> Substitution {
 	let mut dropped: Vec<VariableId> = Vec::new();
-	for &slot in &sym.var_slots {
+	for (slot, term) in sym.variables() {
 		let id = vars::attacker_var_id(slot);
-		let Some(term) = &sym.var_terms[slot] else {
-			continue;
-		};
-		if !proposal.contains_key(&id) || slot >= km.slots.len() {
+		if !proposal.contains_key(&id) || km.slots.get(slot).is_none() {
 			continue;
 		}
 		let ground = vars::ground_free(&vars::apply(term, &proposal));
@@ -229,12 +269,9 @@ pub(crate) fn leave_honest_slots(
 pub(crate) fn install_signature(
 	sym: &SymbolicState,
 	proposal: &Substitution,
-) -> Vec<(usize, Value)> {
+) -> Vec<(SlotIdx, Value)> {
 	let mut out = Vec::new();
-	for &slot in &sym.var_slots {
-		let Some(term) = &sym.var_terms[slot] else {
-			continue;
-		};
+	for (slot, term) in sym.variables() {
 		if !proposal.contains_key(&vars::attacker_var_id(slot)) {
 			continue;
 		}
@@ -247,7 +284,7 @@ pub(crate) fn install_signature(
 	out
 }
 
-fn slot_substitution(sym: &SymbolicState, slot: usize) -> Substitution {
+fn slot_substitution(sym: &SymbolicState, slot: SlotIdx) -> Substitution {
 	let mut out = Substitution::default();
 	if let Some(term) = &sym.var_terms[slot] {
 		vars::ground_remaining(term, &mut out);
@@ -257,17 +294,16 @@ fn slot_substitution(sym: &SymbolicState, slot: usize) -> Substitution {
 
 fn blanket_substitution(sym: &SymbolicState) -> Substitution {
 	let mut out = Substitution::default();
-	for &slot in &sym.var_slots {
+	for slot in sym.var_slots() {
 		out.extend(slot_substitution(sym, slot));
 	}
 	out
 }
 
 fn sibling_flight_substitutions(km: &ProtocolTrace, sym: &SymbolicState) -> Vec<Substitution> {
-	let siblings: Vec<(usize, Vec<Value>)> = sym
-		.var_slots
-		.iter()
-		.filter_map(|&slot| {
+	let siblings: Vec<(SlotIdx, Vec<Value>)> = sym
+		.var_slots()
+		.filter_map(|slot| {
 			let trace_slot = km.slots.get(slot)?;
 			Some((slot, km.session_sibling_values(&trace_slot.constant)))
 		})
@@ -296,10 +332,10 @@ fn slot_candidates(
 	attacker: &AttackerState,
 	sym: &SymbolicState,
 	deducer: &Deducer,
-	protocol: &crate::term::hashing::TermSet,
+	protocol: &TermSet,
 	honest: &Value,
 	blanket: &Substitution,
-	slot: usize,
+	slot: SlotIdx,
 ) -> Vec<Value> {
 	let mut out = Vec::new();
 

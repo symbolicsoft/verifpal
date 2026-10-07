@@ -9,10 +9,24 @@
 // and its challenge. The chip is unchanged; Active Authentication signs
 // whatever bytes it is given, and these bytes now say to whom.
 //
-// Expected: a0, at one session and at two. The dishonest verifier can still
-// pass the bank's challenge to the holder's phone, but the phone hashes it
-// with the verifier's key, and the chip's signature over that is useless at
-// the bank. remote_aa.vp is the attack this closes.
+// Expected: a0 at one session, a1 at two. At one session the dishonest
+// verifier can still pass the bank's challenge to the holder's phone, but
+// the phone hashes it with the verifier's key, and the chip's signature over
+// that is useless at the bank. remote_aa.vp is the attack this closes.
+//
+// The attack at two sessions is not that relay, and the binding cannot stop
+// it, because it goes through the phone's own channel to the bank. The bank
+// contributes nothing to the channel key and the record nonces are fixed
+// labels, so the attacker replays the phone's ckMsg into a second bank run,
+// and two bank runs encrypt different challenges under the same key and
+// nChal. That nonce reuse lets it forge a chalMsg on the phone's channel
+// carrying the challenge of a third bank run, one it opened with its own
+// channel key. The phone, which is connected to the bank, hashes bankPub
+// with that challenge, the chip signs, and the attacker presents the
+// signature in its own run, where the bank accepts it. A TLS server
+// contributes fresh values to the channel keys, so a replayed key message
+// would not give two server runs the same keys; this channel is weaker
+// than TLS.
 
 attacker[active]
 

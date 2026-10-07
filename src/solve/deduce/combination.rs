@@ -4,7 +4,7 @@
 use std::sync::Arc;
 
 use super::Deducer;
-use crate::primitive::{CombineRule, MAX_SHARES, combines_into, primitive_get, recompose_rule};
+use crate::primitive::{CombineRule, MAX_SHARES, combines_into, recompose_rule};
 use crate::solve::matching::{match_values, unifiers};
 use crate::solve::vars::{Distinct, Substitution, apply, as_var, dedupe};
 use crate::term::equivalence::equivalent_primitives;
@@ -179,7 +179,7 @@ impl<'a> Deducer<'a> {
 		agreed: &[Value],
 		mut frontier: Vec<(Substitution, usize)>,
 	) -> Vec<Substitution> {
-		let arity = primitive_get(rule.partial)
+		let arity = crate::primitive::spec(rule.partial)
 			.ok()
 			.and_then(|partial| partial.arity.first().copied())
 			.unwrap_or(0)

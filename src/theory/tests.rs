@@ -6,7 +6,7 @@ use std::sync::Arc;
 use super::rewrite::{can_combine, combine_with};
 use super::*;
 use crate::primitive::*;
-use crate::term::{HashCell, Primitive, Value, value_nil};
+use crate::term::{Application, Primitive, Value, value_nil};
 use crate::testing::*;
 
 #[test]
@@ -14,8 +14,8 @@ fn malleability_deduction_requires_its_source_phase_key_and_payload() {
 	let key = make_private("maul_deduction_key");
 	let other = make_private("maul_deduction_other");
 	let hidden = make_private("maul_deduction_hidden");
-	let mut source = Primitive::new(PRIM_ENC, vec![key.clone(), hidden.clone()], 0);
-	source.capabilities.set(Capability::Malleable, 2);
+	let source = Primitive::new(PRIM_ENC, vec![key.clone(), hidden.clone()], 0)
+		.with(|application| application.capabilities.set(Capability::Malleable, 2));
 	let source = Value::Primitive(Arc::new(source));
 	let target = Value::primitive(PRIM_ENC, vec![key.clone(), value_nil()], 0);
 	let mut capabilities = CapabilityIndex::default();
@@ -76,9 +76,9 @@ fn rewrite_pointer_hits_preserve_collisions_and_checked_instances() {
 	let b = make_constant("pointer_collision_b");
 	let pass = Arc::new(Primitive::new(PRIM_ASSERT, vec![a.clone(), a.clone()], 0));
 	let fail = Arc::new(Primitive::new(PRIM_ASSERT, vec![a, b], 0));
-	fail.hash.set(crate::term::hashing::primitive_hash(&pass));
-	let mut checked = (*fail).clone();
-	checked.instance_check = true;
+	fail.cache()
+		.set(crate::term::hashing::primitive_hash(&pass));
+	let checked = fail.with(|application| application.instance_check = true);
 	let checked = Arc::new(checked);
 	for _ in 0..3 {
 		assert!(can_rewrite(&pass).0);
@@ -95,8 +95,7 @@ fn weak_index(v: &Value, onset: i32) -> CapabilityIndex {
 	let Value::Primitive(p) = v else {
 		panic!("expected a primitive");
 	};
-	let mut annotated = (**p).clone();
-	annotated.capabilities.set(Capability::Weak, onset);
+	let annotated = p.with(|application| application.capabilities.set(Capability::Weak, onset));
 	let mut index = CapabilityIndex::default();
 	index.insert(&Value::Primitive(Arc::new(annotated)));
 	index
@@ -169,8 +168,8 @@ fn a_reused_nonce_makes_a_ciphertext_buildable_without_its_key_or_nonce() {
 	with_pair.reused = Arc::new(vec![[e1.clone(), e2]]);
 	let result = can_reconstruct_primitive(&target, &capabilities, &with_pair)
 		.expect("forgeable under reuse");
-	assert!(matches!(result.forged, Some(Forged::Reuse(_))));
-	assert_eq!(result.from.len(), 2);
+	assert!(matches!(result, DerivationRecord::ReusedForge { .. }));
+	assert_eq!(result.supplied().len(), 2);
 	let without_pair = make_attacker_state(vec![e1, m3, ad]);
 	assert!(can_reconstruct_primitive(&target, &capabilities, &without_pair).is_none());
 }
@@ -230,7 +229,7 @@ fn can_rewrite_split_concat() {
 	let b = make_constant("cr_b");
 	let concat = make_primitive(PRIM_CONCAT, vec![a.clone(), b.clone()], 0);
 	let split_at = |output: usize| {
-		Arc::new(Primitive {
+		Arc::new(Primitive::from(Application {
 			id: PRIM_SPLIT,
 			arguments: vec![concat.clone()],
 			output,
@@ -238,8 +237,7 @@ fn can_rewrite_split_concat() {
 			instance_check: false,
 			capabilities: Capabilities::default(),
 			threshold: 0,
-			hash: HashCell::default(),
-		})
+		}))
 	};
 	for (output, expected) in [(0, a), (1, b)] {
 		let (rewritten, value) = can_rewrite(&split_at(output));
@@ -261,7 +259,7 @@ fn can_rewrite_pke_dec_with_projected_key() {
 	let proj = make_primitive(PRIM_SPLIT, vec![pair], 1);
 	let pk = make_primitive(PRIM_PUBKEY, vec![proj], 0);
 	let enc = make_primitive(PRIM_PKE_ENC, vec![pk, m.clone()], 0);
-	let dec = Primitive {
+	let dec = Primitive::from(Application {
 		id: PRIM_PKE_DEC,
 		arguments: vec![sk2, enc],
 		output: 0,
@@ -269,8 +267,7 @@ fn can_rewrite_pke_dec_with_projected_key() {
 		instance_check: false,
 		capabilities: Capabilities::default(),
 		threshold: 0,
-		hash: HashCell::default(),
-	};
+	});
 	let (rewritten, value) = can_rewrite(&Arc::new(dec));
 	assert!(rewritten);
 	assert!(value.equivalent(&m, true));
@@ -283,7 +280,7 @@ fn can_reconstruct_primitive_projection() {
 	let hash_a = make_primitive(PRIM_HASH, vec![a], 0);
 	let hash_b = make_primitive(PRIM_HASH, vec![b.clone()], 0);
 	let pair = make_primitive(PRIM_CONCAT, vec![hash_a, hash_b], 0);
-	let proj = Primitive {
+	let proj = Primitive::from(Application {
 		id: PRIM_SPLIT,
 		arguments: vec![pair],
 		output: 1,
@@ -291,15 +288,14 @@ fn can_reconstruct_primitive_projection() {
 		instance_check: false,
 		capabilities: Capabilities::default(),
 		threshold: 0,
-		hash: HashCell::default(),
-	};
+	});
 	let capabilities = CapabilityIndex::default();
 	let attacker = make_attacker_state(vec![b]);
 	assert!(can_reconstruct_primitive(&Arc::new(proj), &capabilities, &attacker).is_some());
 }
 
 fn ring(members: [&Value; 3], message: &Value, signature: &Value) -> Arc<Primitive> {
-	Arc::new(Primitive {
+	Arc::new(Primitive::from(Application {
 		id: PRIM_RINGSIGNVERIF,
 		arguments: vec![
 			members[0].clone(),
@@ -313,8 +309,7 @@ fn ring(members: [&Value; 3], message: &Value, signature: &Value) -> Arc<Primiti
 		instance_check: true,
 		capabilities: Capabilities::default(),
 		threshold: 0,
-		hash: HashCell::default(),
-	})
+	}))
 }
 
 #[test]
@@ -357,7 +352,7 @@ fn a_ring_signature_verifies_only_against_the_ring_it_was_made_over() {
 #[test]
 fn can_rewrite_assert_matching() {
 	let a = make_constant("cra_a");
-	let assert_prim = Primitive {
+	let assert_prim = Primitive::from(Application {
 		id: PRIM_ASSERT,
 		arguments: vec![a.clone(), a.clone()],
 		output: 0,
@@ -365,8 +360,7 @@ fn can_rewrite_assert_matching() {
 		instance_check: false,
 		capabilities: Capabilities::default(),
 		threshold: 0,
-		hash: HashCell::default(),
-	};
+	});
 	let (rewritten, _) = can_rewrite(&Arc::new(assert_prim));
 	assert!(rewritten);
 }
@@ -375,7 +369,7 @@ fn can_rewrite_assert_matching() {
 fn can_rewrite_assert_mismatch() {
 	let a = make_constant("cram_a");
 	let b = make_constant("cram_b");
-	let assert_prim = Primitive {
+	let assert_prim = Primitive::from(Application {
 		id: PRIM_ASSERT,
 		arguments: vec![a, b],
 		output: 0,
@@ -383,8 +377,7 @@ fn can_rewrite_assert_mismatch() {
 		instance_check: false,
 		capabilities: Capabilities::default(),
 		threshold: 0,
-		hash: HashCell::default(),
-	};
+	});
 	let (rewritten, _) = can_rewrite(&Arc::new(assert_prim));
 	assert!(!rewritten);
 }
@@ -393,9 +386,8 @@ fn can_rewrite_assert_mismatch() {
 fn recompose_counts_distinct_held_shares_against_the_threshold() {
 	let secret = make_constant("rct_secret");
 	let split = |t: usize| {
-		let mut p = Primitive::new(PRIM_THRESHOLD_SPLIT, vec![secret.clone()], 0);
-		p.threshold = t;
-		p
+		Primitive::new(PRIM_THRESHOLD_SPLIT, vec![secret.clone()], 0)
+			.with(|application| application.threshold = t)
 	};
 	let share = |t: usize, output: usize| Value::Primitive(Arc::new(split(t).with_output(output)));
 	let two_of_five = make_attacker_state(vec![share(2, 1), share(2, 4)]);
@@ -410,8 +402,8 @@ fn recompose_counts_distinct_held_shares_against_the_threshold() {
 }
 
 fn tsh_share(secret: &Value, t: usize, output: usize) -> Value {
-	let mut p = Primitive::new(PRIM_THRESHOLD_SPLIT, vec![secret.clone()], output);
-	p.threshold = t;
+	let p = Primitive::new(PRIM_THRESHOLD_SPLIT, vec![secret.clone()], output)
+		.with(|application| application.threshold = t);
 	Value::Primitive(Arc::new(p))
 }
 
@@ -546,9 +538,14 @@ fn a_signature_is_reconstructed_from_a_held_partial_and_a_held_share() {
 	]);
 	let built =
 		can_reconstruct_primitive(sig_p, &capabilities, &with_share).expect("t pieces suffice");
-	assert_eq!(built.from.len(), 2);
-	assert!(built.from.iter().any(|f| f.equivalent(&partial, true)));
-	assert!(built.forged.is_none());
+	assert_eq!(built.supplied().len(), 2);
+	assert!(
+		built
+			.supplied()
+			.iter()
+			.any(|f| f.equivalent(&partial, true))
+	);
+	assert!(!built.forged());
 	let same_share = make_attacker_state(vec![
 		partial.clone(),
 		tsh_share(&k, 2, 0),
@@ -654,7 +651,7 @@ fn a_leaked_share_uses_a_known_nonce_from_the_committed_session() {
 	let signature = Arc::new(Primitive::new(PRIM_SIGN, vec![k, m], 0));
 	let built =
 		can_reconstruct_primitive(&signature, &CapabilityIndex::default(), &attacker).unwrap();
-	assert!(combination_holds(&signature, &built.from));
+	assert!(combination_holds(&signature, built.supplied()));
 }
 
 #[test]
@@ -704,7 +701,7 @@ fn threshold_sign_nonce_disclosure_needs_the_signing_context() {
 fn can_decompose_enc_with_key() {
 	let key = make_constant("cd_key");
 	let msg = make_constant("cd_msg");
-	let p = Primitive {
+	let p = Primitive::from(Application {
 		id: PRIM_ENC,
 		arguments: vec![key.clone(), msg.clone()],
 		output: 0,
@@ -712,8 +709,7 @@ fn can_decompose_enc_with_key() {
 		instance_check: false,
 		capabilities: Capabilities::default(),
 		threshold: 0,
-		hash: HashCell::default(),
-	};
+	});
 	let capabilities = CapabilityIndex::default();
 	let attacker = make_attacker_state(vec![key]);
 	let result = can_decompose(&p, &capabilities, &attacker);
@@ -732,7 +728,7 @@ fn can_decompose_kem_with_private_key_reveals_shared_secret_and_randomness() {
 	let dk = make_constant("kd_dk");
 	let r = make_constant("kd_r");
 	let ek = make_primitive(PRIM_PUBKEY, vec![dk.clone()], 0);
-	let ct = Primitive {
+	let ct = Primitive::from(Application {
 		id: PRIM_KEM_ENCAP,
 		arguments: vec![ek.clone(), r.clone()],
 		output: 1,
@@ -740,8 +736,7 @@ fn can_decompose_kem_with_private_key_reveals_shared_secret_and_randomness() {
 		instance_check: false,
 		capabilities: Capabilities::default(),
 		threshold: 0,
-		hash: HashCell::default(),
-	};
+	});
 	let capabilities = CapabilityIndex::default();
 	let attacker = make_attacker_state(vec![dk]);
 	let revealed = can_decompose(&ct, &capabilities, &attacker)
@@ -759,7 +754,7 @@ fn can_decompose_kem_without_private_key() {
 	let dk = make_constant("kn_dk");
 	let r = make_constant("kn_r");
 	let ek = make_primitive(PRIM_PUBKEY, vec![dk], 0);
-	let ct = Primitive {
+	let ct = Primitive::from(Application {
 		id: PRIM_KEM_ENCAP,
 		arguments: vec![ek.clone(), r],
 		output: 1,
@@ -767,8 +762,7 @@ fn can_decompose_kem_without_private_key() {
 		instance_check: false,
 		capabilities: Capabilities::default(),
 		threshold: 0,
-		hash: HashCell::default(),
-	};
+	});
 	let capabilities = CapabilityIndex::default();
 	let attacker = make_attacker_state(vec![ek]);
 	assert!(can_decompose(&ct, &capabilities, &attacker).is_none());
@@ -780,7 +774,7 @@ fn kem_decap_rewrites_to_the_shared_secret() {
 	let r = make_constant("kr_r");
 	let ek = make_primitive(PRIM_PUBKEY, vec![dk.clone()], 0);
 	let ct = make_primitive(PRIM_KEM_ENCAP, vec![ek.clone(), r.clone()], 1);
-	let decap = Primitive {
+	let decap = Primitive::from(Application {
 		id: PRIM_KEM_DECAP,
 		arguments: vec![dk, ct],
 		output: 0,
@@ -788,8 +782,7 @@ fn kem_decap_rewrites_to_the_shared_secret() {
 		instance_check: false,
 		capabilities: Capabilities::default(),
 		threshold: 0,
-		hash: HashCell::default(),
-	};
+	});
 	let (rewritten, value) = can_rewrite(&Arc::new(decap));
 	assert!(rewritten);
 	let expected = make_primitive(PRIM_KEM_ENCAP, vec![ek, r], 0);
@@ -803,7 +796,7 @@ fn kem_decap_does_not_rewrite_under_the_wrong_key() {
 	let r = make_constant("kw_r");
 	let ek = make_primitive(PRIM_PUBKEY, vec![dk], 0);
 	let ct = make_primitive(PRIM_KEM_ENCAP, vec![ek, r], 1);
-	let decap = Primitive {
+	let decap = Primitive::from(Application {
 		id: PRIM_KEM_DECAP,
 		arguments: vec![other, ct],
 		output: 0,
@@ -811,8 +804,7 @@ fn kem_decap_does_not_rewrite_under_the_wrong_key() {
 		instance_check: false,
 		capabilities: Capabilities::default(),
 		threshold: 0,
-		hash: HashCell::default(),
-	};
+	});
 	let (rewritten, _) = can_rewrite(&Arc::new(decap));
 	assert!(!rewritten);
 }
@@ -821,7 +813,7 @@ fn kem_decap_does_not_rewrite_under_the_wrong_key() {
 fn can_decompose_enc_without_key() {
 	let key = make_constant("cd_nk_key");
 	let msg = make_constant("cd_nk_msg");
-	let p = Primitive {
+	let p = Primitive::from(Application {
 		id: PRIM_ENC,
 		arguments: vec![key, msg],
 		output: 0,
@@ -829,8 +821,7 @@ fn can_decompose_enc_without_key() {
 		instance_check: false,
 		capabilities: Capabilities::default(),
 		threshold: 0,
-		hash: HashCell::default(),
-	};
+	});
 	let capabilities = CapabilityIndex::default();
 	let attacker = make_attacker_state(vec![]);
 	assert!(can_decompose(&p, &capabilities, &attacker).is_none());
@@ -910,7 +901,7 @@ fn a_checked_decryption_under_the_wrong_key_is_reported_as_a_failure() {
 	let ad = make_constant("rwf_ad");
 	let n = make_constant("rwf_n");
 	let sealed = make_primitive(PRIM_AEAD_ENC, vec![k, n.clone(), m, ad.clone()], 0);
-	let dec = Value::Primitive(Arc::new(Primitive {
+	let dec = Value::Primitive(Arc::new(Primitive::from(Application {
 		id: PRIM_AEAD_DEC,
 		arguments: vec![other, n, sealed, ad],
 		output: 0,
@@ -918,8 +909,7 @@ fn a_checked_decryption_under_the_wrong_key_is_reported_as_a_failure() {
 		instance_check: true,
 		capabilities: Capabilities::default(),
 		threshold: 0,
-		hash: HashCell::default(),
-	}));
+	})));
 	let (ok, value) = rewrite(&dec);
 	assert!(!ok);
 	let failed = value
@@ -951,8 +941,8 @@ fn an_inner_rewrite_is_applied_before_the_outer_one_is_tried() {
 fn threshold_join_rebuilds_the_secret_from_two_distinct_shares() {
 	let secret = make_constant("rws_secret");
 	let share = |output: usize| {
-		let mut p = Primitive::new(PRIM_THRESHOLD_SPLIT, vec![secret.clone()], output);
-		p.threshold = 2;
+		let p = Primitive::new(PRIM_THRESHOLD_SPLIT, vec![secret.clone()], output)
+			.with(|application| application.threshold = 2);
 		Value::Primitive(Arc::new(p))
 	};
 	let (ok, value) = rewrite(&make_primitive(
@@ -968,8 +958,8 @@ fn threshold_join_rebuilds_the_secret_from_two_distinct_shares() {
 fn a_three_of_five_join_needs_three_distinct_shares() {
 	let secret = make_constant("rw35_secret");
 	let share = |output: usize| {
-		let mut p = Primitive::new(PRIM_THRESHOLD_SPLIT, vec![secret.clone()], output);
-		p.threshold = 3;
+		let p = Primitive::new(PRIM_THRESHOLD_SPLIT, vec![secret.clone()], output)
+			.with(|application| application.threshold = 3);
 		Value::Primitive(Arc::new(p))
 	};
 	let join = |shares: Vec<Value>| make_primitive(PRIM_THRESHOLD_JOIN, shares, 0);
@@ -987,8 +977,8 @@ fn a_three_of_five_join_needs_three_distinct_shares() {
 fn a_two_of_n_join_accepts_any_two_shares() {
 	let secret = make_constant("rw2n_secret");
 	let share = |output: usize| {
-		let mut p = Primitive::new(PRIM_THRESHOLD_SPLIT, vec![secret.clone()], output);
-		p.threshold = 2;
+		let p = Primitive::new(PRIM_THRESHOLD_SPLIT, vec![secret.clone()], output)
+			.with(|application| application.threshold = 2);
 		Value::Primitive(Arc::new(p))
 	};
 	let (_, value) = rewrite(&make_primitive(
@@ -1008,8 +998,8 @@ fn a_two_of_n_join_accepts_any_two_shares() {
 #[test]
 fn two_shares_of_the_same_output_do_not_rebuild_anything() {
 	let secret = make_constant("rwd_secret");
-	let mut split = Primitive::new(PRIM_THRESHOLD_SPLIT, vec![secret.clone()], 0);
-	split.threshold = 2;
+	let split = Primitive::new(PRIM_THRESHOLD_SPLIT, vec![secret.clone()], 0)
+		.with(|application| application.threshold = 2);
 	let share = Value::Primitive(Arc::new(split));
 	let join = make_primitive(PRIM_THRESHOLD_JOIN, vec![share.clone(), share], 0);
 	let (_, value) = rewrite(&join);

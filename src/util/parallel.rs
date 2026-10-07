@@ -149,7 +149,6 @@ mod tests {
 				assert_eq!(a.summary, b.summary, "{model}");
 				assert_eq!(a.conclusion, b.conclusion, "{model}");
 				assert_eq!(a.trace, b.trace, "{model}");
-				assert_eq!(a.notes, b.notes, "{model}");
 			}
 		}
 	}

@@ -9,13 +9,14 @@ pub(crate) mod program;
 pub(crate) mod search;
 pub(crate) mod unlink;
 
-use crate::console::{InfoLevel, info_message};
+use crate::console::InfoLevel;
 use crate::protocol::ProtocolTrace;
+use crate::protocol::SlotIdx;
 use crate::syntax::{AttackerKind, Model, PrincipalId, Query, VResult, VerifpalError};
-use crate::term::{Constant, Value};
+use crate::term::Value;
 use crate::verify::context::VerifyContext;
-use crate::verify::{QueryOptionResult, Subtype, VerifyResult};
-use exec::{Context, Execution, Installs, execute};
+use crate::verify::{QueryOptionResult, VerifyResult};
+use exec::{Context, Execution, Install, Installs, execute};
 use judgment::{Judge, Violation};
 use program::Program;
 
@@ -24,7 +25,7 @@ pub(crate) fn verify(ctx: &VerifyContext, m: &Model, km: &ProtocolTrace) -> VRes
 	let cx = Context::new(&program, km);
 	let root = execute(&cx, &Vec::new());
 	check_honest_run(ctx, km, &program, &root)?;
-	info_message(
+	crate::console::message(
 		&format!("Attacker is configured as {}.", m.attacker),
 		InfoLevel::Info,
 	);
@@ -33,10 +34,10 @@ pub(crate) fn verify(ctx: &VerifyContext, m: &Model, km: &ProtocolTrace) -> VRes
 		if matches!(root.knowledge.origin(i), knowledge::Origin::Initial) {
 			continue;
 		}
-		crate::console::info_deduction(|| {
+		crate::console::deduction(|| {
 			format!(
 				"{} is obtained by the attacker.",
-				crate::console::info_output_text(v)
+				crate::console::output_text(v)
 			)
 		});
 	}
@@ -55,7 +56,7 @@ fn check_honest_run(
 	program: &Program,
 	root: &Execution,
 ) -> VResult<()> {
-	let located = |e: VerifpalError, slot: usize| e.or_span(km.slots[slot].declared_span);
+	let located = |e: VerifpalError, slot: SlotIdx| e.or_span(km.slots[slot].declared_span);
 	let failed = root
 		.runs
 		.iter()
@@ -74,7 +75,7 @@ fn check_honest_run(
 		));
 	}
 	for run in &root.runs {
-		for (slot, held) in run.env.iter().enumerate() {
+		for (slot, held) in run.env.iter_enumerated() {
 			if let Some(held) = held {
 				crate::protocol::sanity::sanity_check_argument_restrictions(&held.value)
 					.map_err(|e| located(e, slot))?;
@@ -91,8 +92,12 @@ fn minimal(
 	installs: &Installs,
 	violation: impl Fn(&Execution) -> Option<Found>,
 ) -> Option<(Execution, Found)> {
-	let message = |(run, slot, _): &(usize, usize, Value)| {
-		(*run, cx.program.runs[*run].step_of_slot.get(slot).copied())
+	let message = |install: &Install| {
+		let run = install.run();
+		let step = install
+			.slot()
+			.and_then(|slot| cx.program.runs[run].step_of_slot.get(&slot).copied());
+		(run, step)
 	};
 	let mut kept = installs.clone();
 	let mut best = None;
@@ -151,21 +156,6 @@ pub(crate) fn judge(
 	}
 }
 
-fn carries_a_secret(v: &Value, km: &ProtocolTrace) -> bool {
-	v.constant_leaves().any(|c| unlink::declared_secret(c, km))
-}
-
-fn recipient_contributed(c: &Constant, km: &ProtocolTrace, recipient: PrincipalId) -> bool {
-	crate::protocol::trace::resolve_trace_constant(c, km)
-		.constant_leaves()
-		.any(|inner| {
-			km.index_of(inner).is_some_and(|i| {
-				let slot = &km.slots[i];
-				slot.constant.fresh && km.same_actor(slot.creator, recipient)
-			})
-		})
-}
-
 fn report(
 	ctx: &VerifyContext,
 	cx: &Context,
@@ -175,8 +165,6 @@ fn report(
 	q: &Query,
 	(v, verdict): &Found,
 ) {
-	let km = cx.km;
-	let program = cx.program;
 	out.resolved = true;
 	out.options = q
 		.options
@@ -191,156 +179,10 @@ fn report(
 			})
 		})
 		.collect();
-	let name = |run: usize| program.runs[run].name.as_str();
 	let mut narrator = narrate::Narrator::new(cx, ex, honest);
 	narrator.installs();
-	let shown = |narrator: &narrate::Narrator, slot: usize, value: &Value| {
-		let own = km.slots[slot].constant.to_string();
-		narrator.spelled(value, &[&own])
-	};
-	let conclusion = match v {
-		Violation::Disclosed { run, slot, value } => {
-			narrator.public(value);
-			narrator.explain(value, ex.order.len());
-			let constant = &km.slots[*slot].constant;
-			let value_shown = shown(&narrator, *slot, value);
-			if !crate::theory::reduce_once(value)
-				.equivalent(&unlink::honest_reduct(km, *slot), true)
-				&& !carries_a_secret(value, km)
-			{
-				out.subtype = Some(Subtype::AttackerSuppliedValue);
-				format!(
-					"{constant} ({value_shown}) is obtained by Attacker, but that is the value the \
-					 attacker put there: it carries nothing {} generated or holds privately, so the \
-					 honest {constant} is not shown to be disclosed.",
-					name(*run)
-				)
-			} else {
-				format!("{constant} ({value_shown}) is obtained by Attacker.")
-			}
-		}
-		Violation::Forged {
-			run,
-			slot,
-			value,
-			used,
-		} => {
-			narrator.gate(*run, *used);
-			format!(
-				"{} ({}), sent by Attacker and not by {}, is successfully used in {} within {}'s state.",
-				km.slots[*slot].constant,
-				shown(&narrator, *slot, value),
-				q.message.sender_name,
-				narrator.declared(*used),
-				name(*run)
-			)
-		}
-		Violation::Replayed {
-			run,
-			slot,
-			value,
-			used,
-			emissions,
-			acceptances,
-		} => {
-			narrator.gate(*run, *used);
-			let constant = &km.slots[*slot].constant;
-			out.subtype = Some(
-				if recipient_contributed(constant, km, q.message.recipient) {
-					Subtype::DuplicateAcceptance
-				} else {
-					Subtype::ReplayableFirstFlight
-				},
-			);
-			let axis = narrator.replayed_from(*run, *slot, value).unwrap_or("run");
-			let times = |n: usize| match n {
-				1 => "once".to_string(),
-				2 => "twice".to_string(),
-				n => format!("{n} times"),
-			};
-			format!(
-				"{constant} ({}), which {s} sent in another {axis} and not in this one, is \
-				 successfully used in {} within {}'s state: {s} sent it {}, {r} accepts it \
-				 {}, so agreement is not injective.",
-				shown(&narrator, *slot, value),
-				narrator.declared(*used),
-				name(*run),
-				times(*emissions),
-				times(*acceptances),
-				s = crate::syntax::names::copy_base_name(&q.message.sender_name),
-				r = crate::syntax::names::copy_base_name(&q.message.recipient_name),
-			)
-		}
-		Violation::Substituted {
-			run,
-			slot,
-			sender,
-			used,
-		} => {
-			narrator.received(*run, *slot, *sender);
-			format!(
-				"{}, sent by {} and not by {}, is successfully used in {} within {}'s state.",
-				km.slots[*slot].constant,
-				name(*sender),
-				q.message.sender_name,
-				narrator.declared(*used),
-				name(*run)
-			)
-		}
-		Violation::Stale {
-			run,
-			slot,
-			value,
-			used,
-			repeated: None,
-		} => {
-			narrator.built_from(*slot, value);
-			format!(
-				"{} ({}) is used by {} in {} despite not being a fresh value.",
-				km.slots[*slot].constant,
-				shown(&narrator, *slot, value),
-				name(*run),
-				narrator.declared(*used)
-			)
-		}
-		Violation::Stale {
-			run,
-			slot,
-			value,
-			used,
-			repeated: Some(other),
-		} => {
-			narrator.gate(*run, *used);
-			format!(
-				"{} ({}) is used by {} in {}, and {} accepts the same value: the attacker keeps \
-				 it the same across sessions, so it is not fresh.",
-				km.slots[*slot].constant,
-				shown(&narrator, *slot, value),
-				name(*run),
-				narrator.declared(*used),
-				name(*other)
-			)
-		}
-		Violation::Linked { link, resolved } => {
-			narrator.resolves(resolved);
-			let [a, b] = [&resolved[0].0, &resolved[1].0].map(ToString::to_string);
-			format!(
-				"Attacker links {a} and {b} {}.",
-				link.describe(|v| narrator.term(v, &[&a, &b]))
-			)
-		}
-		Violation::Differ { resolved } => {
-			narrator.resolves(resolved);
-			format!(
-				"{} are not equivalent.",
-				q.constants
-					.iter()
-					.map(|c| c.name.to_string())
-					.collect::<Vec<_>>()
-					.join(", ")
-			)
-		}
-	};
+	let (conclusion, subtype) = narrator.conclude(q, v);
+	out.subtype = subtype;
 	out.set_summary(
 		&narrator.trace(),
 		std::mem::take(&mut narrator.steps),

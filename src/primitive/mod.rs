@@ -6,7 +6,7 @@ mod spec;
 #[cfg(test)]
 mod tests;
 
-pub use capability::{Capabilities, Capability, CapabilityIndex, Reach};
+pub(crate) use capability::{Capabilities, Capability, CapabilityIndex, Reach};
 
 use std::sync::LazyLock;
 
@@ -199,11 +199,11 @@ static PRIM_SPECS: LazyLock<[Option<PrimitiveSpec>; 256]> = LazyLock::new(|| {
 	table
 });
 
-fn core_spec(id: PrimitiveId) -> Option<&'static PrimitiveCoreSpec> {
+fn core_entry(id: PrimitiveId) -> Option<&'static PrimitiveCoreSpec> {
 	CORE_SPECS[id as usize].as_ref()
 }
 
-fn prim_spec(id: PrimitiveId) -> Option<&'static PrimitiveSpec> {
+fn spec_entry(id: PrimitiveId) -> Option<&'static PrimitiveSpec> {
 	PRIM_SPECS[id as usize].as_ref()
 }
 
@@ -262,34 +262,34 @@ impl PrimitiveDefinition for PrimitiveSpec {
 	}
 }
 
-pub(crate) fn primitive_def(id: PrimitiveId) -> VResult<&'static dyn PrimitiveDefinition> {
-	match core_spec(id) {
+pub(crate) fn definition(id: PrimitiveId) -> VResult<&'static dyn PrimitiveDefinition> {
+	match core_entry(id) {
 		Some(core) => Ok(core),
-		None => Ok(primitive_get(id)?),
+		None => Ok(spec(id)?),
 	}
 }
 
-pub(crate) fn primitive_is_core(id: PrimitiveId) -> bool {
-	core_spec(id).is_some()
+pub(crate) fn is_core(id: PrimitiveId) -> bool {
+	core_entry(id).is_some()
 }
 
-pub(crate) fn primitive_core_get(id: PrimitiveId) -> VResult<&'static PrimitiveCoreSpec> {
-	core_spec(id).ok_or_else(|| VerifpalError::internal("unknown primitive".into()))
+pub(crate) fn core_spec(id: PrimitiveId) -> VResult<&'static PrimitiveCoreSpec> {
+	core_entry(id).ok_or_else(|| VerifpalError::internal("unknown primitive".into()))
 }
 
-pub(crate) fn primitive_get(id: PrimitiveId) -> VResult<&'static PrimitiveSpec> {
-	prim_spec(id).ok_or_else(|| VerifpalError::internal("unknown primitive".into()))
+pub(crate) fn spec(id: PrimitiveId) -> VResult<&'static PrimitiveSpec> {
+	spec_entry(id).ok_or_else(|| VerifpalError::internal("unknown primitive".into()))
 }
 
-pub(crate) fn primitive_check_undoing(
+pub(crate) fn check_undoing(
 	id: PrimitiveId,
 ) -> Option<(&'static PrimitiveSpec, &'static RewriteRule)> {
-	primitives_rewriting(id)
+	rewriting(id)
 		.filter(|(spec, _)| spec.definition_check)
 		.min_by_key(|(spec, _)| spec.id)
 }
 
-pub(crate) fn primitives_rewriting(
+pub(crate) fn rewriting(
 	id: PrimitiveId,
 ) -> impl Iterator<Item = (&'static PrimitiveSpec, &'static RewriteRule)> {
 	prim_specs().filter_map(move |spec| {
@@ -298,11 +298,11 @@ pub(crate) fn primitives_rewriting(
 	})
 }
 
-pub(crate) fn primitive_name(id: PrimitiveId) -> &'static str {
-	primitive_def(id).map(|d| d.name()).unwrap_or("")
+pub(crate) fn name(id: PrimitiveId) -> &'static str {
+	definition(id).map(|d| d.name()).unwrap_or("")
 }
 
-pub(crate) fn primitive_names() -> Vec<&'static str> {
+pub(crate) fn names() -> Vec<&'static str> {
 	let mut names: Vec<&'static str> = core_specs()
 		.map(|s| s.name)
 		.chain(prim_specs().map(|s| s.name))
@@ -311,7 +311,7 @@ pub(crate) fn primitive_names() -> Vec<&'static str> {
 	names
 }
 
-pub(crate) fn primitive_checkable_names() -> Vec<String> {
+pub(crate) fn checkable_names() -> Vec<String> {
 	let mut names: Vec<String> = core_specs()
 		.filter(|s| s.definition_check)
 		.map(|s| s.name.to_string())
@@ -325,8 +325,8 @@ pub(crate) fn primitive_checkable_names() -> Vec<String> {
 	names
 }
 
-pub(crate) fn primitive_signature(id: PrimitiveId) -> String {
-	let Ok(def) = primitive_def(id) else {
+pub(crate) fn signature(id: PrimitiveId) -> String {
+	let Ok(def) = definition(id) else {
 		return String::new();
 	};
 	let names = def.arg_names();
@@ -343,18 +343,18 @@ pub(crate) fn primitive_signature(id: PrimitiveId) -> String {
 	format!("{}({})", name, names.join(", "))
 }
 
-pub(crate) fn primitive_has_single_output(id: PrimitiveId) -> bool {
-	primitive_def(id)
+pub(crate) fn has_single_output(id: PrimitiveId) -> bool {
+	definition(id)
 		.map(|d| d.has_single_output())
 		.unwrap_or(false)
 }
 
-pub(crate) fn primitive_output_spec(id: PrimitiveId) -> VResult<(&'static [i32], bool)> {
-	let d = primitive_def(id)?;
+pub(crate) fn output_spec(id: PrimitiveId) -> VResult<(&'static [i32], bool)> {
+	let d = definition(id)?;
 	Ok((d.output(), d.definition_check()))
 }
 
-pub(crate) fn primitive_get_enum(name: &str) -> VResult<PrimitiveId> {
+pub(crate) fn id_of(name: &str) -> VResult<PrimitiveId> {
 	core_specs()
 		.find(|s| s.name == name)
 		.map(|s| s.id)
@@ -363,7 +363,7 @@ pub(crate) fn primitive_get_enum(name: &str) -> VResult<PrimitiveId> {
 }
 
 pub(crate) fn commutativity_rule(id: PrimitiveId) -> Option<&'static CommutativityRule> {
-	prim_spec(id)?.commutativity.as_ref()
+	spec_entry(id)?.commutativity.as_ref()
 }
 
 pub(crate) fn commutativity_parts_ref(p: &Primitive) -> Option<(&Value, &Value)> {
@@ -393,7 +393,7 @@ static KEY_DERIVATION: LazyLock<Option<PrimitiveId>> =
 	LazyLock::new(|| prim_specs().find(|s| s.key_derivation).map(|s| s.id));
 
 pub(crate) fn secret_positions(id: PrimitiveId) -> Vec<usize> {
-	let Some(spec) = prim_spec(id) else {
+	let Some(spec) = spec_entry(id) else {
 		return Vec::new();
 	};
 	let mut out: Vec<usize> = Vec::new();
@@ -422,7 +422,7 @@ pub(crate) fn attacker_public_key() -> Value {
 
 pub(crate) fn key_derivation_inner(v: &Value) -> Option<&Value> {
 	match v {
-		Value::Primitive(p) if primitive_is_key_derivation(p.id) && p.arguments.len() == 1 => {
+		Value::Primitive(p) if is_key_derivation(p.id) && p.arguments.len() == 1 => {
 			p.arguments.first()
 		}
 		_ => None,
@@ -430,7 +430,7 @@ pub(crate) fn key_derivation_inner(v: &Value) -> Option<&Value> {
 }
 
 pub(crate) fn value_is_key_derivation(v: &Value) -> bool {
-	matches!(v, Value::Primitive(p) if primitive_is_key_derivation(p.id))
+	matches!(v, Value::Primitive(p) if is_key_derivation(p.id))
 }
 
 pub(crate) fn normalise_arguments(id: PrimitiveId, mut arguments: Vec<Value>) -> Vec<Value> {
@@ -463,42 +463,42 @@ pub(crate) fn admissible(v: &Value) -> bool {
 }
 
 pub(crate) fn argument_restrictions(id: PrimitiveId) -> &'static [ArgumentRestriction] {
-	prim_spec(id).map_or(&[], |s| s.argument_restrictions.as_slice())
+	spec_entry(id).map_or(&[], |s| s.argument_restrictions.as_slice())
 }
 
-pub(crate) fn primitive_is_key_derivation(id: PrimitiveId) -> bool {
-	prim_spec(id).is_some_and(|s| s.key_derivation)
+pub(crate) fn is_key_derivation(id: PrimitiveId) -> bool {
+	spec_entry(id).is_some_and(|s| s.key_derivation)
 }
 
-pub(crate) fn primitive_core_reveals_args(id: PrimitiveId) -> bool {
-	core_spec(id).is_some_and(|s| s.reveals_args)
+pub(crate) fn core_reveals_arguments(id: PrimitiveId) -> bool {
+	core_entry(id).is_some_and(|s| s.reveals_args)
 }
 
-pub(crate) fn primitive_projects(id: PrimitiveId) -> Option<PrimitiveId> {
-	core_spec(id)?.projection_of
+pub(crate) fn projects(id: PrimitiveId) -> Option<PrimitiveId> {
+	core_entry(id)?.projection_of
 }
 
-pub(crate) fn primitive_is_projection(id: PrimitiveId) -> bool {
-	primitive_projects(id).is_some()
+pub(crate) fn is_projection(id: PrimitiveId) -> bool {
+	projects(id).is_some()
 }
 
-pub(crate) fn primitive_is_equality(id: PrimitiveId) -> bool {
-	core_spec(id).is_some_and(|s| s.equality)
+pub(crate) fn is_equality(id: PrimitiveId) -> bool {
+	core_entry(id).is_some_and(|s| s.equality)
 }
 
-pub(crate) fn primitive_unwraps(id: PrimitiveId) -> Option<usize> {
-	match core_spec(id) {
+pub(crate) fn unwraps(id: PrimitiveId) -> Option<usize> {
+	match core_entry(id) {
 		Some(core) => core.unwraps,
 		None => rewrite_rule(id).map(|rule| rule.from),
 	}
 }
 
-pub(crate) fn filler_primitive() -> Option<PrimitiveId> {
+pub(crate) fn filler() -> Option<PrimitiveId> {
 	prim_specs().find(|s| s.divergence_filler).map(|s| s.id)
 }
 
 pub(crate) fn combine_rules(id: PrimitiveId) -> &'static [CombineRule] {
-	prim_spec(id).map_or(&[], |s| s.combine.as_slice())
+	spec_entry(id).map_or(&[], |s| s.combine.as_slice())
 }
 
 pub(crate) fn combines_from(partial: PrimitiveId) -> impl Iterator<Item = &'static CombineRule> {
@@ -516,18 +516,18 @@ pub(crate) fn combines_into(
 	})
 }
 
-pub(crate) fn primitive_threshold(id: PrimitiveId) -> Option<ThresholdSpec> {
-	prim_spec(id)?.threshold
+pub(crate) fn threshold(id: PrimitiveId) -> Option<ThresholdSpec> {
+	spec_entry(id)?.threshold
 }
 
-pub(crate) fn primitives_with_threshold() -> Vec<&'static str> {
+pub(crate) fn threshold_names() -> Vec<&'static str> {
 	prim_specs()
 		.filter(|s| s.threshold.is_some())
 		.map(|s| s.name)
 		.collect()
 }
 
-pub(crate) fn primitive_renamed(name: &str) -> Option<&'static str> {
+pub(crate) fn renamed(name: &str) -> Option<&'static str> {
 	spec::RENAMED
 		.iter()
 		.find(|(old, _)| old.eq_ignore_ascii_case(name))
@@ -535,22 +535,22 @@ pub(crate) fn primitive_renamed(name: &str) -> Option<&'static str> {
 }
 
 pub(crate) fn reuse_rule(id: PrimitiveId) -> Option<&'static ReuseRule> {
-	prim_spec(id)?.reuse.as_ref()
+	spec_entry(id)?.reuse.as_ref()
 }
 
 pub(crate) fn rewrite_rule(id: PrimitiveId) -> Option<&'static RewriteRule> {
-	prim_spec(id)?.rewrite.as_ref()
+	spec_entry(id)?.rewrite.as_ref()
 }
 
 pub(crate) fn recompose_rule(id: PrimitiveId) -> Option<&'static RecomposeRule> {
-	prim_spec(id)?.recompose.as_ref()
+	spec_entry(id)?.recompose.as_ref()
 }
 
 pub(crate) fn reuse_fixed_names(v: &Value) -> String {
 	let Value::Primitive(p) = v else {
 		return String::new();
 	};
-	let (Some(rule), Some(spec)) = (reuse_rule(p.id), prim_spec(p.id)) else {
+	let (Some(rule), Some(spec)) = (reuse_rule(p.id), spec_entry(p.id)) else {
 		return String::new();
 	};
 	let names: Vec<&str> = rule
@@ -561,13 +561,13 @@ pub(crate) fn reuse_fixed_names(v: &Value) -> String {
 	crate::util::text::and_list(&names)
 }
 
-pub(crate) fn primitive_arity_help(id: PrimitiveId, given: i32) -> Option<&'static str> {
-	let (arity, help) = prim_spec(id)?.arity_help?;
+pub(crate) fn arity_help(id: PrimitiveId, given: i32) -> Option<&'static str> {
+	let (arity, help) = spec_entry(id)?.arity_help?;
 	(arity == given).then_some(help)
 }
 
 #[cfg_attr(not(feature = "language"), allow(dead_code))]
-pub(crate) fn primitive_docs() -> Vec<(&'static str, PrimitiveDoc)> {
+pub(crate) fn docs() -> Vec<(&'static str, PrimitiveDoc)> {
 	core_specs()
 		.map(|s| (s.name, s.doc))
 		.chain(prim_specs().map(|s| (s.name, s.doc)))
@@ -575,14 +575,12 @@ pub(crate) fn primitive_docs() -> Vec<(&'static str, PrimitiveDoc)> {
 }
 
 #[cfg_attr(not(feature = "language"), allow(dead_code))]
-pub(crate) fn primitives_supporting(
-	supports: impl Fn(PrimitiveId) -> bool,
-) -> Vec<&'static PrimitiveSpec> {
+pub(crate) fn supporting(supports: impl Fn(PrimitiveId) -> bool) -> Vec<&'static PrimitiveSpec> {
 	prim_specs().filter(|s| supports(s.id)).collect()
 }
 
-pub(crate) fn primitive_extract_check_key(prim: &Primitive) -> Option<Value> {
-	match prim_spec(prim.id)?.check_key {
+pub(crate) fn check_key(prim: &Primitive) -> Option<Value> {
+	match spec_entry(prim.id)?.check_key {
 		Some(CheckKeyKind::Direct(i)) => Some(prim.arguments[i].clone()),
 		Some(CheckKeyKind::Derived { arg, constructor }) => match &prim.arguments[arg] {
 			Value::Primitive(p) if p.id == constructor && p.arguments.len() == 1 => {

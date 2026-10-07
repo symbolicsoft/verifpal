@@ -7,10 +7,15 @@ use crate::primitive::CapabilityIndex;
 use crate::syntax::names::{ATTACKER_ID, ATTACKER_NAME};
 use crate::syntax::{PrincipalId, Span};
 use crate::term::{Constant, Value, ValueId, copy_index_of, hashing};
+use crate::util::index::{IndexVec, index_type};
 use crate::util::{IdMap, IdSet};
 
+index_type!(
+	pub(crate) struct SlotIdx;
+);
+
 #[derive(Clone, Debug)]
-pub struct TraceSlot {
+pub(crate) struct TraceSlot {
 	pub declared_span: Span,
 	pub constant: Constant,
 	pub initial_value: Value,
@@ -24,7 +29,7 @@ pub struct TraceSlot {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct SendEvent {
+pub(crate) struct SendEvent {
 	pub sender: PrincipalId,
 	pub recipient: PrincipalId,
 	pub declared_at: i32,
@@ -33,7 +38,7 @@ pub struct SendEvent {
 }
 
 impl TraceSlot {
-	pub fn known_by_principal(&self, pid: PrincipalId) -> bool {
+	pub(crate) fn known_by_principal(&self, pid: PrincipalId) -> bool {
 		self.creator == pid || self.known_by.iter().any(|&(recipient, _)| recipient == pid)
 	}
 
@@ -93,11 +98,11 @@ impl TraceSlot {
 }
 
 #[derive(Clone, Debug, Default)]
-pub struct ProtocolTrace {
+pub(crate) struct ProtocolTrace {
 	pub principals: Vec<String>,
 	pub principal_ids: Vec<PrincipalId>,
-	pub slots: Vec<TraceSlot>,
-	pub index: IdMap<ValueId, usize>,
+	pub slots: IndexVec<SlotIdx, TraceSlot>,
+	pub index: IdMap<ValueId, SlotIdx>,
 	pub max_phase: i32,
 	pub used_by: IdMap<ValueId, IdSet<PrincipalId>>,
 	pub leaks: Vec<LeakEvent>,
@@ -111,11 +116,11 @@ pub struct ProtocolTrace {
 }
 
 impl ProtocolTrace {
-	pub fn index_of(&self, c: &Constant) -> Option<usize> {
+	pub(crate) fn index_of(&self, c: &Constant) -> Option<SlotIdx> {
 		self.index.get(&c.id).copied()
 	}
 
-	pub fn principal_name(&self, id: PrincipalId) -> &str {
+	pub(crate) fn principal_name(&self, id: PrincipalId) -> &str {
 		if id == ATTACKER_ID {
 			return ATTACKER_NAME;
 		}
@@ -127,7 +132,7 @@ impl ProtocolTrace {
 			.unwrap_or("")
 	}
 
-	pub fn constant_used_by(&self, principal_id: PrincipalId, c: &Constant) -> bool {
+	pub(crate) fn constant_used_by(&self, principal_id: PrincipalId, c: &Constant) -> bool {
 		self.used_by
 			.get(&c.id)
 			.is_some_and(|principals| principals.contains(&principal_id))
@@ -137,7 +142,7 @@ impl ProtocolTrace {
 		Self::grouped(&self.actors, a, b)
 	}
 
-	pub(crate) fn sibling_slots(&self, slot: usize) -> Vec<usize> {
+	pub(crate) fn sibling_slots(&self, slot: SlotIdx) -> Vec<SlotIdx> {
 		let id = self.slots[slot].constant.id;
 		let mut out = vec![slot];
 		for group in [&self.session_siblings, &self.copy_siblings]
@@ -153,7 +158,12 @@ impl ProtocolTrace {
 		out
 	}
 
-	pub(crate) fn interchangeable_for(&self, a: PrincipalId, b: PrincipalId, slot: usize) -> bool {
+	pub(crate) fn interchangeable_for(
+		&self,
+		a: PrincipalId,
+		b: PrincipalId,
+		slot: SlotIdx,
+	) -> bool {
 		if Self::grouped(&self.interchangeable, a, b) {
 			return true;
 		}
@@ -188,13 +198,13 @@ impl ProtocolTrace {
 }
 
 #[derive(Clone, Debug)]
-pub struct LeakEvent {
+pub(crate) struct LeakEvent {
 	pub constant_id: ValueId,
 	pub principal_id: PrincipalId,
 	pub declared_at: i32,
 }
 
-type TraceMemo = IdMap<usize, Option<Value>>;
+type TraceMemo = IdMap<SlotIdx, Option<Value>>;
 
 pub(crate) fn resolve_trace_constant(c: &Constant, trace: &ProtocolTrace) -> Value {
 	let value = Value::Constant(c.clone());
@@ -303,6 +313,7 @@ mod tests {
 	use crate::primitive::Capability;
 	use crate::term::{Primitive, value_nil};
 	use crate::testing::*;
+	use crate::util::index::Idx;
 
 	#[test]
 	fn repeated_resolution_shares_ground_terms_and_tracks_changed_inputs() {
@@ -337,10 +348,10 @@ mod tests {
 		));
 		let output = make_constant("resolution_metadata_output");
 		let plain = resolved_primitive(source.with_arguments(vec![input.clone(), output.clone()]));
-		let mut annotated = source.as_ref().clone();
-		annotated.capabilities.set(Capability::Weak, 2);
-		annotated.instance_check = true;
-		let annotated = Arc::new(annotated);
+		let annotated = Arc::new(source.with(|application| {
+			application.capabilities.set(Capability::Weak, 2);
+			application.instance_check = true;
+		}));
 		let checked =
 			resolved_primitive(annotated.with_arguments(vec![input.clone(), output.clone()]));
 		assert!(checked.as_primitive().unwrap().instance_check);
@@ -465,7 +476,7 @@ mod tests {
 	fn trace_index_of() {
 		let a = make_constant("ps_idx_a");
 		let km = make_trace(vec![make_trace_slot(&a, &a, 0)]);
-		assert_eq!(km.index_of(a.as_constant().unwrap()), Some(0));
+		assert_eq!(km.index_of(a.as_constant().unwrap()), Some(SlotIdx::new(0)));
 		let other = make_constant("ps_idx_b");
 		assert_eq!(km.index_of(other.as_constant().unwrap()), None);
 	}

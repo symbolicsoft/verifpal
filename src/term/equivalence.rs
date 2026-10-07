@@ -8,12 +8,33 @@ use std::sync::{Arc, Weak};
 use super::{Primitive, Value};
 use crate::util::{IdMap, IdSet};
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) enum Pairing {
+	Equivalent,
+	EquivalentAtOutput,
+	Identical,
+}
+
+impl Pairing {
+	pub(crate) fn equivalence(consider_output: bool) -> Pairing {
+		if consider_output {
+			Pairing::EquivalentAtOutput
+		} else {
+			Pairing::Equivalent
+		}
+	}
+}
+
+const RECENT_IDENTICAL_PAIRS: usize = 8192;
+
+type PairKey = (usize, usize, Pairing);
+
 #[derive(Default)]
 struct PairMemo {
 	depth: usize,
-	equal: IdSet<(usize, usize, u8)>,
-	recent: IdMap<(usize, usize, u8), [Weak<Primitive>; 2]>,
-	order: VecDeque<(usize, usize, u8)>,
+	equal: IdSet<PairKey>,
+	recent: IdMap<PairKey, [Weak<Primitive>; 2]>,
+	order: VecDeque<PairKey>,
 }
 
 thread_local! {
@@ -21,7 +42,7 @@ thread_local! {
 }
 
 pub(crate) fn memoised_pair(
-	kind: u8,
+	kind: Pairing,
 	a: &Arc<Primitive>,
 	b: &Arc<Primitive>,
 	compute: impl FnOnce() -> bool,
@@ -33,7 +54,8 @@ pub(crate) fn memoised_pair(
 		memo.depth += 1;
 		let nested = memo.depth > 1;
 		(
-			(nested && memo.equal.contains(&key)) || (kind == 2 && memo.recent.contains_key(&key)),
+			(nested && memo.equal.contains(&key))
+				|| (kind == Pairing::Identical && memo.recent.contains_key(&key)),
 			nested,
 		)
 	});
@@ -43,8 +65,8 @@ pub(crate) fn memoised_pair(
 		if result && nested && !known {
 			memo.equal.insert(key);
 		}
-		if result && kind == 2 && !known {
-			if memo.recent.len() >= 8192
+		if result && kind == Pairing::Identical && !known {
+			if memo.recent.len() >= RECENT_IDENTICAL_PAIRS
 				&& let Some(oldest) = memo.order.pop_front()
 			{
 				memo.recent.remove(&oldest);
@@ -100,7 +122,10 @@ pub(crate) fn structurally_identical(a: &Value, b: &Value) -> bool {
 		(Value::Constant(x), Value::Constant(y)) => x.id == y.id,
 		(Value::Variable(x), Value::Variable(y)) => x == y,
 		(Value::Primitive(x), Value::Primitive(y)) => {
-			Arc::ptr_eq(x, y) || memoised_pair(2, x, y, || structurally_identical_primitive(x, y))
+			Arc::ptr_eq(x, y)
+				|| memoised_pair(Pairing::Identical, x, y, || {
+					structurally_identical_primitive(x, y)
+				})
 		}
 		_ => false,
 	}
@@ -121,7 +146,7 @@ mod tests {
 	use super::*;
 	use crate::primitive::Capabilities;
 	use crate::primitive::*;
-	use crate::term::{HashCell, Value};
+	use crate::term::{Application, Value};
 	use crate::testing::*;
 
 	#[test]
@@ -129,13 +154,14 @@ mod tests {
 		let a = make_constant("transient_checked_left");
 		let b = make_constant("transient_checked_right");
 		for i in 0..8300 {
-			let mut primitive = Primitive::new(PRIM_ASSERT, vec![a.clone(), b.clone()], 0);
-			primitive.instance_check = i % 2 == 0;
+			let primitive = Primitive::new(PRIM_ASSERT, vec![a.clone(), b.clone()], 0)
+				.with(|application| application.instance_check = i % 2 == 0);
 			let left = Value::Primitive(Arc::new(primitive.clone()));
 			let right = Value::Primitive(Arc::new(primitive.clone()));
 			assert!(structurally_identical(&left, &right));
-			primitive.instance_check = !primitive.instance_check;
-			let different = Value::Primitive(Arc::new(primitive));
+			let different = Value::Primitive(Arc::new(primitive.with(|application| {
+				application.instance_check = !application.instance_check;
+			})));
 			assert!(left.equivalent(&different, true));
 			assert!(!structurally_identical(&left, &different));
 		}
@@ -145,8 +171,8 @@ mod tests {
 	fn splits_of_one_secret_under_different_thresholds_are_different_values() {
 		let k = make_constant("eqt_k");
 		let split = |t: usize| {
-			let mut p = Primitive::new(PRIM_THRESHOLD_SPLIT, vec![k.clone()], 1);
-			p.threshold = t;
+			let p = Primitive::new(PRIM_THRESHOLD_SPLIT, vec![k.clone()], 1)
+				.with(|application| application.threshold = t);
 			Value::Primitive(std::sync::Arc::new(p))
 		};
 		assert!(split(2).equivalent(&split(2), true));
@@ -163,19 +189,23 @@ mod tests {
 	}
 
 	fn pubkey(inner: Value) -> Value {
-		make_primitive(primitive_get_enum("PUBKEY").unwrap(), vec![inner], 0)
+		make_primitive(crate::primitive::id_of("PUBKEY").unwrap(), vec![inner], 0)
 	}
 
 	fn dh_kex(pubkey_inner: Value, bare: Value) -> Value {
 		make_primitive(
-			primitive_get_enum("DH_KEX").unwrap(),
+			crate::primitive::id_of("DH_KEX").unwrap(),
 			vec![pubkey(pubkey_inner), bare],
 			0,
 		)
 	}
 
 	fn dh_kex_raw(first: Value, bare: Value) -> Value {
-		make_primitive(primitive_get_enum("DH_KEX").unwrap(), vec![first, bare], 0)
+		make_primitive(
+			crate::primitive::id_of("DH_KEX").unwrap(),
+			vec![first, bare],
+			0,
+		)
 	}
 
 	#[test]
@@ -224,7 +254,7 @@ mod tests {
 	fn primitive_equivalence_same() {
 		let a = make_constant("peq_a");
 		let b = make_constant("peq_b");
-		let p1 = Primitive {
+		let p1 = Primitive::from(Application {
 			id: PRIM_ENC,
 			arguments: vec![a.clone(), b.clone()],
 			output: 0,
@@ -232,9 +262,8 @@ mod tests {
 			instance_check: false,
 			capabilities: Capabilities::default(),
 			threshold: 0,
-			hash: HashCell::default(),
-		};
-		let p2 = Primitive {
+		});
+		let p2 = Primitive::from(Application {
 			id: PRIM_ENC,
 			arguments: vec![a, b],
 			output: 0,
@@ -242,8 +271,7 @@ mod tests {
 			instance_check: false,
 			capabilities: Capabilities::default(),
 			threshold: 0,
-			hash: HashCell::default(),
-		};
+		});
 		assert!(equivalent_primitives(&p1, &p2, true));
 	}
 
@@ -251,7 +279,7 @@ mod tests {
 	fn primitive_equivalence_different_id() {
 		let a = make_constant("pdiff_a");
 		let b = make_constant("pdiff_b");
-		let p1 = Primitive {
+		let p1 = Primitive::from(Application {
 			id: PRIM_ENC,
 			arguments: vec![a.clone(), b.clone()],
 			output: 0,
@@ -259,9 +287,8 @@ mod tests {
 			instance_check: false,
 			capabilities: Capabilities::default(),
 			threshold: 0,
-			hash: HashCell::default(),
-		};
-		let p2 = Primitive {
+		});
+		let p2 = Primitive::from(Application {
 			id: PRIM_DEC,
 			arguments: vec![a, b],
 			output: 0,
@@ -269,15 +296,14 @@ mod tests {
 			instance_check: false,
 			capabilities: Capabilities::default(),
 			threshold: 0,
-			hash: HashCell::default(),
-		};
+		});
 		assert!(!equivalent_primitives(&p1, &p2, true));
 	}
 
 	#[test]
 	fn primitive_equivalence_different_output() {
 		let a = make_constant("pout_a");
-		let p1 = Primitive {
+		let p1 = Primitive::from(Application {
 			id: PRIM_HKDF,
 			arguments: vec![a.clone(), a.clone(), a.clone()],
 			output: 0,
@@ -285,9 +311,8 @@ mod tests {
 			instance_check: false,
 			capabilities: Capabilities::default(),
 			threshold: 0,
-			hash: HashCell::default(),
-		};
-		let p2 = Primitive {
+		});
+		let p2 = Primitive::from(Application {
 			id: PRIM_HKDF,
 			arguments: vec![a.clone(), a.clone(), a],
 			output: 1,
@@ -295,8 +320,7 @@ mod tests {
 			instance_check: false,
 			capabilities: Capabilities::default(),
 			threshold: 0,
-			hash: HashCell::default(),
-		};
+		});
 		assert!(!equivalent_primitives(&p1, &p2, true));
 		assert!(equivalent_primitives(&p1, &p2, false));
 	}

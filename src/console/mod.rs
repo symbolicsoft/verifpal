@@ -10,7 +10,6 @@ use std::borrow::Cow;
 use std::cell::Cell;
 use std::sync::{LazyLock, Mutex};
 
-use crate::primitive::primitive_has_single_output;
 use crate::term::Value;
 use crate::verify::QueryOptionResult;
 
@@ -22,10 +21,9 @@ use terminal::color_output_support;
 const DEDUCTION_MESSAGE_LIMIT: usize = 1000;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum InfoLevel {
+pub(crate) enum InfoLevel {
 	Verifpal,
 	Info,
-	Analysis,
 	Deduction,
 	Result,
 	Pass,
@@ -80,16 +78,16 @@ fn level_is_visible(level: InfoLevel) -> bool {
 			level,
 			InfoLevel::Result | InfoLevel::Pass | InfoLevel::Warning
 		),
-		Verbosity::Normal => !matches!(level, InfoLevel::Analysis | InfoLevel::Deduction),
+		Verbosity::Normal => level != InfoLevel::Deduction,
 		Verbosity::Verbose => true,
 	}
 }
 
 fn chrome_is_visible() -> bool {
-	verbosity() >= Verbosity::Normal && !info_is_quiet()
+	verbosity() >= Verbosity::Normal && !is_quiet()
 }
 
-pub(crate) fn info_is_quiet() -> bool {
+pub(crate) fn is_quiet() -> bool {
 	QUIET_DEPTH.get() > 0
 }
 
@@ -101,12 +99,12 @@ fn emit(line: String) {
 #[cfg(feature = "cli")]
 fn status_enabled() -> bool {
 	!cfg!(test)
-		&& !info_is_quiet()
+		&& !is_quiet()
 		&& verbosity() >= Verbosity::Normal
 		&& crate::console::terminal::stderr_is_terminal()
 }
 
-pub(crate) fn info_status_begin() {
+pub(crate) fn status_begin() {
 	#[cfg(feature = "cli")]
 	{
 		STATUS_START.set(Some(std::time::Instant::now()));
@@ -117,22 +115,22 @@ pub(crate) fn info_status_begin() {
 }
 
 #[cfg(feature = "cli")]
-pub(crate) fn info_status_elapsed() -> Option<std::time::Duration> {
+pub(crate) fn status_elapsed() -> Option<std::time::Duration> {
 	STATUS_START.get().map(|start| start.elapsed())
 }
 
 #[cfg(all(feature = "wasm", target_arch = "wasm32", not(feature = "cli")))]
-pub(crate) fn info_status_elapsed() -> Option<std::time::Duration> {
+pub(crate) fn status_elapsed() -> Option<std::time::Duration> {
 	let start = WASM_STATUS_START.get()?;
 	std::time::Duration::try_from_secs_f64((js_sys::Date::now() - start).max(0.0) / 1000.0).ok()
 }
 
 #[cfg(not(any(feature = "cli", all(feature = "wasm", target_arch = "wasm32"))))]
-pub(crate) fn info_status_elapsed() -> Option<std::time::Duration> {
+pub(crate) fn status_elapsed() -> Option<std::time::Duration> {
 	None
 }
 
-pub(crate) fn info_status_update(_text: impl FnOnce() -> String) {
+pub(crate) fn status_update(_text: impl FnOnce() -> String) {
 	#[cfg(feature = "cli")]
 	{
 		if !status_enabled() {
@@ -162,7 +160,7 @@ fn status_draw(text: &str) {
 	STATUS_DRAWN.set(true);
 }
 
-fn info_status_erase() {
+fn status_erase() {
 	#[cfg(feature = "cli")]
 	{
 		if !STATUS_DRAWN.get() {
@@ -176,15 +174,15 @@ fn info_status_erase() {
 	}
 }
 
-pub(crate) fn info_status_end() {
-	info_status_erase();
+pub(crate) fn status_end() {
+	status_erase();
 	#[cfg(feature = "cli")]
 	STATUS_LAST.set(None);
 	#[cfg(all(feature = "wasm", target_arch = "wasm32", not(feature = "cli")))]
 	WASM_STATUS_START.set(None);
 }
 
-pub(crate) fn info_elapsed_text(elapsed: std::time::Duration) -> String {
+pub(crate) fn elapsed_text(elapsed: std::time::Duration) -> String {
 	let seconds = elapsed.as_secs_f64();
 	if seconds >= 1.0 {
 		return format!("{:.2}s", seconds);
@@ -192,25 +190,25 @@ pub(crate) fn info_elapsed_text(elapsed: std::time::Duration) -> String {
 	format!("{}ms", elapsed.as_millis())
 }
 
-pub(crate) fn info_blank_line() {
+pub(crate) fn blank_line() {
 	if cfg!(target_arch = "wasm32") || !chrome_is_visible() {
 		return;
 	}
-	info_status_erase();
+	status_erase();
 	emit(String::new());
 }
 
-pub(crate) fn info_reset_deductions() {
+pub(crate) fn reset_deductions() {
 	DEDUCTIONS_SHOWN.set(0);
 	DEDUCTIONS_SUPPRESSED.set(0);
 }
 
-pub(crate) fn info_deductions_suppressed() -> usize {
+pub(crate) fn deductions_suppressed() -> usize {
 	DEDUCTIONS_SUPPRESSED.get()
 }
 
-pub(crate) fn info_deduction(message: impl FnOnce() -> String) {
-	if info_is_quiet() || !level_is_visible(InfoLevel::Deduction) {
+pub(crate) fn deduction(message: impl FnOnce() -> String) {
+	if is_quiet() || !level_is_visible(InfoLevel::Deduction) {
 		return;
 	}
 	let shown = DEDUCTIONS_SHOWN.get();
@@ -218,7 +216,7 @@ pub(crate) fn info_deduction(message: impl FnOnce() -> String) {
 		let suppressed = DEDUCTIONS_SUPPRESSED.get() + 1;
 		DEDUCTIONS_SUPPRESSED.set(suppressed);
 		if suppressed == 1 {
-			info_message(
+			self::message(
 				&format!(
 					"Further deductions are being suppressed after {} messages; the analysis continues in full.",
 					DEDUCTION_MESSAGE_LIMIT
@@ -229,14 +227,14 @@ pub(crate) fn info_deduction(message: impl FnOnce() -> String) {
 		return;
 	}
 	DEDUCTIONS_SHOWN.set(shown + 1);
-	info_line(&message(), InfoLevel::Deduction, true);
+	line(&message(), InfoLevel::Deduction, true);
 }
 
-pub(crate) fn info_analysis_result(headline: &str, full: impl FnOnce() -> String) {
+pub(crate) fn analysis_result(headline: &str, full: impl FnOnce() -> String) {
 	match verbosity() {
 		Verbosity::Silent | Verbosity::Quiet => {}
-		Verbosity::Normal => info_line(headline, InfoLevel::Result, true),
-		Verbosity::Verbose => info_line(&full(), InfoLevel::Result, true),
+		Verbosity::Normal => line(headline, InfoLevel::Result, true),
+		Verbosity::Verbose => line(&full(), InfoLevel::Result, true),
 	}
 }
 
@@ -286,7 +284,7 @@ fn wasm_push(msg: String) {
 		.push(msg);
 }
 
-pub fn info_banner(version: &str) {
+pub fn banner(version: &str) {
 	let plain = format!("Verifpal {version} - https://verifpal.com");
 	if cfg!(target_arch = "wasm32") {
 		wasm_push(plain);
@@ -311,11 +309,11 @@ pub fn info_banner(version: &str) {
 	emit(plain);
 }
 
-pub(crate) fn info_separator() {
+pub(crate) fn separator() {
 	if cfg!(target_arch = "wasm32") || !chrome_is_visible() {
 		return;
 	}
-	info_status_erase();
+	status_erase();
 	#[cfg(feature = "cli")]
 	if color_output_support() {
 		emit(rule());
@@ -341,7 +339,6 @@ fn level_columns(
 	match level {
 		InfoLevel::Verifpal => (" ", "Verifpal", "*", "Verifpal", "\u{25c6}"),
 		InfoLevel::Info => ("     ", "Info", ".", "Info", "\u{25cf}"),
-		InfoLevel::Analysis => (" ", "Analysis", ">", "Analysis", "\u{25b8}"),
 		InfoLevel::Deduction => ("", "Deduction", ">", "Deduction", "\u{203a}"),
 		InfoLevel::Result => ("     ", "FAIL", "x", "Fail", "\u{2717}"),
 		InfoLevel::Pass => ("     ", "PASS", "+", "Pass", "\u{2713}"),
@@ -354,7 +351,6 @@ fn level_styling(level: InfoLevel) -> (Color, bool, bool, bool) {
 	match level {
 		InfoLevel::Verifpal => (Color::Green, true, false, false),
 		InfoLevel::Info => (Color::Cyan, true, false, false),
-		InfoLevel::Analysis => (Color::Blue, true, false, true),
 		InfoLevel::Deduction => (Color::Yellow, false, false, true),
 		InfoLevel::Result => (Color::Red, true, true, false),
 		InfoLevel::Pass => (Color::Green, true, true, false),
@@ -362,12 +358,12 @@ fn level_styling(level: InfoLevel) -> (Color, bool, bool, bool) {
 	}
 }
 
-pub fn info_message(msg: &str, level: InfoLevel) {
-	info_line(msg, level, false);
+pub(crate) fn message(msg: &str, level: InfoLevel) {
+	line(msg, level, false);
 }
 
-fn info_line(msg: &str, level: InfoLevel, show_analysis: bool) {
-	if info_is_quiet() {
+fn line(msg: &str, level: InfoLevel, show_analysis: bool) {
+	if is_quiet() {
 		return;
 	}
 	let (indent, plain_label, plain_symbol, ..) = level_columns(level);
@@ -378,7 +374,7 @@ fn info_line(msg: &str, level: InfoLevel, show_analysis: bool) {
 	if !level_is_visible(level) {
 		return;
 	}
-	info_status_erase();
+	status_erase();
 	let analysis_count = if show_analysis {
 		crate::verify::context::analysis_count_get()
 	} else {
@@ -386,7 +382,7 @@ fn info_line(msg: &str, level: InfoLevel, show_analysis: bool) {
 	};
 	#[cfg(feature = "cli")]
 	if color_output_support() {
-		info_message_color(msg, level, analysis_count);
+		message_color(msg, level, analysis_count);
 		return;
 	}
 	let suffix = if analysis_count > 0 {
@@ -400,7 +396,7 @@ fn info_line(msg: &str, level: InfoLevel, show_analysis: bool) {
 }
 
 #[cfg(feature = "cli")]
-fn info_message_color(msg: &str, level: InfoLevel, analysis_count: usize) {
+fn message_color(msg: &str, level: InfoLevel, analysis_count: usize) {
 	let (indent, _, _, label, symbol) = level_columns(level);
 	let (color, label_bold, symbol_bold, dim_message) = level_styling(level);
 	let paint = |text: &str, bold: bool| {
@@ -431,16 +427,16 @@ fn info_message_color(msg: &str, level: InfoLevel, analysis_count: usize) {
 
 const TRACE_INDENT: &str = "            ";
 
-pub(crate) fn info_verify_result_summary(
+pub(crate) fn result_summary(
 	mutated_info: &str,
 	summary: &str,
 	option_results: &[QueryOptionResult],
 ) -> String {
 	#[cfg(feature = "cli")]
 	if color_output_support() {
-		return info_verify_result_summary_color(mutated_info, summary, option_results);
+		return result_summary_color(mutated_info, summary, option_results);
 	}
-	info_verify_result_summary_plain(mutated_info, summary, option_results)
+	result_summary_plain(mutated_info, summary, option_results)
 }
 
 fn trace_lines(mutated_info: &str) -> impl Iterator<Item = &str> {
@@ -450,7 +446,7 @@ fn trace_lines(mutated_info: &str) -> impl Iterator<Item = &str> {
 		.filter(|line| !line.is_empty())
 }
 
-fn info_verify_result_summary_plain(
+fn result_summary_plain(
 	mutated_info: &str,
 	summary: &str,
 	option_results: &[QueryOptionResult],
@@ -472,7 +468,7 @@ fn info_verify_result_summary_plain(
 }
 
 #[cfg(feature = "cli")]
-fn info_verify_result_summary_color(
+fn result_summary_color(
 	mutated_info: &str,
 	summary: &str,
 	option_results: &[QueryOptionResult],
@@ -527,10 +523,10 @@ fn ordinal(n: usize) -> Cow<'static, str> {
 	format!("{ordinal}{suffix}").into()
 }
 
-pub(crate) fn info_output_text(revealed: &Value) -> String {
+pub(crate) fn output_text(revealed: &Value) -> String {
 	match revealed {
 		Value::Constant(_) | Value::Variable(_) => revealed.to_string(),
-		Value::Primitive(p) if primitive_has_single_output(p.id) => {
+		Value::Primitive(p) if crate::primitive::has_single_output(p.id) => {
 			format!("Output of {revealed}")
 		}
 		Value::Primitive(p) => format!("{} output of {revealed}", ordinal(p.output)),
@@ -547,7 +543,6 @@ mod tests {
 		set_verbosity(Verbosity::Normal);
 		assert!(level_is_visible(InfoLevel::Result));
 		assert!(level_is_visible(InfoLevel::Info));
-		assert!(!level_is_visible(InfoLevel::Analysis));
 		assert!(!level_is_visible(InfoLevel::Deduction));
 		set_verbosity(Verbosity::Verbose);
 		assert!(level_is_visible(InfoLevel::Deduction));
@@ -562,26 +557,26 @@ mod tests {
 
 	#[test]
 	fn elapsed_text_switches_unit_at_one_second() {
-		use crate::console::info_elapsed_text;
+		use crate::console::elapsed_text;
 		use std::time::Duration;
-		assert_eq!(info_elapsed_text(Duration::from_millis(7)), "7ms");
-		assert_eq!(info_elapsed_text(Duration::from_millis(999)), "999ms");
-		assert_eq!(info_elapsed_text(Duration::from_millis(1400)), "1.40s");
+		assert_eq!(elapsed_text(Duration::from_millis(7)), "7ms");
+		assert_eq!(elapsed_text(Duration::from_millis(999)), "999ms");
+		assert_eq!(elapsed_text(Duration::from_millis(1400)), "1.40s");
 	}
 
 	#[test]
-	fn info_quiet_guard_nests_and_restores() {
-		use crate::console::{InfoQuiet, info_is_quiet};
-		assert!(!info_is_quiet());
+	fn quiet_guard_nests_and_restores() {
+		use crate::console::{InfoQuiet, is_quiet};
+		assert!(!is_quiet());
 		{
 			let _outer = InfoQuiet::new();
-			assert!(info_is_quiet());
+			assert!(is_quiet());
 			{
 				let _inner = InfoQuiet::new();
-				assert!(info_is_quiet());
+				assert!(is_quiet());
 			}
-			assert!(info_is_quiet(), "inner guard must not un-quiet the outer");
+			assert!(is_quiet(), "inner guard must not un-quiet the outer");
 		}
-		assert!(!info_is_quiet());
+		assert!(!is_quiet());
 	}
 }

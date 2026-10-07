@@ -702,13 +702,13 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 mod tests {
 	use super::*;
 	use crate::primitive::Capabilities;
-	use crate::term::HashCell;
+	use crate::term::Application;
 	use crate::testing::*;
 
 	#[test]
 	fn extract_exponent_rejects_a_bare_constant() {
 		let k = make_constant("fey_k");
-		let p = Primitive {
+		let p = Primitive::from(Application {
 			id: PRIM_SIGNVERIF,
 			arguments: vec![k.clone()],
 			output: 0,
@@ -716,8 +716,7 @@ mod tests {
 			instance_check: false,
 			capabilities: Capabilities::default(),
 			threshold: 0,
-			hash: HashCell::default(),
-		};
+		});
 		let (_, ok) = filter_extract_dh_exponent(&p, &k, 0);
 		assert!(!ok, "a bare constant is not a public key");
 	}
@@ -726,7 +725,7 @@ mod tests {
 	fn extract_exponent_rejects_a_non_key_primitive() {
 		let k = make_constant("fez_k");
 		let hashed = make_primitive(PRIM_HASH, vec![k], 0);
-		let p = Primitive {
+		let p = Primitive::from(Application {
 			id: PRIM_SIGNVERIF,
 			arguments: vec![hashed.clone()],
 			output: 0,
@@ -734,8 +733,7 @@ mod tests {
 			instance_check: false,
 			capabilities: Capabilities::default(),
 			threshold: 0,
-			hash: HashCell::default(),
-		};
+		});
 		let (_, ok) = filter_extract_dh_exponent(&p, &hashed, 0);
 		assert!(!ok, "only the key-derivation constructor may be peeled");
 	}

@@ -12,6 +12,8 @@ use crate::syntax::{PrincipalId, Query, QueryKind};
 use crate::term::{Constant, PrimitiveId, Value, VariableId};
 use crate::theory::AttackerState;
 
+type Wanted = Vec<(Value, Option<VariableId>)>;
+
 pub(super) fn oracle_input_goals(
 	km: &ProtocolTrace,
 	principal: PrincipalId,
@@ -19,7 +21,9 @@ pub(super) fn oracle_input_goals(
 	attacker: &AttackerState,
 	deducer: &Deducer,
 ) -> Vec<Substitution> {
-	let emissions: Vec<&Value> = (0..km.slots.len())
+	let emissions: Vec<&Value> = km
+		.slots
+		.indices()
 		.filter(|&e| {
 			let slot = &km.slots[e];
 			slot.creator == principal && (slot.sent_from(principal) || slot.constant.leaked)
@@ -30,87 +34,115 @@ pub(super) fn oracle_input_goals(
 	if emissions.is_empty() {
 		return Vec::new();
 	}
-	let mut wanted: Vec<(Value, Option<VariableId>)> = Vec::new();
+	let mut wanted: Wanted = Vec::new();
 	let mut foreign: Substitution = Substitution::default();
-	let slot_var = |v: &Value| vars::as_var(v).filter(vars::is_slot_var_id);
-	for &other_principal in &km.principal_ids {
-		let controllable = crate::solve::control::Controllable::of(km, other_principal, attacker);
-		let other = symbolic::build(&controllable, km, other_principal, attacker);
-		for &slot in &other.var_slots {
-			if sym.var_slots.contains(&slot) {
-				continue;
+	for &other in &km.principal_ids {
+		check_shapes(km, other, sym, attacker, deducer, &mut wanted, &mut foreign);
+	}
+	let nested = nested_shapes(&wanted, &emissions);
+	wanted.extend(nested);
+	let empty = Substitution::default();
+	let mut out: Vec<Substitution> = Vec::new();
+	for emission in emissions {
+		for (shape, target) in &wanted {
+			let mut bounds: Vec<Substitution> = unifiers(emission, shape, &empty).collect();
+			if bounds.is_empty() {
+				bounds = deducer.invert_into_revealed(emission, shape);
 			}
-			let honest = resolve_trace_constant(&km.slots[slot].constant, km);
-			let filler = if crate::primitive::value_is_key_derivation(&honest) {
-				crate::primitive::attacker_public_key()
-			} else {
-				crate::term::value_nil()
-			};
-			foreign.insert(vars::attacker_var_id(slot), filler);
-		}
-		let inverter = deduce::Deducer::with_basis(
-			km,
-			attacker,
-			&other,
-			&deduce::Arities::default(),
-			Substitution::default(),
-		)
-		.in_scope(deducer.fresh_scope());
-		for c in 0..km.slots.len() {
-			if km.slots[c].creator != other_principal {
-				continue;
-			}
-			let Value::Primitive(prim) = &other.terms[c] else {
-				continue;
-			};
-			if !prim.instance_check || !vars::contains_var(&other.terms[c]) {
-				continue;
-			}
-			for bound in inverter.equality_shapes(prim) {
-				for &slot in &other.var_slots {
-					let id = vars::attacker_var_id(slot);
-					let Some(value) = bound.get(&id) else {
-						continue;
-					};
-					let shape = vars::apply(value, &bound);
-					if matches!(shape, Value::Primitive(_))
-						&& !wanted
-							.iter()
-							.any(|(w, t)| t.as_ref() == Some(&id) && w.equivalent(&shape, true))
-					{
-						wanted.push((shape, Some(id)));
-					}
-				}
-			}
-			let shapes: Vec<(Value, Option<VariableId>)> =
-				match crate::primitive::rewrite_rule(prim.id) {
-					Some(rule) => {
-						let target = prim.arguments.get(rule.from).and_then(slot_var);
-						deduce::rewrite_shapes_from(prim, rule, |_| deducer.fresh_var(), true)
-							.into_iter()
-							.map(|shape| (shape, target.clone()))
-							.collect()
-					}
-					None if crate::primitive::primitive_is_core(prim.id)
-						&& prim.arguments.len() == 2 =>
-					{
-						vec![
-							(prim.arguments[0].clone(), slot_var(&prim.arguments[1])),
-							(prim.arguments[1].clone(), slot_var(&prim.arguments[0])),
-						]
-					}
-					None => Vec::new(),
-				};
-			for (shape, target) in shapes {
-				if !wanted
-					.iter()
-					.any(|(w, t)| *t == target && w.equivalent(&shape, true))
-				{
-					wanted.push((shape, target));
-				}
-			}
+			out.extend(bounds.iter().filter_map(|bound| {
+				oracle_proposal(sym, emission, target.as_ref(), bound, &foreign)
+			}));
 		}
 	}
+	out
+}
+
+fn push_wanted(wanted: &mut Wanted, shape: Value, target: Option<VariableId>) {
+	if !wanted
+		.iter()
+		.any(|(w, t)| *t == target && w.equivalent(&shape, true))
+	{
+		wanted.push((shape, target));
+	}
+}
+
+fn check_shapes(
+	km: &ProtocolTrace,
+	principal: PrincipalId,
+	sym: &SymbolicState,
+	attacker: &AttackerState,
+	deducer: &Deducer,
+	wanted: &mut Wanted,
+	foreign: &mut Substitution,
+) {
+	let slot_var = |v: &Value| vars::as_var(v).filter(vars::is_slot_var_id);
+	let controllable = crate::solve::control::Controllable::of(km, principal, attacker);
+	let other = symbolic::build(&controllable, km, principal, attacker);
+	for slot in other.var_slots() {
+		if sym.is_var_slot(slot) {
+			continue;
+		}
+		let honest = resolve_trace_constant(&km.slots[slot].constant, km);
+		let filler = if crate::primitive::value_is_key_derivation(&honest) {
+			crate::primitive::attacker_public_key()
+		} else {
+			crate::term::value_nil()
+		};
+		foreign.insert(vars::attacker_var_id(slot), filler);
+	}
+	let inverter = deduce::Deducer::with_basis(
+		km,
+		attacker,
+		&other,
+		&deduce::Arities::default(),
+		Substitution::default(),
+	)
+	.in_scope(deducer.fresh_scope());
+	for c in km.slots.indices() {
+		if km.slots[c].creator != principal {
+			continue;
+		}
+		let Value::Primitive(prim) = &other.terms[c] else {
+			continue;
+		};
+		if !prim.instance_check || !vars::contains_var(&other.terms[c]) {
+			continue;
+		}
+		for bound in inverter.equality_shapes(prim) {
+			for slot in other.var_slots() {
+				let id = vars::attacker_var_id(slot);
+				let Some(value) = bound.get(&id) else {
+					continue;
+				};
+				let shape = vars::apply(value, &bound);
+				if matches!(shape, Value::Primitive(_)) {
+					push_wanted(wanted, shape, Some(id));
+				}
+			}
+		}
+		let shapes: Wanted = match crate::primitive::rewrite_rule(prim.id) {
+			Some(rule) => {
+				let target = prim.arguments.get(rule.from).and_then(slot_var);
+				deduce::rewrite_shapes_from(prim, rule, |_| deducer.fresh_var(), true)
+					.into_iter()
+					.map(|shape| (shape, target.clone()))
+					.collect()
+			}
+			None if crate::primitive::is_core(prim.id) && prim.arguments.len() == 2 => {
+				vec![
+					(prim.arguments[0].clone(), slot_var(&prim.arguments[1])),
+					(prim.arguments[1].clone(), slot_var(&prim.arguments[0])),
+				]
+			}
+			None => Vec::new(),
+		};
+		for (shape, target) in shapes {
+			push_wanted(wanted, shape, target);
+		}
+	}
+}
+
+fn nested_shapes(wanted: &Wanted, emissions: &[&Value]) -> Wanted {
 	let heads: Vec<(PrimitiveId, usize)> = emissions
 		.iter()
 		.filter_map(|emitted| match emitted {
@@ -118,8 +150,8 @@ pub(super) fn oracle_input_goals(
 			Value::Constant(_) | Value::Variable(_) => None,
 		})
 		.collect();
-	let mut nested: Vec<(Value, Option<VariableId>)> = Vec::new();
-	for (shape, _) in &wanted {
+	let mut nested: Wanted = Vec::new();
+	for (shape, _) in wanted {
 		let Value::Primitive(p) = shape else {
 			continue;
 		};
@@ -144,61 +176,56 @@ pub(super) fn oracle_input_goals(
 			nested.push((inner.clone(), None));
 		}
 	}
-	wanted.extend(nested);
+	nested
+}
+
+fn oracle_proposal(
+	sym: &SymbolicState,
+	emission: &Value,
+	target: Option<&VariableId>,
+	bound: &Substitution,
+	foreign: &Substitution,
+) -> Option<Substitution> {
 	let empty = Substitution::default();
-	let mut out: Vec<Substitution> = Vec::new();
-	for emission in emissions {
-		for (shape, target) in &wanted {
-			let mut bounds: Vec<Substitution> = unifiers(emission, shape, &empty).collect();
-			if bounds.is_empty() {
-				bounds = deducer.invert_into_revealed(emission, shape);
-			}
-			for bound in bounds {
-				let mut local: Substitution = Substitution::default();
-				for &slot in &sym.var_slots {
-					let id = vars::attacker_var_id(slot);
-					if bound.contains_key(&id) {
-						continue;
-					}
-					if bound.values().any(|value| vars::occurs(&id, value, &empty)) {
-						local.insert(id, crate::term::value_nil());
-					}
-				}
-				let mut proposal = Substitution::default();
-				for &slot in &sym.var_slots {
-					let id = vars::attacker_var_id(slot);
-					if !bound.contains_key(&id) && !local.contains_key(&id) {
-						continue;
-					}
-					let value = vars::apply(&vars::attacker_var(slot), &bound);
-					let value = vars::apply(&value, &local);
-					if vars::as_var(&value).as_ref() == Some(&id)
-						|| vars::occurs(&id, &value, &empty)
-					{
-						continue;
-					}
-					proposal.insert(id, vars::ground_free(&vars::apply(&value, &foreign)));
-				}
-				if proposal.is_empty() {
-					continue;
-				}
-				if let Some(target) = target
-					&& sym.var_slots.contains(&vars::slot_of_var_id(target))
-					&& !proposal.contains_key(target)
-				{
-					let value = vars::apply(emission, &bound);
-					if !vars::occurs(target, &value, &proposal) {
-						proposal.insert(
-							target.clone(),
-							vars::ground_free(&vars::apply(&value, &foreign)),
-						);
-					}
-				}
-				out.push(proposal);
-			}
+	let mut local: Substitution = Substitution::default();
+	for slot in sym.var_slots() {
+		let id = vars::attacker_var_id(slot);
+		if bound.contains_key(&id) {
+			continue;
+		}
+		if bound.values().any(|value| vars::occurs(&id, value, &empty)) {
+			local.insert(id, crate::term::value_nil());
 		}
 	}
-	out
+	let mut proposal = Substitution::default();
+	for slot in sym.var_slots() {
+		let id = vars::attacker_var_id(slot);
+		if !bound.contains_key(&id) && !local.contains_key(&id) {
+			continue;
+		}
+		let value = vars::apply(&vars::attacker_var(slot), bound);
+		let value = vars::apply(&value, &local);
+		if vars::as_var(&value).as_ref() == Some(&id) || vars::occurs(&id, &value, &empty) {
+			continue;
+		}
+		proposal.insert(id, vars::ground_free(&vars::apply(&value, foreign)));
+	}
+	if proposal.is_empty() {
+		return None;
+	}
+	if let Some(target) = target
+		&& sym.is_var_slot(vars::slot_of_var_id(target))
+		&& !proposal.contains_key(target)
+	{
+		let value = vars::apply(emission, bound);
+		if !vars::occurs(target, &value, &proposal) {
+			proposal.insert(
+				target.clone(),
+				vars::ground_free(&vars::apply(&value, foreign)),
+			);
+		}
+	}
+	Some(proposal)
 }
 
 pub(super) fn goals_for_query(

@@ -3,26 +3,41 @@
 
 use std::sync::Arc;
 
-use super::{Attempt, Bypassed, Family, Node, Outcome, Search, Stuck, normalize, runs_of};
-use crate::engine::exec::{Execution, Installs, execute};
-use crate::engine::program::Event;
+use super::{
+	Attempt, AttemptIdx, Bypassed, Family, HONEST_NODE, Node, Outcome, Search, Stuck, install_key,
+	normalize, runs_of,
+};
+use crate::engine::exec::{Execution, Install, Installs, execute};
+use crate::engine::program::{Event, RunIdx};
+use crate::protocol::SlotIdx;
 use crate::term::Value;
 use crate::theory::obtainable;
 use crate::util::IdSet;
+use crate::util::index::Idx;
 
 fn varied(
 	fills: &Installs,
-	alternative: impl Fn(usize, usize, &Value) -> Option<Value>,
+	alternative: impl Fn(RunIdx, SlotIdx, &Value) -> Option<Value>,
 ) -> Option<Installs> {
 	let mut changed = false;
 	let out = fills
 		.iter()
-		.map(|(run, slot, value)| match alternative(*run, *slot, value) {
-			Some(v) => {
-				changed = true;
-				(*run, *slot, v)
+		.map(|install| {
+			let Install::Value { run, slot, value } = install else {
+				return install.clone();
+			};
+			let value = match alternative(*run, *slot, value) {
+				Some(v) => {
+					changed = true;
+					v
+				}
+				None => value.clone(),
+			};
+			Install::Value {
+				run: *run,
+				slot: *slot,
+				value,
 			}
-			None => (*run, *slot, value.clone()),
 		})
 		.collect();
 	changed.then_some(out)
@@ -41,10 +56,9 @@ fn rebuilt(honest: &Value, obtains: &impl Fn(&Value) -> bool) -> Value {
 	}
 }
 
-fn halts_of(ex: &Execution) -> Vec<(usize, usize)> {
+fn halts_of(ex: &Execution) -> Vec<(RunIdx, SlotIdx)> {
 	ex.runs
-		.iter()
-		.enumerate()
+		.iter_enumerated()
 		.filter_map(|(run, state)| state.halted.map(|slot| (run, slot)))
 		.collect()
 }
@@ -52,11 +66,11 @@ fn halts_of(ex: &Execution) -> Vec<(usize, usize)> {
 impl<'a, 'b> Search<'a, 'b> {
 	pub(super) fn drain(&mut self) {
 		while !self.done() {
-			if let Some(at) = self.pending.pop() {
+			if let Some(at) = self.attempts.pending.pop() {
 				self.advance(at);
 				continue;
 			}
-			let Some(installs) = self.drops.pop() else {
+			let Some(installs) = self.attempts.drops.pop() else {
 				break;
 			};
 			for skip in 0..installs.len() {
@@ -75,10 +89,11 @@ impl<'a, 'b> Search<'a, 'b> {
 	}
 
 	pub(super) fn push_node(&mut self, node: Node) {
-		let at = self.nodes.len();
-		for (run, slot, value) in &node.installs {
-			self.by_install
-				.entry((*run, *slot, value.hash_value()))
+		let at = self.nodes.next_index();
+		for install in &node.installs {
+			self.retries
+				.by_install
+				.entry(install_key(install))
 				.or_default()
 				.push(at);
 		}
@@ -86,22 +101,22 @@ impl<'a, 'b> Search<'a, 'b> {
 	}
 
 	pub(super) fn as_family<T>(&mut self, family: Family, f: impl FnOnce(&mut Self) -> T) -> T {
-		let outer = std::mem::replace(&mut self.family, family);
+		let outer = std::mem::replace(&mut self.attempts.family, family);
 		let out = f(self);
-		self.family = outer;
+		self.attempts.family = outer;
 		out
 	}
 
 	pub(super) fn execute_counted(&mut self, installs: &Installs) -> Execution {
-		self.executed += 1;
+		self.attempts.executed += 1;
 		self.ctx.analysis_count_increment();
-		let executed = self.executed;
+		let executed = self.attempts.executed;
 		let ctx = self.ctx;
-		crate::console::info_status_update(|| {
+		crate::console::status_update(|| {
 			crate::verify::status_line(
 				ctx,
 				self.cx.km.max_phase,
-				&self.cx.program.runs[self.current].name,
+				&self.cx.program.runs[self.log.proposer].name,
 				&format!(
 					"{executed} execution{} checked",
 					if executed == 1 { "" } else { "s" }
@@ -111,7 +126,7 @@ impl<'a, 'b> Search<'a, 'b> {
 		execute(self.cx, installs)
 	}
 
-	pub(super) fn consider(&mut self, installs: Installs) -> usize {
+	pub(super) fn consider(&mut self, installs: Installs) -> AttemptIdx {
 		let (at, _) = self.enqueue(installs);
 		self.advance(at);
 		self.drain();
@@ -128,37 +143,37 @@ impl<'a, 'b> Search<'a, 'b> {
 		self.outcome(at).is_some_and(|outcome| outcome.settled)
 	}
 
-	pub(super) fn outcome(&self, at: usize) -> Option<&Outcome> {
-		self.tried.entries[at].1.outcome.as_ref()
+	pub(super) fn outcome(&self, at: AttemptIdx) -> Option<&Outcome> {
+		self.attempts.tried.entries[at].1.outcome.as_ref()
 	}
 
-	pub(super) fn enqueue(&mut self, installs: Installs) -> (usize, bool) {
+	pub(super) fn enqueue(&mut self, installs: Installs) -> (AttemptIdx, bool) {
 		let installs = self.project(installs);
-		if let Some(at) = self.tried.position(&installs) {
+		if let Some(at) = self.attempts.tried.position(&installs) {
 			return (at, false);
 		}
-		let at = self.tried.len();
-		self.tried.remember(
+		let at = self.attempts.tried.entries.next_index();
+		self.attempts.tried.remember(
 			&installs,
 			Attempt {
 				outcome: None,
-				family: self.family,
+				family: self.attempts.family,
 			},
 		);
-		self.pending.push(at);
+		self.attempts.pending.push(at);
 		(at, true)
 	}
 
-	fn advance(&mut self, at: usize) {
-		if self.tried.entries[at].1.outcome.is_some() {
+	fn advance(&mut self, at: AttemptIdx) {
+		if self.attempts.tried.entries[at].1.outcome.is_some() {
 			return;
 		}
-		let installs = self.tried.entries[at].0.clone();
-		let family = self.tried.entries[at].1.family;
+		let installs = self.attempts.tried.entries[at].0.clone();
+		let family = self.attempts.tried.entries[at].1.family;
 		self.as_family(family, |search| {
 			let ex = search.execute_counted(&installs);
 			let stuck = !ex.stuck.is_empty();
-			search.tried.entries[at].1.outcome = Some(Outcome {
+			search.attempts.tried.entries[at].1.outcome = Some(Outcome {
 				halts: halts_of(&ex),
 				settled: !stuck,
 			});
@@ -185,7 +200,8 @@ impl<'a, 'b> Search<'a, 'b> {
 		let state = &ex.knowledge.state;
 		let _memo = crate::theory::DeductionMemo::scoped(&km.capabilities, state);
 		let obtains = |v: &Value| obtainable(v, &km.capabilities, state);
-		let honest_value = |run: usize, slot: usize| honest.runs[run].held(slot).map(|h| &h.value);
+		let honest_value =
+			|run: RunIdx, slot: SlotIdx| honest.runs[run].held(slot).map(|h| &h.value);
 		let mut fills: Installs = ex
 			.withheld
 			.iter()
@@ -194,14 +210,14 @@ impl<'a, 'b> Search<'a, 'b> {
 					.filter(|v| obtains(v))
 					.cloned()
 					.unwrap_or_else(crate::term::value_nil);
-				(run, slot, value)
+				Install::Value { run, slot, value }
 			})
 			.collect();
-		for (b, run) in ex.runs.iter().enumerate() {
+		for (b, run) in ex.runs.iter_enumerated() {
 			if run.halted.is_none() || honest.runs[b].halted.is_some() {
 				continue;
 			}
-			for step in &self.cx.program.runs[b].steps[..run.pc] {
+			for step in self.cx.program.runs[b].steps.before(run.pc) {
 				let Event::Recv(d) = step.event else {
 					continue;
 				};
@@ -218,7 +234,11 @@ impl<'a, 'b> Search<'a, 'b> {
 					if value.equivalent(&held.value, true) || !obtains(value) {
 						continue;
 					}
-					fills.push((b, slot, value.clone()));
+					fills.push(Install::Value {
+						run: b,
+						slot,
+						value: value.clone(),
+					});
 				}
 			}
 		}
@@ -247,38 +267,45 @@ impl<'a, 'b> Search<'a, 'b> {
 	}
 
 	pub(super) fn accept(&mut self, installs: Installs, ex: Execution) -> bool {
-		if self.debug {
+		if self.log.debug {
 			eprintln!(
 				"[search]   try {:?} [{}] stuck={} known={}",
-				self.family,
+				self.attempts.family,
 				self.shown(&installs),
 				ex.stuck.len(),
 				ex.knowledge.len()
 			);
 		}
 		if !ex.stuck.is_empty() {
+			let stuck_at = |install: &Install| {
+				install
+					.slot()
+					.is_some_and(|slot| ex.stuck.contains(&(install.run(), slot)))
+			};
 			let admitted: Installs = installs
 				.iter()
-				.filter(|(run, slot, _)| !ex.stuck.contains(&(*run, *slot)))
+				.filter(|install| !stuck_at(install))
 				.cloned()
 				.collect();
 			let supply = installs
 				.iter()
 				.enumerate()
-				.filter(|(_, (run, slot, value))| {
+				.filter(|(_, install)| {
 					!admitted.is_empty()
-						&& ex.stuck.contains(&(*run, *slot))
-						&& self.derivable_in(0, value)
+						&& stuck_at(install)
+						&& install
+							.value()
+							.is_some_and(|value| self.derivable_in(HONEST_NODE, value))
 				})
-				.map(|(install, _)| (install, 1))
+				.map(|(install, _)| (install, HONEST_NODE.next()))
 				.collect();
-			self.stuck.push(Stuck {
+			self.retries.stuck.push(Stuck {
 				installs,
 				slots: ex.stuck,
 				tried_with: IdSet::default(),
 				supply,
 			});
-			self.retry_stuck(self.stuck.len() - 1);
+			self.retry_stuck(self.retries.stuck.len() - 1);
 			if !admitted.is_empty() {
 				self.as_family(Family::Admitted, |search| search.enqueue(admitted));
 			}
@@ -292,33 +319,33 @@ impl<'a, 'b> Search<'a, 'b> {
 				.state
 				.reused
 				.iter()
-				.any(|pair| !self.union.has_reused(pair));
+				.any(|pair| !self.union.knowledge.has_reused(pair));
 		let alternative = !kept
-			&& ex
-				.knowledge
-				.state
-				.known
-				.iter()
-				.any(|v| self.union.knows(v).is_some_and(|i| i >= self.honest_known));
+			&& ex.knowledge.state.known.iter().any(|v| {
+				self.union
+					.knowledge
+					.knows(v)
+					.is_some_and(|i| i >= self.union.honest_known)
+			});
 		if kept
-			&& self.family != Family::Drop
+			&& self.attempts.family != Family::Drop
 			&& runs_of(&installs).len() == 1
 			&& installs.len() > 1
 		{
-			self.drops.push(installs.clone());
+			self.attempts.drops.push(installs.clone());
 		}
-		let node = Node::of(installs, &ex, &self.queried);
-		let at = self.nodes.len();
+		let node = Node::of(installs, &ex, &self.facts.queried);
+		let at = self.nodes.next_index();
 		let fresh = self.note_fresh(at, &node);
 		if !(kept || fresh || alternative) {
-			if !self.rerouting {
-				let sends: Vec<(Value, usize, Bypassed)> = self
+			if !self.retries.rerouting {
+				let sends: Vec<(Value, RunIdx, Bypassed)> = self
 					.rerouted_sends(at, &node)
 					.into_iter()
 					.map(|(v, source, bypassed)| (v, source.run, bypassed))
 					.collect();
 				if !sends.is_empty() {
-					self.routes.push((node.installs, sends));
+					self.retries.routes.push((node.installs, sends));
 				}
 			}
 			return false;

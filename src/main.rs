@@ -4,9 +4,8 @@
 use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum};
 use clap_complete::Shell;
 use verifpal::{
-	ColorChoice, Run, Verbosity, VerifyReport, diagram, html_report, info_banner, pretty_print,
-	set_color_choice, set_verbosity, tex_report, update_check_report, update_check_start,
-	verify_report_with_source_opts,
+	ColorChoice, Run, UpdateCheck, Verbosity, VerifyReport, banner, diagram, html_report,
+	pretty_print, set_color_choice, set_verbosity, tex_report, verify_report_with_source_opts,
 };
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -555,10 +554,10 @@ fn run_verify(args: VerifyArgs) -> i32 {
 	});
 	set_verbosity(verify_verbosity(structured, result_code, quiet, verbose));
 
-	let update_check = update_check_start(VERSION);
+	let update_check = UpdateCheck::start(VERSION);
 	let chrome = !structured && !result_code;
 	if chrome {
-		info_banner(VERSION);
+		banner(VERSION);
 	}
 
 	let single = models.len() == 1;
@@ -573,9 +572,9 @@ fn run_verify(args: VerifyArgs) -> i32 {
 			Ok((report, source)) => {
 				if result_code {
 					if single {
-						out!("{}", report.code);
+						out!("{}", report.code());
 					} else {
-						out!("{} {}", model, report.code);
+						out!("{} {}", model, report.code());
 					}
 				}
 				outcomes.push((model.clone(), Ok(report)));
@@ -609,16 +608,14 @@ fn run_verify(args: VerifyArgs) -> i32 {
 		FormatArg::Html => outp!("{}", html_report(&run())),
 		FormatArg::Tex => outp!("{}", tex_report(&run())),
 	}
-	update_check_report(&update_check);
+	update_check.report();
 
 	if outcomes.iter().any(|(_, outcome)| outcome.is_err()) {
 		return EXIT_ERROR;
 	}
-	let attacked = outcomes.iter().any(|(_, outcome)| {
-		outcome
-			.as_ref()
-			.is_ok_and(|report| report.results.iter().any(|r| r.resolved))
-	});
+	let attacked = outcomes
+		.iter()
+		.any(|(_, outcome)| outcome.as_ref().is_ok_and(VerifyReport::attacked));
 	if fail_on_attack && attacked {
 		return EXIT_ATTACK;
 	}
@@ -684,15 +681,15 @@ fn main() {
 			status(diagram(&model).map(|output| outp!("{}", output)))
 		}
 		Commands::About => {
-			let update_check = update_check_start(VERSION);
-			info_banner(VERSION);
+			let update_check = UpdateCheck::start(VERSION);
+			banner(VERSION);
 			out!("Verifpal is authored by Nadim Kobeissi.");
 			out!("Everyone who has contributed to Verifpal is");
 			out!("named on the Wall of Honor in the Verifpal");
 			out!("Documentation's Acknowledgments page:");
 			out!();
 			out!("  https://verifpal.com/docs/acknowledgments/");
-			update_check_report(&update_check);
+			update_check.report();
 			0
 		}
 		Commands::Completion { shell } => {

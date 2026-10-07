@@ -1,9 +1,10 @@
 /* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
  * SPDX-License-Identifier: GPL-3.0-only */
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::sync::RwLock;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::thread::LocalKey;
 
 use super::IdMap;
 use super::sync::write_lock;
@@ -50,28 +51,32 @@ impl Drop for GenerationGuard {
 	}
 }
 
-pub(crate) struct Generational<T> {
-	generation: u64,
-	inner: T,
+pub(crate) struct AnalysisLocal<T> {
+	cell: RefCell<(u64, T)>,
 }
 
-impl<T: Default> Default for Generational<T> {
+impl<T: Default> Default for AnalysisLocal<T> {
 	fn default() -> Self {
-		Generational {
-			generation: 0,
-			inner: T::default(),
+		AnalysisLocal {
+			cell: RefCell::new((0, T::default())),
 		}
 	}
 }
 
-impl<T: Default> Generational<T> {
-	pub(crate) fn fresh(&mut self) -> &mut T {
-		let now = current_generation();
-		if self.generation != now {
-			self.generation = now;
-			self.inner = T::default();
-		}
-		&mut self.inner
+pub(crate) trait AnalysisKey<T> {
+	fn with_current<R>(&'static self, f: impl FnOnce(&mut T) -> R) -> R;
+}
+
+impl<T: Default> AnalysisKey<T> for LocalKey<AnalysisLocal<T>> {
+	fn with_current<R>(&'static self, f: impl FnOnce(&mut T) -> R) -> R {
+		self.with(|local| {
+			let mut cell = local.cell.borrow_mut();
+			let now = current_generation();
+			if cell.0 != now {
+				*cell = (now, T::default());
+			}
+			f(&mut cell.1)
+		})
 	}
 }
 

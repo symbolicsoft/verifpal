@@ -10,46 +10,48 @@ use std::sync::{Arc, LazyLock};
 use crate::primitive::Capabilities;
 use crate::syntax::{Declaration, Qualifier};
 use crate::util::{IdHasher, IdSet};
-use equivalence::{equivalent_primitives, memoised_pair};
+use equivalence::{Pairing, equivalent_primitives, memoised_pair};
 use hashing::primitive_hash;
 
-pub type ValueId = u32;
+pub(crate) type ValueId = u32;
 
-pub type PrimitiveId = u8;
+pub(crate) const NIL_ID: ValueId = 1;
+
+pub(crate) type PrimitiveId = u8;
 
 #[derive(Clone, Debug)]
-pub enum Value {
+pub(crate) enum Value {
 	Constant(Constant),
 	Primitive(Arc<Primitive>),
 	Variable(VariableId),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum VariableId {
+pub(crate) enum VariableId {
 	Slot(usize),
 	Free(Arc<str>),
 }
 
 impl Value {
-	pub fn primitive(id: PrimitiveId, arguments: Vec<Value>, output: usize) -> Value {
+	pub(crate) fn primitive(id: PrimitiveId, arguments: Vec<Value>, output: usize) -> Value {
 		Value::Primitive(Arc::new(Primitive::new(id, arguments, output)))
 	}
 
-	pub fn as_constant(&self) -> Option<&Constant> {
+	pub(crate) fn as_constant(&self) -> Option<&Constant> {
 		match self {
 			Value::Constant(c) => Some(c),
 			_ => None,
 		}
 	}
 
-	pub fn as_primitive(&self) -> Option<&Primitive> {
+	pub(crate) fn as_primitive(&self) -> Option<&Primitive> {
 		match self {
 			Value::Primitive(p) => Some(p),
 			_ => None,
 		}
 	}
 
-	pub fn equivalent(&self, other: &Value, consider_output: bool) -> bool {
+	pub(crate) fn equivalent(&self, other: &Value, consider_output: bool) -> bool {
 		match (self, other) {
 			(Value::Constant(c1), Value::Constant(c2)) => c1.id == c2.id,
 			(Value::Variable(a), Value::Variable(b)) => a == b,
@@ -60,7 +62,7 @@ impl Value {
 				if consider_output && primitive_hash(p1) != primitive_hash(p2) {
 					return false;
 				}
-				memoised_pair(u8::from(consider_output), p1, p2, || {
+				memoised_pair(Pairing::equivalence(consider_output), p1, p2, || {
 					equivalent_primitives(p1, p2, consider_output)
 				})
 			}
@@ -68,7 +70,7 @@ impl Value {
 		}
 	}
 
-	pub fn same_term(&self, other: &Value) -> bool {
+	pub(crate) fn same_term(&self, other: &Value) -> bool {
 		match (self, other) {
 			(Value::Constant(c1), Value::Constant(c2)) => c1.id == c2.id,
 			(Value::Variable(a), Value::Variable(b)) => a == b,
@@ -77,7 +79,7 @@ impl Value {
 		}
 	}
 
-	pub fn hash_value(&self) -> u64 {
+	pub(crate) fn hash_value(&self) -> u64 {
 		match self {
 			Value::Constant(c) => c.id as u64,
 			Value::Primitive(p) => primitive_hash(p),
@@ -96,7 +98,7 @@ impl Value {
 }
 
 #[derive(Clone, Debug, Default)]
-pub struct Constant {
+pub(crate) struct Constant {
 	pub name: Arc<str>,
 	pub id: ValueId,
 	pub guard: bool,
@@ -107,80 +109,111 @@ pub struct Constant {
 }
 
 impl Constant {
-	pub fn equivalent(&self, other: &Constant) -> bool {
+	pub(crate) fn equivalent(&self, other: &Constant) -> bool {
 		self.id == other.id
 	}
 
-	pub fn is_nil(&self) -> bool {
-		self.id == 1
+	pub(crate) fn is_nil(&self) -> bool {
+		self.id == NIL_ID
 	}
 }
 
+const VARIABLES_UNKNOWN: u8 = 0;
+const VARIABLES_ABSENT: u8 = 1;
+const VARIABLES_PRESENT: u8 = 2;
+
 #[derive(Debug, Default)]
-pub struct HashCell(
-	AtomicU64,
-	AtomicU8,
-	std::sync::OnceLock<Box<(bool, Option<Value>)>>,
-);
+pub(crate) struct HashCell {
+	hash: AtomicU64,
+	variables: AtomicU8,
+	reduct: std::sync::OnceLock<Box<(bool, Option<Value>)>>,
+}
 
 impl Clone for HashCell {
 	fn clone(&self) -> Self {
-		HashCell(
-			AtomicU64::new(self.0.load(Ordering::Relaxed)),
-			AtomicU8::new(self.1.load(Ordering::Relaxed)),
-			std::sync::OnceLock::new(),
-		)
+		HashCell {
+			hash: AtomicU64::new(self.hash.load(Ordering::Relaxed)),
+			variables: AtomicU8::new(self.variables.load(Ordering::Relaxed)),
+			reduct: std::sync::OnceLock::new(),
+		}
 	}
 }
 
 impl HashCell {
-	pub fn get(&self) -> Option<u64> {
-		match self.0.load(Ordering::Relaxed) {
+	pub(crate) fn get(&self) -> Option<u64> {
+		match self.hash.load(Ordering::Relaxed) {
 			0 => None,
 			cached => Some(cached),
 		}
 	}
 
-	pub fn set(&self, hash: u64) {
-		self.0.store(hash, Ordering::Relaxed);
+	pub(crate) fn set(&self, hash: u64) {
+		self.hash.store(hash, Ordering::Relaxed);
 	}
 
 	pub(crate) fn reduct(&self) -> Option<&(bool, Option<Value>)> {
-		self.2.get().map(AsRef::as_ref)
+		self.reduct.get().map(AsRef::as_ref)
 	}
 
 	pub(crate) fn set_reduct(&self, reduct: (bool, Option<Value>)) -> &(bool, Option<Value>) {
-		self.2.get_or_init(|| Box::new(reduct))
+		self.reduct.get_or_init(|| Box::new(reduct))
 	}
 
-	pub fn has_variables(&self) -> Option<bool> {
-		match self.1.load(Ordering::Relaxed) {
-			0 => None,
-			1 => Some(false),
+	pub(crate) fn has_variables(&self) -> Option<bool> {
+		match self.variables.load(Ordering::Relaxed) {
+			VARIABLES_UNKNOWN => None,
+			VARIABLES_ABSENT => Some(false),
 			_ => Some(true),
 		}
 	}
 
-	pub fn set_has_variables(&self, has: bool) {
-		self.1.store(if has { 2 } else { 1 }, Ordering::Relaxed);
+	pub(crate) fn set_has_variables(&self, has: bool) {
+		let state = if has {
+			VARIABLES_PRESENT
+		} else {
+			VARIABLES_ABSENT
+		};
+		self.variables.store(state, Ordering::Relaxed);
 	}
 }
 
 #[derive(Clone, Debug)]
-pub struct Primitive {
-	pub id: PrimitiveId,
-	pub arguments: Vec<Value>,
-	pub output: usize,
-	pub threshold: usize,
-	pub instance: ValueId,
-	pub instance_check: bool,
-	pub capabilities: Capabilities,
-	pub hash: HashCell,
+pub(crate) struct Application {
+	pub(crate) id: PrimitiveId,
+	pub(crate) arguments: Vec<Value>,
+	pub(crate) output: usize,
+	pub(crate) threshold: usize,
+	pub(crate) instance: ValueId,
+	pub(crate) instance_check: bool,
+	pub(crate) capabilities: Capabilities,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct Primitive {
+	application: Application,
+	cache: HashCell,
+}
+
+impl std::ops::Deref for Primitive {
+	type Target = Application;
+
+	fn deref(&self) -> &Application {
+		&self.application
+	}
+}
+
+impl From<Application> for Primitive {
+	fn from(application: Application) -> Self {
+		Primitive {
+			application,
+			cache: HashCell::default(),
+		}
+	}
 }
 
 impl Primitive {
-	pub fn new(id: PrimitiveId, arguments: Vec<Value>, output: usize) -> Self {
-		Primitive {
+	pub(crate) fn new(id: PrimitiveId, arguments: Vec<Value>, output: usize) -> Self {
+		Primitive::from(Application {
 			id,
 			arguments,
 			output,
@@ -188,12 +221,21 @@ impl Primitive {
 			instance: 0,
 			instance_check: false,
 			capabilities: Capabilities::default(),
-			hash: HashCell::default(),
-		}
+		})
 	}
 
-	pub fn with_arguments(&self, arguments: Vec<Value>) -> Self {
-		Primitive {
+	pub(crate) fn cache(&self) -> &HashCell {
+		&self.cache
+	}
+
+	pub(crate) fn with(&self, change: impl FnOnce(&mut Application)) -> Self {
+		let mut application = self.application.clone();
+		change(&mut application);
+		Primitive::from(application)
+	}
+
+	pub(crate) fn with_arguments(&self, arguments: Vec<Value>) -> Self {
+		Primitive::from(Application {
 			id: self.id,
 			arguments,
 			output: self.output,
@@ -201,24 +243,17 @@ impl Primitive {
 			instance: self.instance,
 			instance_check: self.instance_check,
 			capabilities: self.capabilities,
-			hash: HashCell::default(),
-		}
+		})
 	}
 
-	pub fn with_output(&self, output: usize) -> Self {
-		Primitive {
-			id: self.id,
-			arguments: self.arguments.clone(),
-			output,
-			threshold: self.threshold,
-			instance: self.instance,
-			instance_check: self.instance_check,
-			capabilities: self.capabilities,
-			hash: HashCell::default(),
-		}
+	pub(crate) fn with_output(&self, output: usize) -> Self {
+		self.with(|application| application.output = output)
 	}
 
-	pub fn map_arguments(&self, mut f: impl FnMut(&Value) -> Option<Value>) -> Option<Primitive> {
+	pub(crate) fn map_arguments(
+		&self,
+		mut f: impl FnMut(&Value) -> Option<Value>,
+	) -> Option<Primitive> {
 		let mut changed: Option<Vec<Value>> = None;
 		for (i, a) in self.arguments.iter().enumerate() {
 			if let Some(mapped) = f(a) {
@@ -272,7 +307,7 @@ pub(crate) fn copy_index_of(id: ValueId) -> (u32, ValueId) {
 static STATIC_NIL: LazyLock<Value> = LazyLock::new(|| {
 	Value::Constant(Constant {
 		name: Arc::from("nil"),
-		id: 1,
+		id: NIL_ID,
 		guard: false,
 		fresh: false,
 		leaked: false,
@@ -313,7 +348,7 @@ mod tests {
 	fn primitive_with_arguments() {
 		let a = make_constant("pwa_a");
 		let b = make_constant("pwa_b");
-		let p = Primitive {
+		let p = Primitive::from(Application {
 			id: PRIM_ENC,
 			arguments: vec![a],
 			output: 0,
@@ -321,8 +356,7 @@ mod tests {
 			instance_check: true,
 			capabilities: Capabilities::default(),
 			threshold: 0,
-			hash: HashCell::default(),
-		};
+		});
 		let p2 = p.with_arguments(vec![b.clone()]);
 		assert_eq!(p2.id, PRIM_ENC);
 		assert_eq!(p2.output, 0);

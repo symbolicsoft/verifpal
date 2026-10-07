@@ -355,7 +355,6 @@ fn traces(a: &Analysis, model: &ModelReport, index: usize, marked: &[usize]) -> 
 				.text("query", q.query.as_str())
 				.list("diagram", attack_diagram(q, model, index, qi))
 				.list("steps", trace_steps(q))
-				.list("notes", lines(&q.notes))
 		})
 		.collect()
 }

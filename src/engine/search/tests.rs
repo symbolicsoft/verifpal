@@ -5,6 +5,7 @@ use super::*;
 use crate::engine::exec::execute;
 use crate::syntax::Query;
 use crate::term::Constant;
+use crate::util::index::Idx;
 
 #[test]
 fn removing_inputs_after_relevant_actions_preserves_query_violations() {
@@ -58,12 +59,15 @@ fn removing_inputs_after_relevant_actions_preserves_query_violations() {
 							crate::primitive::attacker_public_key(),
 						]
 						.into_iter()
-						.map(|value| (delivery.recipient, *slot, value))
+						.map(|value| Install::Value {
+							run: delivery.recipient,
+							slot: *slot,
+							value,
+						})
 					})
 			})
 			.collect();
-		choices
-			.extend((0..program.runs.len()).map(|run| (run, UNSTARTED, crate::term::value_nil())));
+		choices.extend(program.runs.indices().map(|run| Install::Idle { run }));
 		for first in &choices {
 			for second in &choices {
 				let plan = normalize(vec![first.clone(), second.clone()]);
@@ -122,8 +126,16 @@ fn colliding_install_maps_keep_their_own_continuations() {
 		vec![constant("sig_c", 11), constant("sig_d", 69)],
 		0,
 	);
-	let left = vec![(1, 7, left)];
-	let right = vec![(1, 7, right)];
+	let left = vec![Install::Value {
+		run: RunIdx::new(1),
+		slot: SlotIdx::new(7),
+		value: left,
+	}];
+	let right = vec![Install::Value {
+		run: RunIdx::new(1),
+		slot: SlotIdx::new(7),
+		value: right,
+	}];
 	assert_eq!(installs_hash(&left), installs_hash(&right));
 	let mut tried = Tried::default();
 	assert!(tried.remember(&left, vec![None, Some(8)]));
@@ -146,24 +158,23 @@ fn a_repeated_execution_keeps_its_repair_continuation() {
 	let ctx = VerifyContext::new(&model, Vec::new(), 1, None, Vec::new(), Vec::new());
 	let root = execute(&cx, &Vec::new());
 	let mut search = Search::new(&ctx, &cx, root);
-	let bob = program
-		.runs
-		.iter()
-		.position(|run| run.name == "Bob")
-		.unwrap();
+	let bob = program.runs.position(|run| run.name == "Bob").unwrap();
 	let slot = km
 		.slots
-		.iter()
 		.position(|slot| &*slot.constant.name == "ciphertext")
 		.unwrap();
-	let plan = vec![(bob, slot, crate::term::value_nil())];
+	let plan = vec![Install::Value {
+		run: bob,
+		slot,
+		value: crate::term::value_nil(),
+	}];
 	let first = search.consider(plan.clone());
 	assert!(
 		search
 			.outcome(first)
 			.is_some_and(|outcome| outcome.halts.iter().any(|&(run, _)| run == bob))
 	);
-	let executed = search.executed;
+	let executed = search.attempts.executed;
 	assert_eq!(search.consider(plan), first);
-	assert_eq!(search.executed, executed);
+	assert_eq!(search.attempts.executed, executed);
 }

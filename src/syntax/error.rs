@@ -5,24 +5,24 @@ use std::borrow::Cow;
 use std::fmt;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
-pub struct Span {
-	pub start: usize,
-	pub end: usize,
+pub(crate) struct Span {
+	pub(crate) start: usize,
+	pub(crate) end: usize,
 }
 
 impl Span {
-	pub fn new(start: usize, end: usize) -> Self {
+	pub(crate) fn new(start: usize, end: usize) -> Self {
 		Span { start, end }
 	}
 
-	pub fn at(pos: usize) -> Self {
+	pub(crate) fn at(pos: usize) -> Self {
 		Span {
 			start: pos,
 			end: pos,
 		}
 	}
 
-	pub fn line_col(&self, source: &str) -> (usize, usize) {
+	pub(crate) fn line_col(&self, source: &str) -> (usize, usize) {
 		let (line, start, _) = self.line_bounds(source);
 		let col = source
 			.get(start..self.start.min(source.len()))
@@ -64,20 +64,18 @@ fn last_line_with_text(source: &str) -> Option<(usize, usize, usize)> {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ErrorKind {
+pub(crate) enum ErrorKind {
 	Parse,
 	Sanity,
-	Resolution,
 	Internal,
 	Cancelled,
 }
 
 impl ErrorKind {
-	pub fn label(self) -> &'static str {
+	pub(crate) fn label(self) -> &'static str {
 		match self {
 			ErrorKind::Parse => "parse error",
 			ErrorKind::Sanity => "sanity error",
-			ErrorKind::Resolution => "resolution error",
 			ErrorKind::Internal => "internal error",
 			ErrorKind::Cancelled => "cancelled",
 		}
@@ -96,31 +94,27 @@ struct Diagnostic {
 
 #[derive(Clone, Debug)]
 pub struct VerifpalError {
-	pub kind: ErrorKind,
-	pub message: Cow<'static, str>,
-	pub span: Option<Span>,
+	pub(crate) kind: ErrorKind,
+	pub(crate) message: Cow<'static, str>,
+	pub(crate) span: Option<Span>,
 	extra: Option<Box<Diagnostic>>,
 	rendered: Option<String>,
 }
 
 impl VerifpalError {
-	pub fn parse(message: Cow<'static, str>) -> Self {
+	pub(crate) fn parse(message: Cow<'static, str>) -> Self {
 		Self::of(ErrorKind::Parse, message)
 	}
 
-	pub fn sanity(message: Cow<'static, str>) -> Self {
+	pub(crate) fn sanity(message: Cow<'static, str>) -> Self {
 		Self::of(ErrorKind::Sanity, message)
 	}
 
-	pub fn resolution(message: Cow<'static, str>) -> Self {
-		Self::of(ErrorKind::Resolution, message)
-	}
-
-	pub fn internal(message: Cow<'static, str>) -> Self {
+	pub(crate) fn internal(message: Cow<'static, str>) -> Self {
 		Self::of(ErrorKind::Internal, message)
 	}
 
-	pub fn cancelled() -> Self {
+	pub(crate) fn cancelled() -> Self {
 		Self::of(ErrorKind::Cancelled, "analysis cancelled".into())
 	}
 
@@ -138,92 +132,96 @@ impl VerifpalError {
 		self.extra.get_or_insert_with(Box::default)
 	}
 
-	pub fn at(mut self, span: Span) -> Self {
+	pub(crate) fn at(mut self, span: Span) -> Self {
 		self.span = Some(span);
 		self
 	}
 
-	pub fn marking(mut self, span: Span, message: impl Into<Cow<'static, str>>) -> Self {
+	pub(crate) fn marking(mut self, span: Span, message: impl Into<Cow<'static, str>>) -> Self {
 		self.span = Some(span);
 		self.extra_mut().primary_label = Some(message.into());
 		self
 	}
 
-	pub fn narrow(mut self, needle: impl Into<Cow<'static, str>>) -> Self {
+	pub(crate) fn narrow(mut self, needle: impl Into<Cow<'static, str>>) -> Self {
 		self.extra_mut().narrow = Some(needle.into());
 		self
 	}
 
-	pub fn narrow_occurrence(mut self, needle: impl Into<Cow<'static, str>>, index: usize) -> Self {
+	pub(crate) fn narrow_occurrence(
+		mut self,
+		needle: impl Into<Cow<'static, str>>,
+		index: usize,
+	) -> Self {
 		let extra = self.extra_mut();
 		extra.narrow = Some(needle.into());
 		extra.narrow_index = index;
 		self
 	}
 
-	pub fn labelled(mut self, message: impl Into<Cow<'static, str>>) -> Self {
+	pub(crate) fn labelled(mut self, message: impl Into<Cow<'static, str>>) -> Self {
 		self.extra_mut().primary_label = Some(message.into());
 		self
 	}
 
-	pub fn label(mut self, span: Span, message: impl Into<Cow<'static, str>>) -> Self {
+	pub(crate) fn label(mut self, span: Span, message: impl Into<Cow<'static, str>>) -> Self {
 		self.extra_mut().labels.push((span, message.into()));
 		self
 	}
 
-	pub fn note(mut self, message: impl Into<Cow<'static, str>>) -> Self {
+	pub(crate) fn note(mut self, message: impl Into<Cow<'static, str>>) -> Self {
 		self.extra_mut().notes.push(message.into());
 		self
 	}
 
-	pub fn help(mut self, message: impl Into<Cow<'static, str>>) -> Self {
+	pub(crate) fn help(mut self, message: impl Into<Cow<'static, str>>) -> Self {
 		self.extra_mut().helps.push(message.into());
 		self
 	}
 
-	pub fn suggest(self, candidate: Option<String>) -> Self {
+	pub(crate) fn suggest(self, candidate: Option<String>) -> Self {
 		match candidate {
 			Some(name) => self.help(format!("did you mean `{}`?", name)),
 			None => self,
 		}
 	}
 
-	pub fn labels(&self) -> &[(Span, Cow<'static, str>)] {
+	pub(crate) fn labels(&self) -> &[(Span, Cow<'static, str>)] {
 		match self.extra.as_deref() {
 			Some(extra) => &extra.labels,
 			None => &[],
 		}
 	}
 
-	pub fn notes(&self) -> Vec<&str> {
+	pub(crate) fn notes(&self) -> Vec<&str> {
 		self.extra
 			.as_deref()
 			.map(|e| e.notes.iter().map(|n| n.as_ref()).collect())
 			.unwrap_or_default()
 	}
 
-	pub fn helps(&self) -> Vec<&str> {
+	pub(crate) fn helps(&self) -> Vec<&str> {
 		self.extra
 			.as_deref()
 			.map(|e| e.helps.iter().map(|h| h.as_ref()).collect())
 			.unwrap_or_default()
 	}
 
-	pub fn has_labels(&self) -> bool {
+	pub(crate) fn has_labels(&self) -> bool {
 		self.extra.as_ref().is_some_and(|e| !e.labels.is_empty())
 	}
 
-	pub fn or_span(mut self, span: Span) -> Self {
+	pub(crate) fn or_span(mut self, span: Span) -> Self {
 		self.span.get_or_insert(span);
 		self
 	}
 
-	pub fn located(mut self, file_name: &str, source: &str) -> Self {
+	pub(crate) fn located(mut self, file_name: &str, source: &str) -> Self {
 		self.rendered = Some(self.render(file_name, source));
 		self
 	}
 
-	pub fn narrowed_span(&self, source: &str) -> Option<Span> {
+	pub(crate) fn narrowed_span(&self, source: &str) -> Option<Span> {
 		let span = self.span?;
 		let Some(extra) = self.extra.as_deref() else {
 			return Some(span);
@@ -237,7 +235,7 @@ impl VerifpalError {
 		)
 	}
 
-	pub fn render(&self, file_name: &str, source: &str) -> String {
+	pub(crate) fn render(&self, file_name: &str, source: &str) -> String {
 		let header = match self.kind {
 			ErrorKind::Internal => self.message.to_string(),
 			kind => format!("{}: {}", kind.label(), self.message),
@@ -461,7 +459,7 @@ impl From<&'static str> for VerifpalError {
 	}
 }
 
-pub type VResult<T> = Result<T, VerifpalError>;
+pub(crate) type VResult<T> = Result<T, VerifpalError>;
 
 #[cfg(test)]
 mod tests {
@@ -471,8 +469,8 @@ mod tests {
 	fn error_display() {
 		let e = VerifpalError::parse("bad input".into());
 		assert_eq!(format!("{}", e), "parse error: bad input");
-		let e2 = VerifpalError::resolution("not found".into());
-		assert_eq!(format!("{}", e2), "resolution error: not found");
+		let e2 = VerifpalError::sanity("not found".into());
+		assert_eq!(format!("{}", e2), "sanity error: not found");
 	}
 
 	const SRC: &str = "attacker[active]\n\nprincipal Alice[\n\tknows private m\n]\n";

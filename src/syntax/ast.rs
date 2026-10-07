@@ -8,10 +8,10 @@ use super::{Span, VResult, VerifpalError};
 use crate::term::{Constant, Value, ValueId, copy_index_of};
 use crate::util::IdSet;
 
-pub type PrincipalId = u8;
+pub(crate) type PrincipalId = u8;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum Qualifier {
+pub(crate) enum Qualifier {
 	Public,
 	Private,
 }
@@ -26,25 +26,25 @@ impl fmt::Display for Qualifier {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum CommentStyle {
+pub(crate) enum CommentStyle {
 	Line,
 	Block,
 }
 
 #[derive(Clone, Debug)]
-pub struct Comment {
+pub(crate) struct Comment {
 	pub text: String,
 	pub style: CommentStyle,
 }
 
 #[derive(Clone, Debug, Default)]
-pub struct LineComments {
+pub(crate) struct LineComments {
 	pub leading: Vec<Comment>,
 	pub trailing: Option<Comment>,
 }
 
 #[derive(Clone, Debug, Default)]
-pub struct BracketComments {
+pub(crate) struct BracketComments {
 	pub leading: Vec<Comment>,
 	pub opening: Option<Comment>,
 	pub tail: Vec<Comment>,
@@ -52,7 +52,7 @@ pub struct BracketComments {
 }
 
 impl BracketComments {
-	pub fn is_empty(&self) -> bool {
+	pub(crate) fn is_empty(&self) -> bool {
 		self.leading.is_empty()
 			&& self.opening.is_none()
 			&& self.tail.is_empty()
@@ -61,7 +61,7 @@ impl BracketComments {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum Declaration {
+pub(crate) enum Declaration {
 	Knows,
 	Generates,
 	Assignment,
@@ -69,7 +69,7 @@ pub enum Declaration {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum QueryKind {
+pub(crate) enum QueryKind {
 	Confidentiality,
 	Authentication,
 	Freshness,
@@ -78,7 +78,7 @@ pub enum QueryKind {
 }
 
 impl QueryKind {
-	pub const ALL: [QueryKind; 5] = [
+	pub(crate) const ALL: [QueryKind; 5] = [
 		QueryKind::Confidentiality,
 		QueryKind::Authentication,
 		QueryKind::Freshness,
@@ -86,7 +86,7 @@ impl QueryKind {
 		QueryKind::Equivalence,
 	];
 
-	pub fn name(self) -> &'static str {
+	pub(crate) fn name(self) -> &'static str {
 		match self {
 			QueryKind::Confidentiality => "confidentiality",
 			QueryKind::Authentication => "authentication",
@@ -98,12 +98,12 @@ impl QueryKind {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum QueryOptionKind {
+pub(crate) enum QueryOptionKind {
 	Precondition,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum AttackerKind {
+pub(crate) enum AttackerKind {
 	Active,
 	Passive,
 }
@@ -118,7 +118,7 @@ impl std::fmt::Display for AttackerKind {
 }
 
 #[derive(Clone, Default)]
-pub struct Source(pub Arc<str>);
+pub(crate) struct Source(pub Arc<str>);
 
 impl fmt::Debug for Source {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -140,7 +140,7 @@ impl From<&str> for Source {
 }
 
 #[derive(Clone, Debug)]
-pub struct Scenario {
+pub(crate) struct Scenario {
 	pub span: Span,
 	pub principal: PrincipalId,
 	pub principal_name: Arc<str>,
@@ -149,7 +149,7 @@ pub struct Scenario {
 }
 
 #[derive(Clone, Debug)]
-pub struct Model {
+pub(crate) struct Model {
 	pub file_name: String,
 	pub source: Source,
 	pub attacker: AttackerKind,
@@ -163,7 +163,7 @@ pub struct Model {
 }
 
 impl Model {
-	pub fn declared_principals(&self) -> Vec<(PrincipalId, String)> {
+	pub(crate) fn declared_principals(&self) -> Vec<(PrincipalId, String)> {
 		let mut out: Vec<(PrincipalId, String)> = Vec::new();
 		for block in &self.blocks {
 			if let Block::Principal(p) = block
@@ -175,7 +175,7 @@ impl Model {
 		out
 	}
 
-	pub fn freshened_constants(&self) -> IdSet<ValueId> {
+	pub(crate) fn freshened_constants(&self) -> IdSet<ValueId> {
 		let mut out = IdSet::default();
 		for block in &self.blocks {
 			let Block::Principal(p) = block else {
@@ -192,7 +192,7 @@ impl Model {
 		out
 	}
 
-	pub fn highest_referenced_principal(&self) -> PrincipalId {
+	pub(crate) fn highest_referenced_principal(&self) -> PrincipalId {
 		let mut highest = 0;
 		for block in &self.blocks {
 			match block {
@@ -219,14 +219,14 @@ impl Model {
 }
 
 #[derive(Clone, Debug)]
-pub enum Block {
+pub(crate) enum Block {
 	Principal(Principal),
 	Message(Message),
 	Phase(Phase),
 }
 
 #[derive(Clone, Debug, Default)]
-pub struct Principal {
+pub(crate) struct Principal {
 	pub name: String,
 	pub id: PrincipalId,
 	pub span: Span,
@@ -235,7 +235,7 @@ pub struct Principal {
 }
 
 #[derive(Clone, Debug, Default)]
-pub struct Message {
+pub(crate) struct Message {
 	pub span: Span,
 	pub sender: PrincipalId,
 	pub sender_name: Arc<str>,
@@ -246,14 +246,14 @@ pub struct Message {
 }
 
 #[derive(Clone, Debug, Default)]
-pub struct Phase {
+pub(crate) struct Phase {
 	pub span: Span,
 	pub number: i32,
 	pub comments: LineComments,
 }
 
 #[derive(Clone, Debug)]
-pub struct Query {
+pub(crate) struct Query {
 	pub span: Span,
 	pub kind: QueryKind,
 	pub constants: Vec<Constant>,
@@ -279,7 +279,7 @@ impl Query {
 				.all(|(x, y)| x.message.same_shape(&y.message))
 	}
 
-	pub fn subject(&self) -> VResult<&Constant> {
+	pub(crate) fn subject(&self) -> VResult<&Constant> {
 		self.constants.first().ok_or_else(|| {
 			VerifpalError::internal(
 				format!("{} query carries no constant", self.kind.name()).into(),
@@ -300,7 +300,7 @@ impl Message {
 				.all(|(x, y)| x.id == y.id)
 	}
 
-	pub fn constant(&self) -> VResult<&Constant> {
+	pub(crate) fn constant(&self) -> VResult<&Constant> {
 		self.constants
 			.first()
 			.ok_or_else(|| VerifpalError::internal("query message carries no constant".into()))
@@ -308,14 +308,14 @@ impl Message {
 }
 
 #[derive(Clone, Debug)]
-pub struct QueryOption {
+pub(crate) struct QueryOption {
 	pub kind: QueryOptionKind,
 	pub message: Message,
 	pub comments: LineComments,
 }
 
 #[derive(Clone, Debug)]
-pub struct Expression {
+pub(crate) struct Expression {
 	pub span: Span,
 	pub kind: Declaration,
 	pub qualifier: Option<Qualifier>,
@@ -339,13 +339,15 @@ impl Expression {
 				let Value::Primitive(p) = assigned else {
 					return (c, assigned.clone());
 				};
-				let mut projected = p.with_output(output);
-				if crate::primitive::primitive_get(projected.id)
-					.is_ok_and(|spec| spec.distinct_per_assignment)
-					&& let Some(first) = self.constants.first()
-				{
-					projected.instance = copy_index_of(first.id).1;
-				}
+				let projected = p.with(|application| {
+					application.output = output;
+					if crate::primitive::spec(application.id)
+						.is_ok_and(|spec| spec.distinct_per_assignment)
+						&& let Some(first) = self.constants.first()
+					{
+						application.instance = copy_index_of(first.id).1;
+					}
+				});
 				(c, Value::Primitive(Arc::new(projected)))
 			})
 		})

@@ -43,7 +43,6 @@ fn query(kind: &str, text: &str, resolved: bool) -> QueryReport {
 		subtype: None,
 		steps: vec![],
 		preconditions: vec![],
-		notes: vec![],
 		generated: false,
 		variants: 0,
 	}
@@ -705,10 +704,7 @@ fn no_markup_is_written_in_rust() {
 		("report/html/mod.rs", include_str!("mod.rs")),
 		("report/html/diagram.rs", include_str!("diagram.rs")),
 	] {
-		let body = source
-			.split("#[cfg(test)]\nmod tests {")
-			.next()
-			.unwrap_or(source);
+		let body = crate::testing::shipping_code(name, source);
 		for needle in ["\"<", "</", "/>", "<span", "<div", "class=\"", "&amp;"] {
 			assert!(
 				!body.contains(needle),
@@ -720,11 +716,7 @@ fn no_markup_is_written_in_rust() {
 
 #[test]
 fn the_html_layer_never_reaches_for_the_parser() {
-	let source = include_str!("mod.rs");
-	let body = source
-		.split("#[cfg(test)]\nmod tests {")
-		.next()
-		.unwrap_or(source);
+	let body = crate::testing::shipping_code("report/html/mod.rs", include_str!("mod.rs"));
 	assert!(
 		!body.contains("crate::syntax::parser"),
 		"the model is parsed once, in report/mod.rs; the renderer reads the report"

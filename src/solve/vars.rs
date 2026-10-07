@@ -4,7 +4,9 @@
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
+use crate::protocol::SlotIdx;
 use crate::term::{Value, VariableId, value_nil};
+use crate::util::index::Idx;
 use crate::util::{IdHasher, IdMap, IdSet};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -46,22 +48,22 @@ pub(crate) fn free_var(n: usize) -> Value {
 
 pub(crate) type Substitution = IdMap<VariableId, Value>;
 
-pub(crate) fn attacker_var_id(slot: usize) -> VariableId {
-	VariableId::Slot(slot)
+pub(crate) fn attacker_var_id(slot: SlotIdx) -> VariableId {
+	VariableId::Slot(slot.index())
 }
 
 pub(crate) fn is_slot_var_id(id: &VariableId) -> bool {
 	matches!(id, VariableId::Slot(_))
 }
 
-pub(crate) fn slot_of_var_id(id: &VariableId) -> usize {
+pub(crate) fn slot_of_var_id(id: &VariableId) -> SlotIdx {
 	let VariableId::Slot(slot) = id else {
 		panic!("a wire slot variable")
 	};
-	*slot
+	SlotIdx::new(*slot)
 }
 
-pub(crate) fn attacker_var(slot: usize) -> Value {
+pub(crate) fn attacker_var(slot: SlotIdx) -> Value {
 	Value::Variable(attacker_var_id(slot))
 }
 
@@ -77,11 +79,11 @@ pub(crate) fn contains_var(v: &Value) -> bool {
 		Value::Constant(_) => false,
 		Value::Variable(_) => true,
 		Value::Primitive(p) => {
-			if let Some(has) = p.hash.has_variables() {
+			if let Some(has) = p.cache().has_variables() {
 				return has;
 			}
 			let has = p.arguments.iter().any(contains_var);
-			p.hash.set_has_variables(has);
+			p.cache().set_has_variables(has);
 			has
 		}
 	}
@@ -433,12 +435,12 @@ pub(crate) fn dedupe(candidates: Vec<Substitution>) -> Vec<Substitution> {
 mod tests {
 	use super::*;
 	use crate::primitive::Capabilities;
-	use crate::term::{Constant, HashCell, Primitive};
+	use crate::term::{Application, Constant, Primitive};
 	use crate::testing::test_value_id;
 
 	#[test]
 	fn canonical_slots_ignore_existential_names_and_unused_bindings() {
-		let slot = attacker_var_id(0);
+		let slot = attacker_var_id(SlotIdx::new(0));
 		let tuple =
 			|a: Value, b: Value| Value::primitive(crate::primitive::PRIM_CONCAT, vec![a, b], 0);
 		let left = Substitution::from_iter([
@@ -470,7 +472,7 @@ mod tests {
 		}
 		let template = Value::primitive(
 			crate::primitive::PRIM_HASH,
-			vec![ground.clone(), free_var(0), attacker_var(0)],
+			vec![ground.clone(), free_var(0), attacker_var(SlotIdx::new(0))],
 			0,
 		);
 		for filler in [value_nil(), crate::primitive::attacker_public_key()] {
@@ -482,7 +484,7 @@ mod tests {
 			};
 			assert!(Arc::ptr_eq(original, retained));
 			assert!(args[1].equivalent(&filler, true));
-			assert_eq!(as_var(&args[2]), Some(attacker_var_id(0)));
+			assert_eq!(as_var(&args[2]), Some(attacker_var_id(SlotIdx::new(0))));
 			assert!(crate::term::equivalence::structurally_identical(
 				&ground_free_as(&ground, &filler),
 				&ground
@@ -501,13 +503,13 @@ mod tests {
 					0,
 				);
 			}
-			Substitution::from_iter([(attacker_var_id(0), term)])
+			Substitution::from_iter([(attacker_var_id(SlotIdx::new(0)), term)])
 		};
 		let left = canonical_slots(&make(10));
 		let right = canonical_slots(&make(100));
 		assert!(same_substitution(&left, &right));
 		assert_eq!(
-			crate::term::subterms(&left[&attacker_var_id(0)])
+			crate::term::subterms(&left[&attacker_var_id(SlotIdx::new(0))])
 				.filter(|v| matches!(v, Value::Primitive(_)))
 				.count(),
 			40
@@ -518,8 +520,8 @@ mod tests {
 	fn canonical_slots_preserve_sharing_between_receives() {
 		let make = |first, second| {
 			Substitution::from_iter([
-				(attacker_var_id(0), free_var(first)),
-				(attacker_var_id(1), free_var(second)),
+				(attacker_var_id(SlotIdx::new(0)), free_var(first)),
+				(attacker_var_id(SlotIdx::new(1)), free_var(second)),
 			])
 		};
 		assert!(same_substitution(
@@ -530,7 +532,10 @@ mod tests {
 			&canonical_slots(&make(10, 10)),
 			&canonical_slots(&make(20, 21))
 		));
-		let unbound_slot = Substitution::from_iter([(attacker_var_id(0), attacker_var(1))]);
+		let unbound_slot = Substitution::from_iter([(
+			attacker_var_id(SlotIdx::new(0)),
+			attacker_var(SlotIdx::new(1)),
+		)]);
 		assert!(!same_substitution(
 			&canonical_slots(&make(10, 10)),
 			&canonical_slots(&unbound_slot)
@@ -539,7 +544,7 @@ mod tests {
 
 	#[test]
 	fn removing_local_bindings_preserves_the_remaining_choices() {
-		let slot = attacker_var(0);
+		let slot = attacker_var(SlotIdx::new(0));
 		let first = free_var(0);
 		let second = free_var(1);
 		let kept = free_var(2);
@@ -567,7 +572,7 @@ mod tests {
 	}
 	#[test]
 	fn variable_walks_visit_shared_terms_without_expanding_them() {
-		let slot = attacker_var(0);
+		let slot = attacker_var(SlotIdx::new(0));
 		let free = free_var(0);
 		let mut term = Value::primitive(
 			crate::primitive::PRIM_HASH,
@@ -587,12 +592,12 @@ mod tests {
 		let mut frees = Vec::new();
 		collect_free_vars(&term, &mut frees);
 		assert_eq!(frees, vec![as_var(&free).unwrap()]);
-		let missing = attacker_var_id(1);
+		let missing = attacker_var_id(SlotIdx::new(1));
 		let mut bindings = Substitution::default();
 		assert!(!occurs(&missing, &term, &bindings));
-		bindings.insert(as_var(&free).unwrap(), attacker_var(1));
+		bindings.insert(as_var(&free).unwrap(), attacker_var(SlotIdx::new(1)));
 		assert!(occurs(&missing, &term, &bindings));
-		assert!(!occurs(&attacker_var_id(2), &term, &bindings));
+		assert!(!occurs(&attacker_var_id(SlotIdx::new(2)), &term, &bindings));
 	}
 
 	fn solver_constant(name: &str) -> Value {
@@ -605,7 +610,7 @@ mod tests {
 
 	#[test]
 	fn variables_never_alias_constants_or_slots() {
-		let slot = attacker_var(3);
+		let slot = attacker_var(SlotIdx::new(3));
 		let free = free_var(3);
 		let constant = Value::Constant(Constant {
 			id: u32::MAX,
@@ -618,7 +623,7 @@ mod tests {
 		}
 		assert!(is_slot_var_id(&as_var(&slot).unwrap()));
 		assert!(is_free_var_id(&as_var(&free).unwrap()));
-		assert_eq!(slot_of_var_id(&as_var(&slot).unwrap()), 3);
+		assert_eq!(slot_of_var_id(&as_var(&slot).unwrap()), SlotIdx::new(3));
 		assert!(!contains_var(&constant));
 	}
 
@@ -649,9 +654,9 @@ mod tests {
 	fn solver_merge_unifies_partial_solutions() {
 		let a = solver_constant("solver_merge_a");
 		let b = solver_constant("solver_merge_b");
-		let slot = crate::solve::vars::attacker_var_id(0);
+		let slot = crate::solve::vars::attacker_var_id(SlotIdx::new(0));
 		let concat = |x: Value, y: Value| {
-			Value::Primitive(std::sync::Arc::new(Primitive {
+			Value::Primitive(std::sync::Arc::new(Primitive::from(Application {
 				id: 2,
 				arguments: vec![x, y],
 				output: 0,
@@ -659,8 +664,7 @@ mod tests {
 				instance_check: false,
 				capabilities: Capabilities::default(),
 				threshold: 0,
-				hash: HashCell::default(),
-			}))
+			})))
 		};
 
 		let mut left = crate::solve::vars::Substitution::default();
@@ -684,10 +688,10 @@ mod tests {
 	#[test]
 	fn solver_occurs_check_refuses_a_cyclic_binding() {
 		let k = solver_constant("solver_occurs_k");
-		let slot = crate::solve::vars::attacker_var_id(0);
-		let var = crate::solve::vars::attacker_var(0);
+		let slot = crate::solve::vars::attacker_var_id(SlotIdx::new(0));
+		let var = crate::solve::vars::attacker_var(SlotIdx::new(0));
 		let enc = |x: Value, y: Value| {
-			Value::Primitive(std::sync::Arc::new(Primitive {
+			Value::Primitive(std::sync::Arc::new(Primitive::from(Application {
 				id: crate::primitive::PRIM_ENC,
 				arguments: vec![x, y],
 				output: 0,
@@ -695,8 +699,7 @@ mod tests {
 				instance_check: false,
 				capabilities: Capabilities::default(),
 				threshold: 0,
-				hash: HashCell::default(),
-			}))
+			})))
 		};
 
 		let mut s = crate::solve::vars::Substitution::default();
@@ -714,11 +717,11 @@ mod tests {
 	fn solver_occurs_check_sees_through_a_chain() {
 		// $0 -> HASH($1) and $1 -> $2 already bound, so binding $2 to anything
 		// mentioning $0 closes a cycle two hops away.
-		let a = crate::solve::vars::attacker_var_id(0);
-		let b = crate::solve::vars::attacker_var_id(1);
-		let c = crate::solve::vars::attacker_var_id(2);
+		let a = crate::solve::vars::attacker_var_id(SlotIdx::new(0));
+		let b = crate::solve::vars::attacker_var_id(SlotIdx::new(1));
+		let c = crate::solve::vars::attacker_var_id(SlotIdx::new(2));
 		let hash = |x: Value| {
-			Value::Primitive(std::sync::Arc::new(Primitive {
+			Value::Primitive(std::sync::Arc::new(Primitive::from(Application {
 				id: crate::primitive::PRIM_HASH,
 				arguments: vec![x],
 				output: 0,
@@ -726,26 +729,34 @@ mod tests {
 				instance_check: false,
 				capabilities: Capabilities::default(),
 				threshold: 0,
-				hash: HashCell::default(),
-			}))
+			})))
 		};
 
 		let mut s = crate::solve::vars::Substitution::default();
 		assert!(bind(
 			&mut s,
 			a.clone(),
-			hash(crate::solve::vars::attacker_var(1))
+			hash(crate::solve::vars::attacker_var(SlotIdx::new(1)))
 		));
-		assert!(bind(&mut s, b, crate::solve::vars::attacker_var(2)));
-		assert!(occurs(&a, &crate::solve::vars::attacker_var(0), &s));
+		assert!(bind(
+			&mut s,
+			b,
+			crate::solve::vars::attacker_var(SlotIdx::new(2))
+		));
+		assert!(occurs(
+			&a,
+			&crate::solve::vars::attacker_var(SlotIdx::new(0)),
+			&s
+		));
 		assert!(!bind(
 			&mut s,
 			c.clone(),
-			hash(crate::solve::vars::attacker_var(0))
+			hash(crate::solve::vars::attacker_var(SlotIdx::new(0)))
 		));
 		assert!(bind(&mut s, c, hash(solver_constant("solver_chain_m"))));
 		// With the cycle refused, applying the substitution terminates.
-		let applied = crate::solve::vars::apply(&crate::solve::vars::attacker_var(0), &s);
+		let applied =
+			crate::solve::vars::apply(&crate::solve::vars::attacker_var(SlotIdx::new(0)), &s);
 		assert!(!crate::solve::vars::contains_var(&applied));
 	}
 

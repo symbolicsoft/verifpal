@@ -1,7 +1,6 @@
 /* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
  * SPDX-License-Identifier: GPL-3.0-only */
 
-use crate::primitive::primitive_names;
 use crate::report::msc::ATTACKER;
 use crate::report::template::escaped_tex;
 use crate::report::{DiagramRow, ModelReport};
@@ -72,7 +71,7 @@ fn is_name_byte(c: u8) -> bool {
 }
 
 fn is_primitive(name: &str) -> bool {
-	primitive_names()
+	crate::primitive::names()
 		.iter()
 		.any(|known| known.eq_ignore_ascii_case(name))
 }

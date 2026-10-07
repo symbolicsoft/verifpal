@@ -38,7 +38,6 @@
 use std::sync::Arc;
 
 use crate::console::InfoLevel;
-use crate::console::info_message;
 use crate::protocol::sanity::MAX_PRINCIPALS;
 use crate::syntax::{Block, Message, Model, Principal, PrincipalId, Query, VResult, VerifpalError};
 use crate::term::{Constant, Value, ValueId};
@@ -86,57 +85,16 @@ pub(crate) fn expand_sessions(mut e: Expansion, sessions: u8) -> VResult<Expansi
 		"session",
 	)?;
 
-	let mut blocks: Vec<Block> = Vec::with_capacity(m.blocks.len() * sessions as usize);
-	for block in &m.blocks {
-		blocks.push(block.clone());
-		match block {
-			Block::Principal(p) => {
-				blocks.extend(
-					copies
-						.iter()
-						.map(|copy| Block::Principal(copy.principal(p))),
-				);
-			}
-			Block::Message(msg) => {
-				blocks.extend(copies.iter().map(|copy| Block::Message(copy.message(msg))));
-			}
-			Block::Phase(_) => {}
-		}
-	}
-
-	let mut query_variants: Vec<Vec<Query>> = Vec::with_capacity(m.queries.len());
-	for (i, query) in m.queries.iter().enumerate() {
-		let scenarios: &[Query] = e.variants.get(i).map(Vec::as_slice).unwrap_or(&[]);
-		let mut variants: Vec<Query> = scenarios.to_vec();
-		for seed in std::iter::once(query).chain(scenarios.iter()) {
-			for copy in &copies {
-				let variant = copy.query(seed);
-				if !seed.same_shape(&variant) && !variants.iter().any(|v| v.same_shape(&variant)) {
-					variants.push(variant);
-				}
-			}
-		}
-		query_variants.push(variants);
-	}
-
-	let mut siblings: IdMap<ValueId, Arc<Vec<ValueId>>> = IdMap::default();
-	for &base in &freshen {
-		let group: Arc<Vec<ValueId>> = Arc::new(
-			std::iter::once(base)
-				.chain(copies.iter().map(|copy| copy.value_id(base)))
-				.collect(),
-		);
-		for &member in group.iter() {
-			siblings.insert(member, Arc::clone(&group));
-		}
-	}
+	let blocks = session_blocks(m, &copies);
+	let query_variants = session_query_variants(m, &copies, &e.variants);
+	let siblings = session_siblings(&freshen, &copies);
 
 	let naming = if sessions == 2 {
 		"suffixed #2".to_string()
 	} else {
 		format!("suffixed #2 through #{sessions}")
 	};
-	info_message(
+	crate::console::message(
 		&format!(
 			"Analyzing {sessions} parallel sessions per principal; \
 			 per-session values and principals are {naming}.",
@@ -165,6 +123,67 @@ pub(crate) fn expand_sessions(mut e: Expansion, sessions: u8) -> VResult<Expansi
 	e.variants = query_variants;
 	e.siblings = siblings;
 	Ok(e)
+}
+
+fn session_blocks(m: &Model, copies: &[ModelCopy]) -> Vec<Block> {
+	let mut blocks: Vec<Block> = Vec::with_capacity(m.blocks.len() * (copies.len() + 1));
+	for block in &m.blocks {
+		blocks.push(block.clone());
+		match block {
+			Block::Principal(p) => {
+				blocks.extend(
+					copies
+						.iter()
+						.map(|copy| Block::Principal(copy.principal(p))),
+				);
+			}
+			Block::Message(msg) => {
+				blocks.extend(copies.iter().map(|copy| Block::Message(copy.message(msg))));
+			}
+			Block::Phase(_) => {}
+		}
+	}
+	blocks
+}
+
+fn session_query_variants(
+	m: &Model,
+	copies: &[ModelCopy],
+	scenario_variants: &[Vec<Query>],
+) -> Vec<Vec<Query>> {
+	let mut query_variants: Vec<Vec<Query>> = Vec::with_capacity(m.queries.len());
+	for (i, query) in m.queries.iter().enumerate() {
+		let scenarios: &[Query] = scenario_variants.get(i).map(Vec::as_slice).unwrap_or(&[]);
+		let mut variants: Vec<Query> = scenarios.to_vec();
+		for seed in std::iter::once(query).chain(scenarios.iter()) {
+			for copy in copies {
+				let variant = copy.query(seed);
+				if !seed.same_shape(&variant) && !variants.iter().any(|v| v.same_shape(&variant)) {
+					variants.push(variant);
+				}
+			}
+		}
+		query_variants.push(variants);
+	}
+	query_variants
+}
+
+fn session_siblings(
+	freshen: &IdSet<ValueId>,
+	copies: &[ModelCopy],
+) -> IdMap<ValueId, Arc<Vec<ValueId>>> {
+	let mut siblings: IdMap<ValueId, Arc<Vec<ValueId>>> = IdMap::default();
+	for &base in freshen {
+		let group: Arc<Vec<ValueId>> = Arc::new(
+			std::iter::once(base)
+				.chain(copies.iter().map(|copy| copy.value_id(base)))
+				.collect(),
+		);
+		for &member in group.iter() {
+			siblings.insert(member, Arc::clone(&group));
+		}
+	}
+	siblings
 }
 
 pub(crate) struct ModelCopy<'a> {

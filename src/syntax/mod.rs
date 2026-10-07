@@ -8,9 +8,11 @@ pub(crate) mod parser;
 pub(crate) mod pretty;
 pub(crate) mod tokens;
 
-pub use ast::{
+pub(crate) use ast::{
 	AttackerKind, Block, BracketComments, Comment, CommentStyle, Declaration, Expression,
 	LineComments, Message, Model, Phase, Principal, PrincipalId, Qualifier, Query, QueryKind,
 	QueryOption, QueryOptionKind, Scenario, Source,
 };
-pub use error::{ErrorKind, Span, VResult, VerifpalError};
+#[cfg(any(test, feature = "lsp"))]
+pub(crate) use error::ErrorKind;
+pub(crate) use error::{Span, VResult, VerifpalError};

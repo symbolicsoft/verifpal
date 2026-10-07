@@ -19,6 +19,7 @@ pub(crate) use propose::{emissions_under, install_signature, leave_honest_slots,
 use std::sync::Arc;
 
 use crate::protocol::ProtocolTrace;
+use crate::protocol::SlotIdx;
 use crate::syntax::PrincipalId;
 use crate::term::{Value, VariableId};
 use crate::util::IdSet;
@@ -30,7 +31,11 @@ pub(crate) enum Pass {
 	Constructed,
 }
 
-pub(crate) fn directly_unguarded(km: &ProtocolTrace, principal: PrincipalId, slot: usize) -> bool {
+pub(crate) fn directly_unguarded(
+	km: &ProtocolTrace,
+	principal: PrincipalId,
+	slot: SlotIdx,
+) -> bool {
 	km.slots.get(slot).is_some_and(|trace_slot| {
 		trace_slot
 			.sent_by
@@ -39,7 +44,7 @@ pub(crate) fn directly_unguarded(km: &ProtocolTrace, principal: PrincipalId, slo
 	})
 }
 
-pub(crate) fn split_delivered(km: &ProtocolTrace, principal: PrincipalId, slot: usize) -> bool {
+pub(crate) fn split_delivered(km: &ProtocolTrace, principal: PrincipalId, slot: SlotIdx) -> bool {
 	km.slots.get(slot).is_some_and(|trace_slot| {
 		trace_slot
 			.sent_by
@@ -49,8 +54,8 @@ pub(crate) fn split_delivered(km: &ProtocolTrace, principal: PrincipalId, slot: 
 	})
 }
 
-pub(crate) fn slots_blocking_reduction(sym: &SymbolicState) -> Vec<Vec<usize>> {
-	let mut out: Vec<Vec<usize>> = Vec::new();
+pub(crate) fn slots_blocking_reduction(sym: &SymbolicState) -> Vec<Vec<SlotIdx>> {
+	let mut out: Vec<Vec<SlotIdx>> = Vec::new();
 	let mut seen = IdSet::default();
 	for term in &sym.terms {
 		collect_blocking_slots(term, &mut out, &mut seen);
@@ -60,7 +65,7 @@ pub(crate) fn slots_blocking_reduction(sym: &SymbolicState) -> Vec<Vec<usize>> {
 	out
 }
 
-fn collect_blocking_slots(v: &Value, out: &mut Vec<Vec<usize>>, seen: &mut IdSet<usize>) {
+fn collect_blocking_slots(v: &Value, out: &mut Vec<Vec<SlotIdx>>, seen: &mut IdSet<usize>) {
 	let Value::Primitive(p) = v else {
 		return;
 	};
@@ -75,12 +80,12 @@ fn collect_blocking_slots(v: &Value, out: &mut Vec<Vec<usize>>, seen: &mut IdSet
 		let positions = std::iter::once(rule.from).chain(rule.matching.iter().map(|(o, _)| *o));
 		for position in positions {
 			if let Some(argument) = p.arguments.get(position) {
-				if let Value::Variable(VariableId::Slot(slot)) = argument {
-					direct.push(*slot);
+				if let Value::Variable(id @ VariableId::Slot(_)) = argument {
+					direct.push(vars::slot_of_var_id(id));
 				}
 				for term in crate::term::subterms(argument) {
-					if let Value::Variable(VariableId::Slot(slot)) = term {
-						group.push(*slot);
+					if let Value::Variable(id @ VariableId::Slot(_)) = term {
+						group.push(vars::slot_of_var_id(id));
 					}
 				}
 			}

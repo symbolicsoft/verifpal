@@ -1,39 +1,41 @@
 /* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
  * SPDX-License-Identifier: GPL-3.0-only */
 
-use super::{Bypassed, Family, Node, Search, Source, Stuck, runs_of};
-use crate::engine::exec::Installs;
-use crate::engine::program::Event;
+use super::{Bypassed, Family, HONEST_NODE, Node, NodeIdx, Search, Source, Stuck, runs_of};
+use crate::engine::exec::{Install, Installs};
+use crate::engine::program::{DeliveryIdx, Event, RunIdx, StepIdx};
 use crate::term::Value;
 use crate::util::IdMap;
 
-type Registration = (Vec<(Value, Source)>, Vec<usize>);
+type Registration = (Vec<(Value, Source)>, Vec<RunIdx>);
 
-fn reaches(bypassed: &[(usize, usize)], run: usize, receive: usize) -> bool {
+fn reaches(bypassed: &[(RunIdx, usize)], run: RunIdx, receive: usize) -> bool {
 	bypassed
 		.iter()
 		.any(|&(sender, sent)| sender == run && sent > receive)
 }
 
 impl<'a, 'b> Search<'a, 'b> {
-	fn send_step(&self, d: usize) -> Option<usize> {
+	fn send_step(&self, d: DeliveryIdx) -> Option<StepIdx> {
 		let sender = self.cx.program.deliveries[d].sender;
 		self.cx.program.runs[sender]
 			.steps
-			.iter()
 			.position(|step| step.event == Event::Send(d))
 	}
 
-	fn honest_sent_at(&self, d: usize) -> Option<usize> {
+	fn honest_sent_at(&self, d: DeliveryIdx) -> Option<usize> {
 		let sender = self.cx.program.deliveries[d].sender;
-		self.honest_at.get(&(sender, self.send_step(d)?)).copied()
+		self.facts
+			.honest_at
+			.get(&(sender, self.send_step(d)?))
+			.copied()
 	}
 
 	pub(super) fn replaced<'n>(
 		&'n self,
 		node: &'n Node,
-		d: usize,
-	) -> impl Iterator<Item = usize> + 'n {
+		d: DeliveryIdx,
+	) -> impl Iterator<Item = DeliveryIdx> + 'n {
 		let sender = self.cx.program.deliveries[d].sender;
 		let run = &self.cx.program.runs[sender];
 		let send = self.send_step(d);
@@ -46,7 +48,7 @@ impl<'a, 'b> Search<'a, 'b> {
 		})
 	}
 
-	fn bypassed(&self, node: &Node, d: usize) -> Vec<(usize, usize)> {
+	fn bypassed(&self, node: &Node, d: DeliveryIdx) -> Bypassed {
 		self.replaced(node, d)
 			.filter_map(|replaced| {
 				let sender = self.cx.program.deliveries[replaced].sender;
@@ -55,9 +57,13 @@ impl<'a, 'b> Search<'a, 'b> {
 			.collect()
 	}
 
-	pub(super) fn rerouted_sends(&self, at: usize, node: &Node) -> Vec<(Value, Source, Bypassed)> {
+	pub(super) fn rerouted_sends(
+		&self,
+		at: NodeIdx,
+		node: &Node,
+	) -> Vec<(Value, Source, Bypassed)> {
 		let mut out = Vec::new();
-		for (d, delivery) in self.cx.program.deliveries.iter().enumerate() {
+		for (d, delivery) in self.cx.program.deliveries.iter_enumerated() {
 			let Some(sent) = &node.sent[d] else {
 				continue;
 			};
@@ -77,17 +83,22 @@ impl<'a, 'b> Search<'a, 'b> {
 		out
 	}
 
-	fn waiting(&self, stuck: &Stuck) -> Vec<(Value, usize, usize)> {
+	fn waiting(&self, stuck: &Stuck) -> Vec<(Value, RunIdx, usize)> {
 		let program = self.cx.program;
 		stuck
 			.installs
 			.iter()
-			.filter(|(run, slot, _)| stuck.slots.contains(&(*run, *slot)))
+			.filter_map(|install| match install {
+				Install::Value { run, slot, value } if stuck.slots.contains(&(*run, *slot)) => {
+					Some((run, slot, value))
+				}
+				_ => None,
+			})
 			.filter_map(|(run, slot, value)| {
 				let step = *program.runs[*run].step_of_slot.get(slot)?;
-				let receive = *self.honest_at.get(&(*run, step))?;
-				let early = (0..program.deliveries.len()).any(|d| {
-					self.nodes[0].sent[d]
+				let receive = *self.facts.honest_at.get(&(*run, step))?;
+				let early = program.deliveries.indices().any(|d| {
+					self.nodes[HONEST_NODE].sent[d]
 						.as_ref()
 						.is_some_and(|sent| sent.iter().any(|v| v.equivalent(value, true)))
 						&& self.honest_sent_at(d).is_some_and(|sent| sent < receive)
@@ -97,13 +108,12 @@ impl<'a, 'b> Search<'a, 'b> {
 			.collect()
 	}
 
-	pub(super) fn bypasses(&self, source: Source, run: usize, receive: usize) -> bool {
+	pub(super) fn bypasses(&self, source: Source, run: RunIdx, receive: usize) -> bool {
 		let node = &self.nodes[source.node];
 		self.cx
 			.program
 			.deliveries
-			.iter()
-			.enumerate()
+			.iter_enumerated()
 			.any(|(d, delivery)| {
 				delivery.sender == source.run
 					&& node.sent[d].is_some()
@@ -116,10 +126,14 @@ impl<'a, 'b> Search<'a, 'b> {
 		if self.done() {
 			return;
 		}
-		self.rerouting = true;
-		let waiting: Vec<Vec<(Value, usize, usize)>> =
-			self.stuck.iter().map(|stuck| self.waiting(stuck)).collect();
-		let mut earliest: IdMap<(u64, usize), Vec<(&Value, usize)>> = IdMap::default();
+		self.retries.rerouting = true;
+		let waiting: Vec<Vec<(Value, RunIdx, usize)>> = self
+			.retries
+			.stuck
+			.iter()
+			.map(|stuck| self.waiting(stuck))
+			.collect();
+		let mut earliest: IdMap<(u64, RunIdx), Vec<(&Value, usize)>> = IdMap::default();
 		for (value, run, receive) in waiting.iter().flatten() {
 			let bucket = earliest.entry((value.hash_value(), *run)).or_default();
 			match bucket
@@ -130,7 +144,7 @@ impl<'a, 'b> Search<'a, 'b> {
 				None => bucket.push((value, *receive)),
 			}
 		}
-		let wanted = |v: &Value, bypassed: &[(usize, usize)]| {
+		let wanted = |v: &Value, bypassed: &[(RunIdx, usize)]| {
 			bypassed.iter().any(|&(run, sent)| {
 				earliest.get(&(v.hash_value(), run)).is_some_and(|bucket| {
 					bucket
@@ -141,8 +155,7 @@ impl<'a, 'b> Search<'a, 'b> {
 		};
 		let registered: Vec<Registration> = self
 			.nodes
-			.iter()
-			.enumerate()
+			.iter_enumerated()
 			.map(|(n, node)| {
 				let sends = self
 					.rerouted_sends(n, node)
@@ -153,11 +166,12 @@ impl<'a, 'b> Search<'a, 'b> {
 				(sends, runs_of(&node.installs))
 			})
 			.collect();
-		let chosen: Vec<(Installs, Vec<(Value, usize)>)> = self
+		let chosen: Vec<(Installs, Vec<(Value, RunIdx)>)> = self
+			.retries
 			.routes
 			.iter()
 			.filter_map(|(installs, sends)| {
-				let useful: Vec<(Value, usize)> = sends
+				let useful: Vec<(Value, RunIdx)> = sends
 					.iter()
 					.filter(|(v, _, bypassed)| wanted(v, bypassed))
 					.map(|(v, run, _)| (v.clone(), *run))
@@ -165,7 +179,7 @@ impl<'a, 'b> Search<'a, 'b> {
 				(!useful.is_empty()).then(|| (installs.clone(), useful))
 			})
 			.collect();
-		self.routes.clear();
+		self.retries.routes.clear();
 		for (sends, touched) in registered {
 			self.note_sources(sends, touched);
 		}
@@ -196,9 +210,9 @@ impl<'a, 'b> Search<'a, 'b> {
 			if sources.is_empty() {
 				continue;
 			}
-			let installs = self.stuck[index].installs.clone();
-			let slots = self.stuck[index].slots.clone();
-			self.stuck[index]
+			let installs = self.retries.stuck[index].installs.clone();
+			let slots = self.retries.stuck[index].slots.clone();
+			self.retries.stuck[index]
 				.tried_with
 				.extend(sources.iter().map(|s| s.node));
 			self.try_sources(&installs, &slots, sources);

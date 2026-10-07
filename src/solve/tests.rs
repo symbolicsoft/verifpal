@@ -7,8 +7,11 @@ use super::*;
 use crate::primitive::{
 	PRIM_CONCAT, PRIM_HASH, PRIM_PUBKEY, attacker_public_key, value_is_key_derivation,
 };
+use crate::protocol::SlotIdx;
 use crate::term::value_nil;
 use crate::testing::{make_attacker_state, make_constant};
+use crate::util::index::Idx;
+use crate::util::index::IndexVec;
 use vars::free_var;
 
 #[test]
@@ -62,8 +65,8 @@ fn a_shared_proposal_keeps_distinct_honest_contexts() {
 
 #[test]
 fn blocking_slot_collection_visits_shared_checks_once() {
-	let x = vars::attacker_var(0);
-	let y = vars::attacker_var(1);
+	let x = vars::attacker_var(SlotIdx::new(0));
+	let y = vars::attacker_var(SlotIdx::new(1));
 	let check = Value::primitive(
 		crate::primitive::PRIM_AEAD_DEC,
 		vec![x, value_nil(), y, value_nil()],
@@ -74,11 +77,13 @@ fn blocking_slot_collection_visits_shared_checks_once() {
 		term = Value::primitive(PRIM_HASH, vec![term.clone(), term.clone(), term], 0);
 	}
 	let sym = SymbolicState {
-		terms: vec![term.clone(), check, term],
-		var_slots: vec![0, 1],
+		terms: IndexVec::from(vec![term.clone(), check, term]),
 		..SymbolicState::default()
 	};
-	assert_eq!(slots_blocking_reduction(&sym), vec![vec![0, 1]]);
+	assert_eq!(
+		slots_blocking_reduction(&sym),
+		vec![vec![SlotIdx::new(0), SlotIdx::new(1)]]
+	);
 }
 
 fn bundle(second: Value) -> Value {

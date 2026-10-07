@@ -5,8 +5,9 @@ use std::sync::Arc;
 
 use super::shapes::rewrite_shapes_from;
 use super::{Deducer, match_each, refine_check};
-use crate::primitive::Capability;
-use crate::primitive::*;
+use crate::primitive::{
+	Capability, RewriteRule, commutativity_rule, commutativity_swap, reuse_rule, rewrite_rule,
+};
 use crate::solve::matching::{match_values, unifiers};
 use crate::solve::vars::{Substitution, apply, as_var, contains_var, dedupe};
 use crate::term::{Primitive, Value};
@@ -19,7 +20,7 @@ use crate::theory::{forgeable_by_reuse, same_fixed};
 fn projects_a_variable(v: &Value) -> bool {
 	crate::term::subterms(v).any(|term| match term {
 		Value::Primitive(p) => {
-			primitive_is_projection(p.id) && p.arguments.first().is_some_and(contains_var)
+			crate::primitive::is_projection(p.id) && p.arguments.first().is_some_and(contains_var)
 		}
 		Value::Constant(_) | Value::Variable(_) => false,
 	})
@@ -66,7 +67,7 @@ impl<'a> Deducer<'a> {
 		if self.shared.capabilities.is_empty() {
 			return;
 		}
-		let Ok(spec) = primitive_get(target.id) else {
+		let Ok(spec) = crate::primitive::spec(target.id) else {
 			return;
 		};
 		if spec.malleable_vary.is_empty() {
@@ -248,7 +249,7 @@ impl<'a> Deducer<'a> {
 		let capabilities = self.shared.capabilities;
 		let forgeable_secret =
 			capabilities.forgeable_secret_position(p, self.attacker.current_phase);
-		let secret_position = primitive_get(p.id)
+		let secret_position = crate::primitive::spec(p.id)
 			.ok()
 			.and_then(|spec| spec.forgeable_secret);
 		let by_reuse = forgeable_by_reuse(p, self.attacker);

@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use super::Search;
+use super::{NodeIdx, Search};
 use crate::engine::exec::Execution;
 use crate::engine::knowledge::{Knowledge, Origin};
 use crate::term::Value;
@@ -13,7 +13,7 @@ use crate::util::IdMap;
 impl<'a, 'b> Search<'a, 'b> {
 	pub(super) fn novel_terms(&self, ex: &Execution) -> Vec<Value> {
 		let capabilities = &self.cx.km.capabilities;
-		let union = &self.union.state;
+		let union = &self.union.knowledge.state;
 		let _memo = crate::theory::DeductionMemo::scoped(capabilities, union);
 		let depth = self.ctx.term_bound(self.cx.km).depth();
 		let mut own: IdMap<u64, Vec<&Value>> = IdMap::default();
@@ -45,35 +45,35 @@ impl<'a, 'b> Search<'a, 'b> {
 			.collect()
 	}
 
-	fn note_source(&mut self, i: usize, node: usize) {
+	fn note_source(&mut self, i: usize, node: NodeIdx) {
 		let cost = self.nodes[node].installs.len();
-		let buckets = &mut self.by_cost[i];
+		let buckets = &mut self.union.by_cost[i];
 		if buckets.len() <= cost {
 			buckets.resize_with(cost + 1, Vec::new);
 		}
 		buckets[cost].push(node);
 	}
 
-	pub(super) fn supplies(&self, idx: usize, node: usize) -> bool {
-		self.by_cost[idx]
+	pub(super) fn supplies(&self, idx: usize, node: NodeIdx) -> bool {
+		self.union.by_cost[idx]
 			.get(self.nodes[node].installs.len())
 			.is_some_and(|bucket| bucket.binary_search(&node).is_ok())
 	}
 
-	pub(super) fn absorb(&mut self, node: usize, novel: Vec<Value>, knowledge: &Knowledge) {
+	pub(super) fn absorb(&mut self, node: NodeIdx, novel: Vec<Value>, knowledge: &Knowledge) {
 		for v in knowledge.state.known.iter() {
-			if let Some(i) = self.union.knows(v) {
+			if let Some(i) = self.union.knowledge.knows(v) {
 				self.note_source(i, node);
 			}
 		}
 		for v in novel {
-			if self.union.learn(&v, Origin::Initial) {
-				self.by_cost.push(Vec::new());
-				self.note_source(self.by_cost.len() - 1, node);
-				crate::console::info_deduction(|| {
+			if self.union.knowledge.learn(&v, Origin::Initial) {
+				self.union.by_cost.push(Vec::new());
+				self.note_source(self.union.by_cost.len() - 1, node);
+				crate::console::deduction(|| {
 					format!(
 						"{} is obtained in an execution where {}.",
-						crate::console::info_output_text(&v),
+						crate::console::output_text(&v),
 						self.describe(node)
 					)
 				});
@@ -88,7 +88,7 @@ impl<'a, 'b> Search<'a, 'b> {
 		let reused = Arc::clone(&knowledge.state.reused);
 		for (value, pre, own) in protocol.iter() {
 			let key = value.hash_value() ^ pre.hash_value().rotate_left(7);
-			let bucket = self.protocol_seen.entry(key).or_default();
+			let bucket = self.union.protocol_seen.entry(key).or_default();
 			if bucket
 				.iter()
 				.any(|(v, p)| v.equivalent(value, true) && p.equivalent(pre, true))
@@ -96,23 +96,23 @@ impl<'a, 'b> Search<'a, 'b> {
 				continue;
 			}
 			bucket.push((value.clone(), pre.clone()));
-			self.union.note_protocol(value, pre, *own);
+			self.union.knowledge.note_protocol(value, pre, *own);
 		}
 		for term in built.iter() {
-			self.union.note_built(term);
+			self.union.knowledge.note_built(term);
 		}
 		for pair in reused.iter() {
-			self.union.note_reused(pair);
+			self.union.knowledge.note_reused(pair);
 		}
 	}
 
 	pub(super) fn close_union(&mut self) {
-		self.closed = self.union.clone();
-		self.closed_at = (self.union.len(), self.nodes.len());
-		self.closed.close(&self.cx.km.capabilities);
+		self.union.closed = self.union.knowledge.clone();
+		self.union.closed_at = (self.union.knowledge.len(), self.nodes.next_index());
+		self.union.closed.close(&self.cx.km.capabilities);
 	}
 
-	pub(super) fn derivable_in(&self, node: usize, v: &Value) -> bool {
+	pub(super) fn derivable_in(&self, node: NodeIdx, v: &Value) -> bool {
 		let derive = || {
 			let capabilities = &self.cx.km.capabilities;
 			let node = &self.nodes[node];
@@ -129,11 +129,11 @@ impl<'a, 'b> Search<'a, 'b> {
 			return derive();
 		}
 		let key = (node, Arc::as_ptr(p) as usize);
-		if let Some(&known) = self.derivable.borrow().get(&key) {
+		if let Some(&known) = self.memo.derivable.borrow().get(&key) {
 			return known;
 		}
 		let found = derive();
-		self.derivable.borrow_mut().insert(key, found);
+		self.memo.derivable.borrow_mut().insert(key, found);
 		found
 	}
 }

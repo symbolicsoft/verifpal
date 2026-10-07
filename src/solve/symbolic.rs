@@ -5,24 +5,39 @@ use std::sync::Arc;
 
 use super::vars::attacker_var;
 use crate::protocol::ProtocolTrace;
+use crate::protocol::SlotIdx;
 use crate::syntax::PrincipalId;
 use crate::term::Value;
 use crate::theory::{AttackerState, reduce_once};
+use crate::util::index::IndexVec;
 
 #[derive(Default)]
 pub(crate) struct SymbolicState {
-	pub terms: Vec<Value>,
-	pub var_slots: Vec<usize>,
-	pub var_terms: Vec<Option<Value>>,
+	pub terms: IndexVec<SlotIdx, Value>,
+	pub var_terms: IndexVec<SlotIdx, Option<Value>>,
 }
 
 impl SymbolicState {
-	pub(crate) fn is_var_slot(&self, slot: usize) -> bool {
+	pub(crate) fn is_var_slot(&self, slot: SlotIdx) -> bool {
 		self.var_terms.get(slot).is_some_and(|t| t.is_some())
+	}
+
+	pub(crate) fn variables(&self) -> impl Iterator<Item = (SlotIdx, &Value)> + Clone {
+		self.var_terms
+			.iter_enumerated()
+			.filter_map(|(slot, term)| Some((slot, term.as_ref()?)))
+	}
+
+	pub(crate) fn var_slots(&self) -> impl Iterator<Item = SlotIdx> + Clone {
+		self.variables().map(|(slot, _)| slot)
+	}
+
+	pub(crate) fn has_variables(&self) -> bool {
+		self.var_terms.iter().any(Option::is_some)
 	}
 }
 
-fn shaped_var(slot: usize, honest: &Value) -> Value {
+fn shaped_var(slot: SlotIdx, honest: &Value) -> Value {
 	let var = attacker_var(slot);
 	match honest {
 		Value::Primitive(_) if crate::primitive::value_is_key_derivation(honest) => {
@@ -61,7 +76,7 @@ pub(crate) fn build_assuming_honest(
 	km: &ProtocolTrace,
 	principal: PrincipalId,
 	attacker: &AttackerState,
-	honest: &[usize],
+	honest: &[SlotIdx],
 ) -> SymbolicState {
 	build_with(controllable, km, principal, attacker, honest, false, true)
 }
@@ -71,7 +86,7 @@ pub(crate) fn build_addressed(
 	km: &ProtocolTrace,
 	principal: PrincipalId,
 	attacker: &AttackerState,
-	honest: &[usize],
+	honest: &[SlotIdx],
 ) -> SymbolicState {
 	build_with(controllable, km, principal, attacker, honest, true, true)
 }
@@ -79,10 +94,10 @@ pub(crate) fn build_addressed(
 struct Walk<'a> {
 	km: &'a ProtocolTrace,
 	principal: PrincipalId,
-	var_terms: &'a [Option<Value>],
+	var_terms: &'a IndexVec<SlotIdx, Option<Value>>,
 	addressed: bool,
-	memo: Vec<Option<Value>>,
-	building: Vec<bool>,
+	memo: IndexVec<SlotIdx, Option<Value>>,
+	building: IndexVec<SlotIdx, bool>,
 }
 
 fn build_with(
@@ -90,15 +105,14 @@ fn build_with(
 	km: &ProtocolTrace,
 	principal: PrincipalId,
 	attacker: &AttackerState,
-	honest: &[usize],
+	honest: &[SlotIdx],
 	addressed: bool,
 	shaped: bool,
 ) -> SymbolicState {
 	let n = km.slots.len();
-	let mut var_terms: Vec<Option<Value>> = vec![None; n];
-	let mut var_slots = Vec::new();
+	let mut var_terms: IndexVec<SlotIdx, Option<Value>> = IndexVec::from_elem(None, n);
 
-	for (idx, slot) in var_terms.iter_mut().enumerate() {
+	for (idx, slot) in var_terms.iter_enumerated_mut() {
 		if !controllable.admits(principal, attacker, idx) || honest.contains(&idx) {
 			continue;
 		}
@@ -107,7 +121,6 @@ fn build_with(
 			true => shaped_var(idx, &trace_slot.initial_value),
 			false => attacker_var(idx),
 		});
-		var_slots.push(idx);
 	}
 
 	let mut walk = Walk {
@@ -115,20 +128,17 @@ fn build_with(
 		principal,
 		var_terms: &var_terms,
 		addressed,
-		memo: vec![None; n],
-		building: vec![false; n],
+		memo: IndexVec::from_elem(None, n),
+		building: IndexVec::from_elem(false, n),
 	};
-	let terms: Vec<Value> = (0..n).map(|idx| walk.slot_term(idx)).collect();
+	let terms: IndexVec<SlotIdx, Value> =
+		km.slots.indices().map(|idx| walk.slot_term(idx)).collect();
 
-	SymbolicState {
-		terms,
-		var_slots,
-		var_terms,
-	}
+	SymbolicState { terms, var_terms }
 }
 
 impl Walk<'_> {
-	fn slot_term(&mut self, idx: usize) -> Value {
+	fn slot_term(&mut self, idx: SlotIdx) -> Value {
 		if let Some(cached) = &self.memo[idx] {
 			return cached.clone();
 		}
@@ -151,7 +161,7 @@ impl Walk<'_> {
 		reduced
 	}
 
-	fn reaches(&self, idx: usize, owner: PrincipalId) -> bool {
+	fn reaches(&self, idx: SlotIdx, owner: PrincipalId) -> bool {
 		owner == self.principal || (!self.addressed && self.km.slots[idx].mutation_reaches(owner))
 	}
 
@@ -212,9 +222,8 @@ mod tests {
 		(km, bob, make_attacker_state(vec![]))
 	}
 
-	fn slot(km: &ProtocolTrace, name: &str) -> usize {
+	fn slot(km: &ProtocolTrace, name: &str) -> SlotIdx {
 		km.slots
-			.iter()
 			.position(|s| &*s.constant.name == name)
 			.unwrap_or_else(|| panic!("no slot named {name}"))
 	}
@@ -248,7 +257,7 @@ mod tests {
 		let ga = slot(&km, "sym_ga");
 		let refined = build_assuming_honest(&controllable, &km, bob, &attacker, &[ga]);
 		assert!(!refined.is_var_slot(ga), "the held slot is not a variable");
-		assert!(refined.var_slots.is_empty());
+		assert!(!refined.has_variables());
 		for name in ["sym_ga", "sym_k", "sym_t"] {
 			assert!(
 				!crate::solve::vars::contains_var(&refined.terms[slot(&km, name)]),
@@ -277,10 +286,10 @@ mod tests {
 		let walk = Walk {
 			km: &km,
 			principal: bob,
-			var_terms: &[],
+			var_terms: &IndexVec::new(),
 			addressed: false,
-			memo: Vec::new(),
-			building: Vec::new(),
+			memo: IndexVec::new(),
+			building: IndexVec::new(),
 		};
 		let ga = slot(&km, "sym_ga");
 		assert!(walk.reaches(ga, bob), "the walked principal always reaches");

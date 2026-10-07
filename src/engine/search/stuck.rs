@@ -1,22 +1,29 @@
 /* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
  * SPDX-License-Identifier: GPL-3.0-only */
 
-use super::{Family, Node, Search, Source, compatible_with, normalize, runs_of, same_installs};
-use crate::engine::exec::{Installs, install_at};
-use crate::engine::program::Event;
+use super::{
+	Family, HONEST_NODE, Node, NodeIdx, Search, Source, compatible_with, install_key, normalize,
+	runs_of, same_installs,
+};
+use crate::engine::exec::{Install, Installs, install_at};
+use crate::engine::program::{Event, RunIdx};
+use crate::protocol::SlotIdx;
 use crate::term::Value;
 use crate::theory::obtainable;
+use crate::util::index::Idx;
 
 impl<'a, 'b> Search<'a, 'b> {
-	fn fresh_sends(&self, at: usize, node: &Node) -> Vec<(Value, Source)> {
+	fn fresh_sends(&self, at: NodeIdx, node: &Node) -> Vec<(Value, Source)> {
 		let mut out = Vec::new();
-		for (d, delivery) in self.cx.program.deliveries.iter().enumerate() {
+		for (d, delivery) in self.cx.program.deliveries.iter_enumerated() {
 			let Some(sent) = &node.sent[d] else {
 				continue;
 			};
-			let rerouted = self.rerouting && self.replaced(node, d).next().is_some();
+			let rerouted = self.retries.rerouting && self.replaced(node, d).next().is_some();
 			for (k, v) in sent.iter().enumerate() {
-				let honest = self.nodes[0].sent[d].as_ref().map(|values| &values[k]);
+				let honest = self.nodes[HONEST_NODE].sent[d]
+					.as_ref()
+					.map(|values| &values[k]);
 				if !rerouted && honest.is_some_and(|h| h.equivalent(v, true)) {
 					continue;
 				}
@@ -31,40 +38,45 @@ impl<'a, 'b> Search<'a, 'b> {
 		out
 	}
 
-	pub(super) fn note_fresh(&mut self, at: usize, node: &Node) -> bool {
+	pub(super) fn note_fresh(&mut self, at: NodeIdx, node: &Node) -> bool {
 		let sends = self.fresh_sends(at, node);
 		self.note_sources(sends, runs_of(&node.installs))
 	}
 
-	pub(super) fn registered(&self, v: &Value, run: usize, touched: &[usize]) -> bool {
-		self.fresh.get(&v.hash_value()).is_some_and(|bucket| {
-			bucket
-				.iter()
-				.any(|(w, held, runs)| held.run == run && w.equivalent(v, true) && runs == touched)
-		})
+	pub(super) fn registered(&self, v: &Value, run: RunIdx, touched: &[RunIdx]) -> bool {
+		self.retries
+			.fresh
+			.get(&v.hash_value())
+			.is_some_and(|bucket| {
+				bucket.iter().any(|(w, held, runs)| {
+					held.run == run && w.equivalent(v, true) && runs == touched
+				})
+			})
 	}
 
 	pub(super) fn note_sources(
 		&mut self,
 		sends: Vec<(Value, Source)>,
-		touched: Vec<usize>,
+		touched: Vec<RunIdx>,
 	) -> bool {
 		let mut added = false;
 		for (v, source) in sends {
 			if self.registered(&v, source.run, &touched) {
 				continue;
 			}
-			self.fresh
-				.entry(v.hash_value())
-				.or_default()
-				.push((v, source, touched.clone()));
+			self.retries.fresh.entry(v.hash_value()).or_default().push((
+				v,
+				source,
+				touched.clone(),
+			));
 			added = true;
 		}
 		added
 	}
 
 	fn fresh_sources(&self, v: &Value) -> Vec<Source> {
-		self.fresh
+		self.retries
+			.fresh
 			.get(&v.hash_value())
 			.into_iter()
 			.flatten()
@@ -76,20 +88,23 @@ impl<'a, 'b> Search<'a, 'b> {
 	fn cleared(
 		&self,
 		plan: &Installs,
-		stuck: &[(usize, usize)],
+		stuck: &[(RunIdx, SlotIdx)],
 		source: Source,
-		cone: &[(usize, usize)],
+		cone: &[(RunIdx, SlotIdx)],
 	) -> Option<Installs> {
 		let source = &self.nodes[source.node];
 		let kept: Installs = plan
 			.iter()
-			.filter(|(r, s, v)| {
-				stuck.contains(&(*r, *s))
-					|| !cone.contains(&(*r, *s))
-					|| install_at(&source.installs, *r, *s).is_some()
+			.filter(|install| {
+				let Install::Value { run, slot, value } = install else {
+					return true;
+				};
+				stuck.contains(&(*run, *slot))
+					|| !cone.contains(&(*run, *slot))
+					|| install_at(&source.installs, *run, *slot).is_some()
 					|| source
-						.held(*r, *s)
-						.is_none_or(|h| h.value.equivalent(v, true))
+						.held(*run, *slot)
+						.is_none_or(|h| h.value.equivalent(value, true))
 			})
 			.cloned()
 			.collect();
@@ -99,14 +114,14 @@ impl<'a, 'b> Search<'a, 'b> {
 	pub(super) fn stuck_sources<'v>(
 		&self,
 		at: usize,
-		values: impl Iterator<Item = (&'v Value, Option<(usize, usize)>)>,
+		values: impl Iterator<Item = (&'v Value, Option<(RunIdx, usize)>)>,
 	) -> Vec<Source> {
-		let stuck = &self.stuck[at];
+		let stuck = &self.retries.stuck[at];
 		let mut sources: Vec<Source> = Vec::new();
 		for (value, receive) in values {
 			for source in self.fresh_sources(value) {
 				let n = source.node;
-				if n != 0
+				if n != HONEST_NODE
 					&& !sources.iter().any(|s| s.node == n)
 					&& !stuck.tried_with.contains(&n)
 					&& compatible_with(&stuck.installs, &self.nodes[n].installs)
@@ -120,33 +135,41 @@ impl<'a, 'b> Search<'a, 'b> {
 	}
 
 	pub(super) fn retry_stuck(&mut self, at: usize) {
-		let installs = self.stuck[at].installs.clone();
-		let slots = self.stuck[at].slots.clone();
-		let mut supply = std::mem::take(&mut self.stuck[at].supply);
+		let installs = self.retries.stuck[at].installs.clone();
+		let slots = self.retries.stuck[at].slots.clone();
+		let mut supply = std::mem::take(&mut self.retries.stuck[at].supply);
+		let stuck_at = |install: &Install| {
+			install
+				.slot()
+				.is_some_and(|slot| slots.contains(&(install.run(), slot)))
+		};
 		let sources = self.stuck_sources(
 			at,
 			installs
 				.iter()
-				.filter(|(run, slot, _)| slots.contains(&(*run, *slot)))
-				.map(|(_, _, value)| (value, None)),
+				.filter(|install| stuck_at(install))
+				.filter_map(|install| Some((install.value()?, None))),
 		);
-		let tried_with = &self.stuck[at].tried_with;
-		let mut suppliers: Vec<usize> = Vec::new();
-		let context: Vec<&(usize, usize, Value)> = installs
+		let tried_with = &self.retries.stuck[at].tried_with;
+		let mut suppliers: Vec<NodeIdx> = Vec::new();
+		let context: Vec<&Install> = installs
 			.iter()
-			.filter(|(run, slot, _)| !slots.contains(&(*run, *slot)))
+			.filter(|install| !stuck_at(install))
 			.collect();
 		let rarest = context
 			.iter()
-			.map(|(run, slot, value)| {
-				self.by_install
-					.get(&(*run, *slot, value.hash_value()))
+			.map(|install| {
+				self.retries
+					.by_install
+					.get(&install_key(install))
 					.map_or(&[][..], Vec::as_slice)
 			})
 			.min_by_key(|posting| posting.len())
 			.unwrap_or(&[]);
 		for (install, next) in supply.iter_mut() {
-			let (run, slot, value) = &installs[*install];
+			let Install::Value { run, slot, value } = &installs[*install] else {
+				continue;
+			};
 			let program = &self.cx.program.runs[*run];
 			let phase = program
 				.step_of_slot
@@ -155,17 +178,16 @@ impl<'a, 'b> Search<'a, 'b> {
 			let start = rarest.partition_point(|&n| n < *next);
 			let mut found = false;
 			for &n in &rarest[start..] {
-				*next = n + 1;
+				*next = n.next();
 				if sources.iter().any(|s| s.node == n)
 					|| suppliers.contains(&n)
 					|| tried_with.contains(&n)
 				{
 					continue;
 				}
-				let within = context.iter().all(|(run, slot, held)| {
-					install_at(&self.nodes[n].installs, *run, *slot)
-						.is_some_and(|v| v.equivalent(held, true))
-				});
+				let within = context
+					.iter()
+					.all(|install| self.nodes[n].installs.iter().any(|held| held.same(install)));
 				if within
 					&& compatible_with(&installs, &self.nodes[n].installs)
 					&& obtainable(value, &self.cx.km.capabilities, self.nodes[n].at(phase))
@@ -176,11 +198,11 @@ impl<'a, 'b> Search<'a, 'b> {
 				}
 			}
 			if !found {
-				*next = self.nodes.len();
+				*next = self.nodes.next_index();
 			}
 		}
-		self.stuck[at].supply = supply;
-		self.stuck[at].tried_with.extend(
+		self.retries.stuck[at].supply = supply;
+		self.retries.stuck[at].tried_with.extend(
 			sources
 				.iter()
 				.map(|s| s.node)
@@ -201,7 +223,7 @@ impl<'a, 'b> Search<'a, 'b> {
 	pub(super) fn try_sources(
 		&mut self,
 		installs: &Installs,
-		slots: &[(usize, usize)],
+		slots: &[(RunIdx, SlotIdx)],
 		sources: Vec<Source>,
 	) {
 		for source in sources {
@@ -211,9 +233,12 @@ impl<'a, 'b> Search<'a, 'b> {
 			let mut plan = self.merged(&[source.node], installs.clone());
 			let mut cone = Vec::new();
 			self.cone(source.run, source.slot, &mut cone);
-			for (r, s, v) in &self.nodes[source.node].installs {
-				if cone.contains(&(*r, *s)) && install_at(&plan, *r, *s).is_none() {
-					plan.push((*r, *s, v.clone()));
+			for install in &self.nodes[source.node].installs {
+				if let Install::Value { run, slot, .. } = install
+					&& cone.contains(&(*run, *slot))
+					&& install_at(&plan, *run, *slot).is_none()
+				{
+					plan.push(install.clone());
 				}
 			}
 			let plan = normalize(plan);
@@ -228,7 +253,7 @@ impl<'a, 'b> Search<'a, 'b> {
 
 	pub(super) fn retry_all_stuck(&mut self) {
 		let mut at = 0;
-		while at < self.stuck.len() {
+		while at < self.retries.stuck.len() {
 			if self.done() {
 				return;
 			}
@@ -237,7 +262,7 @@ impl<'a, 'b> Search<'a, 'b> {
 		}
 	}
 
-	pub(super) fn cone(&self, run: usize, slot: usize, out: &mut Vec<(usize, usize)>) {
+	pub(super) fn cone(&self, run: RunIdx, slot: SlotIdx, out: &mut Vec<(RunIdx, SlotIdx)>) {
 		if out.contains(&(run, slot)) {
 			return;
 		}

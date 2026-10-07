@@ -148,8 +148,8 @@ fn text_before(doc: &Document, position: Position) -> &str {
 }
 
 fn primitive(name: &str) -> Option<(PrimitiveId, &'static dyn PrimitiveDefinition)> {
-	let id = crate::primitive::primitive_get_enum(&name.to_uppercase()).ok()?;
-	Some((id, crate::primitive::primitive_def(id).ok()?))
+	let id = crate::primitive::id_of(&name.to_uppercase()).ok()?;
+	Some((id, crate::primitive::definition(id).ok()?))
 }
 
 fn documentation(value: String) -> Documentation {
@@ -587,7 +587,7 @@ pub(crate) fn completions(doc: &Document, position: Position) -> Vec<CompletionI
 			.collect();
 	}
 
-	let mut out: Vec<CompletionItem> = crate::primitive::primitive_names()
+	let mut out: Vec<CompletionItem> = crate::primitive::names()
 		.into_iter()
 		.map(|name| item(name, CompletionItemKind::FUNCTION, docs::primitive(name)))
 		.collect();
@@ -624,7 +624,7 @@ fn in_capability_brackets(before: &str) -> bool {
 		return false;
 	}
 	let name = trailing_word(before[..open].trim_end());
-	!name.is_empty() && crate::primitive::primitive_get_enum(&name.to_uppercase()).is_ok()
+	!name.is_empty() && crate::primitive::id_of(&name.to_uppercase()).is_ok()
 }
 
 fn in_queries_block(doc: &Document, offset: usize) -> bool {

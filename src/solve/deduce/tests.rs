@@ -7,7 +7,10 @@ use super::decomposition::DecompositionMemo;
 use super::*;
 use crate::primitive::*;
 use crate::primitive::{Capabilities, Capability};
-use crate::term::HashCell;
+use crate::protocol::SlotIdx;
+use crate::term::Application;
+use crate::util::index::Idx;
+use crate::util::index::IndexVec;
 
 #[test]
 fn deduction_uses_the_bound_of_its_inputs_and_keeps_reducible_inputs() {
@@ -15,7 +18,7 @@ fn deduction_uses_the_bound_of_its_inputs_and_keeps_reducible_inputs() {
 	let km = make_trace(vec![]);
 	let sym = SymbolicState::default();
 	let attacker = make_attacker_state(vec![nil.clone()]);
-	let input = crate::solve::vars::attacker_var(0);
+	let input = crate::solve::vars::attacker_var(SlotIdx::new(0));
 	let hash = |v| Value::primitive(PRIM_HASH, vec![v], 0);
 	let too_deep = hash(hash(nil.clone()));
 	let reducible = Value::primitive(
@@ -39,8 +42,8 @@ fn an_oracle_accepts_a_constructed_goal_outside_the_protocol_basis() {
 	let key = make_private("oracle_constructed_seal");
 	let signing = make_private("oracle_constructed_signing");
 	let message = make_constant("oracle_constructed_message");
-	let input = crate::solve::vars::attacker_var(2);
-	let cipher = crate::solve::vars::attacker_var(3);
+	let input = crate::solve::vars::attacker_var(SlotIdx::new(2));
+	let cipher = crate::solve::vars::attacker_var(SlotIdx::new(3));
 	let sealed = Value::primitive(
 		PRIM_ENC,
 		vec![
@@ -55,9 +58,8 @@ fn an_oracle_accepts_a_constructed_goal_outside_the_protocol_basis() {
 		crate::testing::make_wire_slot(&make_constant("oracle_constructed_opened"), &opened, 1),
 	]);
 	let sym = SymbolicState {
-		terms: vec![sealed, opened, input.clone(), cipher.clone()],
-		var_slots: vec![2, 3],
-		var_terms: vec![None, None, Some(input.clone()), Some(cipher.clone())],
+		terms: IndexVec::from(vec![sealed, opened, input.clone(), cipher.clone()]),
+		var_terms: IndexVec::from(vec![None, None, Some(input.clone()), Some(cipher.clone())]),
 	};
 	let attacker = make_attacker_state(vec![message.clone(), value_nil()]);
 	let deducer = Deducer::new(&km, &attacker, &sym);
@@ -72,7 +74,8 @@ fn an_oracle_accepts_a_constructed_goal_outside_the_protocol_basis() {
 	let solutions = deducer.solve(&goal, &Substitution::default());
 	assert!(solutions.iter().any(|solution| {
 		apply(&input, solution).equivalent(&chosen, true)
-			&& crate::theory::reduce_once(&apply(&sym.terms[1], solution)).equivalent(&goal, true)
+			&& crate::theory::reduce_once(&apply(&sym.terms[SlotIdx::new(1)], solution))
+				.equivalent(&goal, true)
 	}));
 }
 
@@ -82,8 +85,8 @@ fn forgeable_goals_share_only_the_declared_key_primitive_and_phase() {
 	let other = make_private("forge_scope_other");
 	let message = make_constant("forge_scope_message");
 	let hidden = make_private("forge_scope_hidden");
-	let mut annotated = Primitive::new(PRIM_SIGN, vec![key.clone(), value_nil()], 0);
-	annotated.capabilities.set(Capability::Forgeable, 2);
+	let annotated = Primitive::new(PRIM_SIGN, vec![key.clone(), value_nil()], 0)
+		.with(|application| application.capabilities.set(Capability::Forgeable, 2));
 	let mut km = make_trace(vec![]);
 	km.capabilities
 		.insert(&Value::Primitive(Arc::new(annotated)));
@@ -105,7 +108,7 @@ fn forgeable_goals_share_only_the_declared_key_primitive_and_phase() {
 				"{goal} at phase {phase}"
 			);
 		}
-		let variable = crate::solve::vars::attacker_var(0);
+		let variable = crate::solve::vars::attacker_var(SlotIdx::new(0));
 		let goal = Value::primitive(PRIM_SIGN, vec![variable.clone(), message.clone()], 0);
 		let solutions = deducer.solve(&goal, &Substitution::default());
 		assert!(
@@ -131,7 +134,7 @@ fn solving_a_reducible_goal_requires_its_result_to_be_derivable() {
 	let km = make_trace(vec![]);
 	let sym = SymbolicState::default();
 	let attacker = make_attacker_state(vec![value_nil(), public, sealed]);
-	let variable = crate::solve::vars::attacker_var(0);
+	let variable = crate::solve::vars::attacker_var(SlotIdx::new(0));
 	let goal = Value::primitive(PRIM_PKE_DEC, vec![key, variable.clone()], 0);
 	let deducer = Deducer::new(&km, &attacker, &sym);
 	let bound = Substitution::from_iter([(
@@ -180,7 +183,7 @@ fn combining_constraint_groups_keeps_alignments_needed_by_later_groups() {
 			0,
 		)
 	};
-	let slot = crate::solve::vars::attacker_var_id(0);
+	let slot = crate::solve::vars::attacker_var_id(SlotIdx::new(0));
 	let left = Substitution::from_iter([(slot.clone(), key(x.clone(), y.clone()))]);
 	let right = Substitution::from_iter([(slot.clone(), key(a.clone(), b.clone()))]);
 	let merged = combine(&[left], &[right]);
@@ -198,8 +201,8 @@ fn combining_constraint_groups_keeps_alignments_needed_by_later_groups() {
 fn rewrite_inversion_keeps_bindings_in_the_reduct() {
 	let key = make_private("invert_reduct_key");
 	let message = make_constant("invert_reduct_message");
-	let input = crate::solve::vars::attacker_var(0);
-	let signature = crate::solve::vars::attacker_var(1);
+	let input = crate::solve::vars::attacker_var(SlotIdx::new(0));
+	let signature = crate::solve::vars::attacker_var(SlotIdx::new(1));
 	let term = Value::primitive(PRIM_UNBLIND, vec![value_nil(), input.clone(), signature], 0);
 	let target = Value::primitive(PRIM_SIGN, vec![key, message.clone()], 0);
 	let km = make_trace(vec![]);
@@ -220,9 +223,9 @@ fn rewrite_inversion_retains_commutative_alternatives_and_incoming_bindings() {
 	let a = make_constant("invert_alternatives_a");
 	let b = make_constant("invert_alternatives_b");
 	let key = make_private("invert_alternatives_key");
-	let x = crate::solve::vars::attacker_var(0);
-	let y = crate::solve::vars::attacker_var(1);
-	let sig = crate::solve::vars::attacker_var(2);
+	let x = crate::solve::vars::attacker_var(SlotIdx::new(0));
+	let y = crate::solve::vars::attacker_var(SlotIdx::new(1));
+	let sig = crate::solve::vars::attacker_var(SlotIdx::new(2));
 	let dh = |a, b| {
 		Value::primitive(
 			PRIM_DH_KEX,
@@ -288,8 +291,8 @@ fn rewrite_matching_keeps_the_alignment_required_by_the_nonce() {
 	let a = make_private("rewrite_match_a");
 	let b = make_private("rewrite_match_b");
 	let secret = make_private("rewrite_match_secret");
-	let x = crate::solve::vars::attacker_var(0);
-	let y = crate::solve::vars::attacker_var(1);
+	let x = crate::solve::vars::attacker_var(SlotIdx::new(0));
+	let y = crate::solve::vars::attacker_var(SlotIdx::new(1));
 	let dh = |a: Value, b| {
 		Value::primitive(
 			PRIM_DH_KEX,
@@ -320,7 +323,7 @@ fn rewrite_matching_keeps_the_alignment_required_by_the_nonce() {
 	);
 	let km = make_trace(vec![]);
 	let sym = SymbolicState {
-		terms: vec![wire.clone()],
+		terms: IndexVec::from(vec![wire.clone()]),
 		..SymbolicState::default()
 	};
 	let attacker = make_attacker_state(vec![a.clone(), b.clone()]);
@@ -339,10 +342,10 @@ fn rewrite_matching_keeps_the_alignment_required_by_the_nonce() {
 fn weak_decomposition_respects_capabilities_and_their_phase() {
 	let secret = make_private("weak_route_secret");
 	let message = make_constant("weak_route_message");
-	let variable = crate::solve::vars::attacker_var(0);
+	let variable = crate::solve::vars::attacker_var(SlotIdx::new(0));
 	let goal = Value::primitive(PRIM_MAC, vec![secret.clone(), message.clone()], 0);
 	for annotated in [false, true] {
-		let mut p = Primitive::new(
+		let p = Primitive::new(
 			PRIM_HASH,
 			vec![Value::primitive(
 				PRIM_MAC,
@@ -351,9 +354,11 @@ fn weak_decomposition_respects_capabilities_and_their_phase() {
 			)],
 			0,
 		);
-		if annotated {
-			p.capabilities.set(Capability::Weak, 1);
-		}
+		let p = if annotated {
+			p.with(|application| application.capabilities.set(Capability::Weak, 1))
+		} else {
+			p
+		};
 		let wire = Value::Primitive(Arc::new(p));
 		let mut km = make_trace(vec![]);
 		let declared = apply(
@@ -362,7 +367,7 @@ fn weak_decomposition_respects_capabilities_and_their_phase() {
 		);
 		km.capabilities.insert(&declared);
 		let sym = SymbolicState {
-			terms: vec![wire.clone()],
+			terms: IndexVec::from(vec![wire.clone()]),
 			..SymbolicState::default()
 		};
 		for phase in [0, 1, 2] {
@@ -453,8 +458,8 @@ fn malleability_matching_keeps_the_constructible_alignment() {
 			0,
 		)
 	};
-	let mut held = Primitive::new(PRIM_ENC, vec![dh(a.clone(), b.clone()), value_nil()], 0);
-	held.capabilities.set(Capability::Malleable, 0);
+	let held = Primitive::new(PRIM_ENC, vec![dh(a.clone(), b.clone()), value_nil()], 0)
+		.with(|application| application.capabilities.set(Capability::Malleable, 0));
 	let held = Value::Primitive(Arc::new(held));
 	let mut km = make_trace(vec![]);
 	km.capabilities.insert(&held);
@@ -493,8 +498,8 @@ fn threshold_search_constructs_a_missing_partial_with_a_committed_nonce() {
 		],
 		0,
 	);
-	let mut split = Primitive::new(PRIM_THRESHOLD_SPLIT, vec![key.clone()], 0);
-	split.threshold = 2;
+	let split = Primitive::new(PRIM_THRESHOLD_SPLIT, vec![key.clone()], 0)
+		.with(|application| application.threshold = 2);
 	let held = Value::primitive(
 		PRIM_THRESHOLD_SIGN,
 		vec![
@@ -530,8 +535,8 @@ fn threshold_search_constructs_a_missing_partial_with_a_committed_nonce() {
 fn threshold_search_retains_key_alignments_until_the_message_matches() {
 	let a = make_private("threshold_alignment_a");
 	let b = make_private("threshold_alignment_b");
-	let x = crate::solve::vars::attacker_var(0);
-	let y = crate::solve::vars::attacker_var(1);
+	let x = crate::solve::vars::attacker_var(SlotIdx::new(0));
+	let y = crate::solve::vars::attacker_var(SlotIdx::new(1));
 	let dh = |a: Value, b| {
 		Value::primitive(
 			PRIM_DH_KEX,
@@ -539,8 +544,8 @@ fn threshold_search_retains_key_alignments_until_the_message_matches() {
 			0,
 		)
 	};
-	let mut split = Primitive::new(PRIM_THRESHOLD_SPLIT, vec![dh(a.clone(), b.clone())], 0);
-	split.threshold = 2;
+	let split = Primitive::new(PRIM_THRESHOLD_SPLIT, vec![dh(a.clone(), b.clone())], 0)
+		.with(|application| application.threshold = 2);
 	let partials = (0..2)
 		.map(|output| {
 			Value::primitive(
@@ -574,8 +579,8 @@ fn threshold_search_keeps_one_state_per_distinct_choice() {
 	let key = make_private("subset_search_key");
 	let message = make_private("subset_search_message");
 	let wanted = crate::solve::vars::free_var(10000);
-	let mut split = Primitive::new(PRIM_THRESHOLD_SPLIT, vec![key.clone()], 0);
-	split.threshold = 8;
+	let split = Primitive::new(PRIM_THRESHOLD_SPLIT, vec![key.clone()], 0)
+		.with(|application| application.threshold = 8);
 	let commitments = Value::primitive(
 		PRIM_CONCAT,
 		(0..16)
@@ -665,7 +670,7 @@ fn a_lane_issues_variables_without_a_ceiling() {
 
 #[test]
 fn threshold_frontier_retains_distinct_counts_and_bindings_in_order() {
-	let id = crate::solve::vars::attacker_var_id(0);
+	let id = crate::solve::vars::attacker_var_id(SlotIdx::new(0));
 	let first = Substitution::from_iter([(id.clone(), make_private("count_first"))]);
 	let second = Substitution::from_iter([(id.clone(), make_private("count_second"))]);
 	let reduced = dedupe_counts(vec![
@@ -685,7 +690,7 @@ fn threshold_frontier_retains_distinct_counts_and_bindings_in_order() {
 
 #[test]
 fn forgeable_shape_collection_visits_a_shared_check_once() {
-	let variable = crate::solve::vars::attacker_var(0);
+	let variable = crate::solve::vars::attacker_var(SlotIdx::new(0));
 	let key = make_private("dag_shape_key");
 	let check = Value::primitive(PRIM_DEC, vec![key.clone(), variable.clone()], 0);
 	let mut term = check.clone();
@@ -693,9 +698,8 @@ fn forgeable_shape_collection_visits_a_shared_check_once() {
 		term = Value::primitive(PRIM_HASH, vec![term.clone(), term.clone(), term], 0);
 	}
 	let sym = SymbolicState {
-		terms: vec![term.clone(), check, term],
-		var_slots: vec![0],
-		var_terms: vec![Some(variable.clone())],
+		terms: IndexVec::from(vec![term.clone(), check, term]),
+		var_terms: IndexVec::from(vec![Some(variable.clone())]),
 	};
 	let km = make_trace(vec![]);
 	let attacker = make_attacker_state(vec![]);
@@ -742,7 +746,6 @@ authentication? Sender -> Bob: payload
 	let groups = constraint_sets(&model.queries, &km, &sym);
 	let slot = |name: &str| {
 		km.slots
-			.iter()
 			.position(|slot| &*slot.constant.name == name)
 			.unwrap()
 	};
@@ -768,7 +771,7 @@ fn nested_reuse_needs_a_held_matching_vetted_pair() {
 	let other_nonce = make_private("nested_reuse_other_nonce");
 	let secret = make_private("nested_reuse_secret");
 	let message = make_constant("nested_reuse_message");
-	let variable = crate::solve::vars::attacker_var(0);
+	let variable = crate::solve::vars::attacker_var(SlotIdx::new(0));
 	let goal = Value::primitive(PRIM_MAC, vec![secret.clone(), message.clone()], 0);
 	let seal = |nonce: Value, plaintext: Value| {
 		Value::primitive(
@@ -795,7 +798,7 @@ fn nested_reuse_needs_a_held_matching_vetted_pair() {
 			0,
 		);
 		let sym = SymbolicState {
-			terms: vec![wire.clone()],
+			terms: IndexVec::from(vec![wire.clone()]),
 			..SymbolicState::default()
 		};
 		let mut held = vec![wrapping.clone(), message.clone(), pair[0].clone()];
@@ -827,7 +830,7 @@ fn nested_decomposition_requires_every_opening_input() {
 	let inner = make_private("nested_open_inner");
 	let secret = make_private("nested_open_secret");
 	let message = make_constant("nested_open_message");
-	let variable = crate::solve::vars::attacker_var(0);
+	let variable = crate::solve::vars::attacker_var(SlotIdx::new(0));
 	let goal = Value::primitive(PRIM_MAC, vec![secret.clone(), message.clone()], 0);
 	let plaintext = Value::primitive(PRIM_MAC, vec![secret, variable.clone()], 0);
 	let encrypted = Value::primitive(PRIM_ENC, vec![inner.clone(), plaintext], 0);
@@ -838,7 +841,7 @@ fn nested_decomposition_requires_every_opening_input() {
 	);
 	let km = make_trace(vec![]);
 	let sym = SymbolicState {
-		terms: vec![wire.clone()],
+		terms: IndexVec::from(vec![wire.clone()]),
 		..SymbolicState::default()
 	};
 	for mask in 0..8 {
@@ -868,7 +871,7 @@ fn nested_decomposition_visits_shared_carriers_once() {
 	let key = make_constant("nested_dag_key");
 	let secret = make_private("nested_dag_secret");
 	let message = make_constant("nested_dag_message");
-	let variable = crate::solve::vars::attacker_var(0);
+	let variable = crate::solve::vars::attacker_var(SlotIdx::new(0));
 	let goal = Value::primitive(PRIM_MAC, vec![secret.clone(), message.clone()], 0);
 	let plaintext = Value::primitive(PRIM_MAC, vec![secret, variable.clone()], 0);
 	let mut wire = Value::primitive(PRIM_ENC, vec![key.clone(), plaintext], 0);
@@ -877,7 +880,7 @@ fn nested_decomposition_visits_shared_carriers_once() {
 	}
 	let km = make_trace(vec![]);
 	let sym = SymbolicState {
-		terms: vec![wire.clone()],
+		terms: IndexVec::from(vec![wire.clone()]),
 		..SymbolicState::default()
 	};
 	let attacker = make_attacker_state(vec![key, message.clone()]);
@@ -901,7 +904,7 @@ fn nested_decomposition_visits_shared_carriers_once() {
 fn deduction_routes_require_the_declared_encapsulation_projection() {
 	let key = make_private("route_projection_key");
 	let public = Value::primitive(PRIM_PUBKEY, vec![key.clone()], 0);
-	let variable = crate::solve::vars::attacker_var(0);
+	let variable = crate::solve::vars::attacker_var(SlotIdx::new(0));
 	let randomness = make_constant("route_projection_randomness");
 	let secret = Value::primitive(PRIM_KEM_ENCAP, vec![public.clone(), randomness.clone()], 0);
 	let name = make_constant("route_projection_wire");
@@ -914,7 +917,7 @@ fn deduction_routes_require_the_declared_encapsulation_projection() {
 		);
 		let km = make_trace(vec![make_wire_slot(&name, &wire, 1)]);
 		let sym = SymbolicState {
-			terms: vec![wire.clone()],
+			terms: IndexVec::from(vec![wire.clone()]),
 			..SymbolicState::default()
 		};
 		let deducer = Deducer::new(&km, &attacker, &sym);
@@ -939,14 +942,14 @@ fn a_cached_goal_keeps_the_bindings_its_oracle_was_solved_under() {
 	let key = make_private("memo_oracle_key");
 	let message = make_constant("memo_oracle_message");
 	let other = make_constant("memo_oracle_other");
-	let variable = crate::solve::vars::attacker_var(0);
+	let variable = crate::solve::vars::attacker_var(SlotIdx::new(0));
 	let wire = Value::primitive(PRIM_MAC, vec![key.clone(), variable.clone()], 0);
 	let goal = Value::primitive(PRIM_MAC, vec![key, message.clone()], 0);
 	let name = make_constant("memo_oracle_wire");
 	let km = make_trace(vec![make_wire_slot(&name, &wire, 1)]);
 	let attacker = make_attacker_state(vec![message.clone(), other.clone()]);
 	let sym = SymbolicState {
-		terms: vec![wire],
+		terms: IndexVec::from(vec![wire]),
 		..SymbolicState::default()
 	};
 	let deducer = Deducer::new(&km, &attacker, &sym);
@@ -987,7 +990,7 @@ fn fresh_variables_are_disjoint_between_lanes_and_batches() {
 use crate::testing::*;
 
 fn unblind_over(k: &Value, m: &Value, sig: &Value) -> Primitive {
-	Primitive {
+	Primitive::from(Application {
 		id: PRIM_UNBLIND,
 		arguments: vec![k.clone(), m.clone(), sig.clone()],
 		output: 0,
@@ -995,8 +998,7 @@ fn unblind_over(k: &Value, m: &Value, sig: &Value) -> Primitive {
 		instance_check: false,
 		capabilities: Capabilities::default(),
 		threshold: 0,
-		hash: HashCell::default(),
-	}
+	})
 }
 
 #[test]
@@ -1075,7 +1077,7 @@ fn a_share_opened_out_of_a_sealed_tuple_is_shaped_as_the_attackers_key() {
 	let nonce = make_constant("sealed_share_nonce");
 	let secret = make_private("sealed_share_secret");
 	let public = Value::primitive(PRIM_PUBKEY, vec![secret.clone()], 0);
-	let ciphertext = crate::solve::vars::attacker_var(0);
+	let ciphertext = crate::solve::vars::attacker_var(SlotIdx::new(0));
 	let opened = Value::primitive(
 		PRIM_AEAD_DEC,
 		vec![seal.clone(), nonce.clone(), ciphertext.clone(), value_nil()],

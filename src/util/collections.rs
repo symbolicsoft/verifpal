@@ -4,7 +4,7 @@
 use std::hash::{BuildHasherDefault, Hasher};
 
 #[derive(Default)]
-pub struct IdHasher(u64);
+pub(crate) struct IdHasher(u64);
 
 impl Hasher for IdHasher {
 	fn finish(&self) -> u64 {
@@ -34,9 +34,9 @@ impl Hasher for IdHasher {
 	}
 }
 
-pub type IdMap<K, V> = std::collections::HashMap<K, V, BuildHasherDefault<IdHasher>>;
+pub(crate) type IdMap<K, V> = std::collections::HashMap<K, V, BuildHasherDefault<IdHasher>>;
 
-pub type IdSet<K> = std::collections::HashSet<K, BuildHasherDefault<IdHasher>>;
+pub(crate) type IdSet<K> = std::collections::HashSet<K, BuildHasherDefault<IdHasher>>;
 
 pub(crate) fn append_unique<T: PartialEq>(vec: &mut Vec<T>, value: T) {
 	if !vec.contains(&value) {

@@ -16,7 +16,7 @@ impl Entry {
 }
 
 static PRIMITIVES: LazyLock<Vec<Entry>> = LazyLock::new(|| {
-	crate::primitive::primitive_docs()
+	crate::primitive::docs()
 		.into_iter()
 		.map(|(name, doc)| Entry {
 			name,
@@ -30,7 +30,6 @@ pub(crate) static CAPABILITIES: LazyLock<Vec<Entry>> = LazyLock::new(capability_
 
 fn capability_entries() -> Vec<Entry> {
 	use crate::primitive::Capability;
-	use crate::primitive::{primitive_is_key_derivation, primitives_supporting};
 	fn leak(text: String) -> &'static str {
 		Box::leak(text.into_boxed_str())
 	}
@@ -41,7 +40,7 @@ fn capability_entries() -> Vec<Entry> {
 		crate::util::text::and_list(&names)
 	}
 	let supporting = |cap: Capability| {
-		primitives_supporting(|id| crate::primitive::capability::supports(id, cap))
+		crate::primitive::supporting(|id| crate::primitive::capability::supports(id, cap))
 	};
 	let declared_for = |cap: Capability| list(supporting(cap).iter().map(|s| s.name).collect());
 	let example = |cap: Capability| {
@@ -57,7 +56,7 @@ fn capability_entries() -> Vec<Entry> {
 			})
 			.unwrap_or("")
 	};
-	let delayed = primitives_supporting(primitive_is_key_derivation)
+	let delayed = crate::primitive::supporting(crate::primitive::is_key_derivation)
 		.first()
 		.map(|s| {
 			leak(format!(
@@ -234,7 +233,7 @@ mod tests {
 
 	#[test]
 	fn every_primitive_declares_its_documentation() {
-		for (name, doc) in crate::primitive::primitive_docs() {
+		for (name, doc) in crate::primitive::docs() {
 			assert!(
 				!doc.example.is_empty() && !doc.help.is_empty(),
 				"{name} declares no documentation"

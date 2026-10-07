@@ -3,7 +3,7 @@
 
 use super::decomposition::decomposition_targets;
 use super::{Deducer, advance};
-use crate::primitive::{primitive_is_projection, rewrite_rule};
+use crate::primitive::rewrite_rule;
 use crate::solve::matching::unifiers;
 use crate::solve::vars::{Substitution, apply, contains_var, dedupe};
 use crate::term::Value;
@@ -59,7 +59,7 @@ impl<'a> Deducer<'a> {
 			}
 		}
 
-		if primitive_is_projection(p.id)
+		if crate::primitive::is_projection(p.id)
 			&& let Some(inner) = p.arguments.first()
 		{
 			for candidate in self.tuple_shapes(p, Some(&target)) {

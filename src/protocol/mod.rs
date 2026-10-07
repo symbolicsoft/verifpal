@@ -8,4 +8,4 @@ pub(crate) mod scenario;
 pub(crate) mod sessions;
 pub(crate) mod trace;
 
-pub use trace::{LeakEvent, ProtocolTrace, SendEvent, TraceSlot};
+pub(crate) use trace::{LeakEvent, ProtocolTrace, SendEvent, SlotIdx, TraceSlot};

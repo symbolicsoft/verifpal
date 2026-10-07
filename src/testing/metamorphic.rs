@@ -9,7 +9,7 @@ use crate::syntax::{
 	AttackerKind, Block, Declaration, Expression, LineComments, Message, Model, Qualifier,
 	QueryKind, QueryOption, QueryOptionKind, Scenario, Span,
 };
-use crate::term::{Constant, HashCell, Value, ValueId};
+use crate::term::{Constant, Value, ValueId};
 use crate::verify::VerifyResult;
 
 const SESSIONS: u8 = 1;
@@ -203,14 +203,12 @@ fn annotations(value: &Value, cap: Capability) -> Vec<Value> {
 	if crate::primitive::capability::supports(p.id, cap)
 		&& p.capabilities.onset(cap).is_none_or(|phase| phase > 0)
 	{
-		let mut updated = (**p).clone();
-		updated.capabilities.set(cap, 0);
+		let updated = p.with(|application| application.capabilities.set(cap, 0));
 		out.push(Value::Primitive(Arc::new(updated)));
 	}
 	for (i, argument) in p.arguments.iter().enumerate() {
 		for replaced in annotations(argument, cap) {
-			let mut updated = (**p).clone();
-			updated.arguments[i] = replaced;
+			let updated = p.with(|application| application.arguments[i] = replaced);
 			out.push(Value::Primitive(Arc::new(updated)));
 		}
 	}
@@ -260,16 +258,14 @@ fn variants_rethresholded(model: &Model, delta: i64) -> Vec<Model> {
 			let Some(Value::Primitive(p)) = expression.assigned.as_ref() else {
 				continue;
 			};
-			let Some(rule) = crate::primitive::primitive_threshold(p.id) else {
+			let Some(rule) = crate::primitive::threshold(p.id) else {
 				continue;
 			};
 			let threshold = p.threshold as i64 + delta;
 			if threshold < rule.min as i64 || threshold > expression.constants.len() as i64 {
 				continue;
 			}
-			let mut changed = (**p).clone();
-			changed.threshold = threshold as usize;
-			changed.hash = HashCell::default();
+			let changed = p.with(|application| application.threshold = threshold as usize);
 			let mut variant = model.clone();
 			if let Some(Block::Principal(principal)) = variant.blocks.get_mut(bi)
 				&& let Some(e) = principal.expressions.get_mut(ei)

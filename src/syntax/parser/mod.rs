@@ -11,7 +11,6 @@ mod tests;
 use super::names::{PrincipalNames, ValueNames};
 use super::tokens::TokenIndex;
 use super::{Comment, Declaration, Model, Source, Span, VResult, VerifpalError};
-use crate::primitive::primitive_get_enum;
 
 const RESERVED: &[&str] = &[
 	"attacker",
@@ -46,7 +45,7 @@ const DECLARATIONS: [(&str, Declaration); 3] = [
 const MAX_NESTING: usize = 128;
 
 fn names_a_primitive(lower: &str) -> bool {
-	primitive_get_enum(&lower.to_uppercase()).is_ok()
+	crate::primitive::id_of(&lower.to_uppercase()).is_ok()
 }
 
 pub(crate) fn check_reserved(s: &str) -> VResult<()> {

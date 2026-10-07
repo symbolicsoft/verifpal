@@ -5,13 +5,10 @@ use std::sync::Arc;
 
 use super::scanner::{starts_with_comment, starts_with_keyword};
 use super::{DECLARATIONS, MAX_NESTING, Parser, check_reserved, names_a_primitive};
-use crate::primitive::{
-	Capabilities, Capability, primitive_get_enum, primitive_names, primitive_renamed,
-	primitive_threshold, primitives_with_threshold,
-};
+use crate::primitive::{Capabilities, Capability};
 use crate::syntax::tokens::TokenKind;
 use crate::syntax::{Comment, Declaration, Expression, Qualifier, Span, VResult, VerifpalError};
-use crate::term::{Constant, HashCell, Primitive, Value};
+use crate::term::{Application, Constant, Primitive, PrimitiveId, Value};
 use crate::util::text::did_you_mean;
 
 impl<'a> Parser<'a> {
@@ -217,6 +214,26 @@ impl<'a> Parser<'a> {
 			(Capabilities::default(), None)
 		};
 		self.skip_whitespace();
+		let arguments = self.parse_arguments(&prim_name)?;
+		let instance_check = self.eat_token("?", TokenKind::Check);
+		self.primitive_end = self.pos;
+		self.skip_inline_whitespace();
+		self.eat(",");
+		let id = crate::primitive::id_of(&prim_name)
+			.map_err(|_| unknown_primitive(&prim_name, name_span))?;
+		let threshold = checked_threshold(&prim_name, name_span, id, threshold)?;
+		Ok(Value::Primitive(Arc::new(Primitive::from(Application {
+			id,
+			arguments,
+			output: 0,
+			threshold,
+			instance: 0,
+			instance_check,
+			capabilities,
+		}))))
+	}
+
+	fn parse_arguments(&mut self, prim_name: &str) -> VResult<Vec<Value>> {
 		let open_paren = self.pos;
 		self.expect_where("(", &format!("after `{}`", prim_name))?;
 		self.consume_trivia();
@@ -240,79 +257,7 @@ impl<'a> Parser<'a> {
 			}
 		}
 		self.expect(")")?;
-		let instance_check = self.eat_token("?", TokenKind::Check);
-		self.primitive_end = self.pos;
-		self.skip_inline_whitespace();
-		self.eat(",");
-		let id = primitive_get_enum(&prim_name).map_err(|_| {
-			let unknown = VerifpalError::parse(format!("unknown primitive `{}`", prim_name).into())
-				.at(name_span);
-			match primitive_renamed(&prim_name) {
-				Some(new_name) => unknown
-					.labelled(format!("now called `{}`", new_name))
-					.note(format!(
-						"`{}` was renamed `{}`; a split now carries its threshold in a bracket, e.g. `{}[2](…)` for two-of-n",
-						prim_name,
-						new_name,
-						primitives_with_threshold().first().copied().unwrap_or(new_name)
-					))
-					.help(format!("write `{}` instead", new_name)),
-				None => unknown
-					.labelled("not a Verifpal primitive")
-					.suggest(did_you_mean(&prim_name, primitive_names())),
-			}
-		})?;
-		let threshold = match (primitive_threshold(id), threshold) {
-			(Some(_), None) => {
-				return Err(VerifpalError::parse(
-					format!("`{}` needs a threshold", prim_name).into(),
-				)
-				.at(name_span)
-				.note(
-					"the number in the bracket is how many of the bound shares recover the secret",
-				)
-				.help(format!(
-					"write `{}[2](…)` for a scheme where any two shares suffice",
-					prim_name
-				)));
-			}
-			(None, Some((_, span))) => {
-				return Err(VerifpalError::parse(
-					format!("`{}` takes no threshold", prim_name).into(),
-				)
-				.at(span)
-				.note(format!(
-					"a threshold belongs on a primitive that shares a secret: {}",
-					crate::util::text::quoted_list(
-						&primitives_with_threshold()
-							.iter()
-							.map(|s| s.to_string())
-							.collect::<Vec<String>>()
-					)
-				))
-				.help("remove the number from the bracket"));
-			}
-			(Some(rule), Some((t, span))) if t < rule.min => {
-				return Err(VerifpalError::parse(
-					format!("a threshold of {} makes every share the secret", t).into(),
-				)
-				.at(span)
-				.note(format!("the smallest threshold is {}", rule.min))
-				.help(format!("write `{}[{}](…)`", prim_name, rule.min)));
-			}
-			(Some(_), Some((t, _))) => t,
-			(None, None) => 0,
-		};
-		Ok(Value::Primitive(Arc::new(Primitive {
-			id,
-			arguments,
-			output: 0,
-			threshold,
-			instance: 0,
-			instance_check,
-			capabilities,
-			hash: HashCell::default(),
-		})))
+		Ok(arguments)
 	}
 
 	fn parse_bracket(&mut self) -> VResult<(Capabilities, Option<(usize, Span)>)> {
@@ -408,5 +353,65 @@ impl<'a> Parser<'a> {
 			VerifpalError::parse("invalid phase number in primitive parameter".into())
 				.at(Span::at(digits.start))
 		})
+	}
+}
+
+fn unknown_primitive(prim_name: &str, name_span: Span) -> VerifpalError {
+	let unknown =
+		VerifpalError::parse(format!("unknown primitive `{}`", prim_name).into()).at(name_span);
+	match crate::primitive::renamed(prim_name) {
+		Some(new_name) => unknown
+			.labelled(format!("now called `{}`", new_name))
+			.note(format!(
+				"`{}` was renamed `{}`; a split now carries its threshold in a bracket, e.g. `{}[2](…)` for two-of-n",
+				prim_name,
+				new_name,
+				crate::primitive::threshold_names().first().copied().unwrap_or(new_name)
+			))
+			.help(format!("write `{}` instead", new_name)),
+		None => unknown
+			.labelled("not a Verifpal primitive")
+			.suggest(did_you_mean(prim_name, crate::primitive::names())),
+	}
+}
+
+fn checked_threshold(
+	prim_name: &str,
+	name_span: Span,
+	id: PrimitiveId,
+	threshold: Option<(usize, Span)>,
+) -> VResult<usize> {
+	match (crate::primitive::threshold(id), threshold) {
+		(Some(_), None) => Err(VerifpalError::parse(
+			format!("`{}` needs a threshold", prim_name).into(),
+		)
+		.at(name_span)
+		.note("the number in the bracket is how many of the bound shares recover the secret")
+		.help(format!(
+			"write `{}[2](…)` for a scheme where any two shares suffice",
+			prim_name
+		))),
+		(None, Some((_, span))) => Err(VerifpalError::parse(
+			format!("`{}` takes no threshold", prim_name).into(),
+		)
+		.at(span)
+		.note(format!(
+			"a threshold belongs on a primitive that shares a secret: {}",
+			crate::util::text::quoted_list(
+				&crate::primitive::threshold_names()
+					.iter()
+					.map(|s| s.to_string())
+					.collect::<Vec<String>>()
+			)
+		))
+		.help("remove the number from the bracket")),
+		(Some(rule), Some((t, span))) if t < rule.min => Err(VerifpalError::parse(
+			format!("a threshold of {} makes every share the secret", t).into(),
+		)
+		.at(span)
+		.note(format!("the smallest threshold is {}", rule.min))
+		.help(format!("write `{}[{}](…)`", prim_name, rule.min))),
+		(Some(_), Some((t, _))) => Ok(t),
+		(None, None) => Ok(0),
 	}
 }

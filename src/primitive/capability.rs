@@ -3,27 +3,27 @@
 
 use std::sync::Arc;
 
-use super::{primitive_get, primitive_is_core, primitive_name};
+use super::{is_core, name, spec};
 use crate::protocol::TraceSlot;
 use crate::syntax::{Block, Model};
 use crate::term::{Primitive, PrimitiveId, Value};
 use crate::util::IdMap;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Capability {
+pub(crate) enum Capability {
 	Weak,
 	Forgeable,
 	Malleable,
 }
 
 impl Capability {
-	pub const ALL: [Capability; 3] = [
+	pub(crate) const ALL: [Capability; 3] = [
 		Capability::Weak,
 		Capability::Forgeable,
 		Capability::Malleable,
 	];
 
-	pub fn index(self) -> usize {
+	pub(crate) fn index(self) -> usize {
 		match self {
 			Capability::Weak => 0,
 			Capability::Forgeable => 1,
@@ -31,7 +31,7 @@ impl Capability {
 		}
 	}
 
-	pub fn name(self) -> &'static str {
+	pub(crate) fn name(self) -> &'static str {
 		match self {
 			Capability::Weak => "weak",
 			Capability::Forgeable => "forgeable",
@@ -39,7 +39,7 @@ impl Capability {
 		}
 	}
 
-	pub fn from_name(s: &str) -> Option<Capability> {
+	pub(crate) fn from_name(s: &str) -> Option<Capability> {
 		Capability::ALL
 			.into_iter()
 			.find(|c| c.name().eq_ignore_ascii_case(s))
@@ -47,7 +47,7 @@ impl Capability {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub struct Capabilities {
+pub(crate) struct Capabilities {
 	onset: [i32; 3],
 }
 
@@ -60,39 +60,39 @@ impl Default for Capabilities {
 }
 
 impl Capabilities {
-	pub fn is_empty(&self) -> bool {
+	pub(crate) fn is_empty(&self) -> bool {
 		self.onset.iter().all(|&o| o == ABSENT)
 	}
 
-	pub fn set(&mut self, cap: Capability, from_phase: i32) {
+	pub(crate) fn set(&mut self, cap: Capability, from_phase: i32) {
 		self.onset[cap.index()] = from_phase.max(0);
 	}
 
-	pub fn has(&self, cap: Capability) -> bool {
+	pub(crate) fn has(&self, cap: Capability) -> bool {
 		self.onset[cap.index()] != ABSENT
 	}
 
-	pub fn onset(&self, cap: Capability) -> Option<i32> {
+	pub(crate) fn onset(&self, cap: Capability) -> Option<i32> {
 		match self.onset[cap.index()] {
 			ABSENT => None,
 			o => Some(o),
 		}
 	}
 
-	pub fn in_force(&self, cap: Capability, phase: i32) -> bool {
+	pub(crate) fn in_force(&self, cap: Capability, phase: i32) -> bool {
 		match self.onset(cap) {
 			Some(o) => phase >= o,
 			None => false,
 		}
 	}
 
-	pub fn iter(&self) -> impl Iterator<Item = (Capability, i32)> + '_ {
+	pub(crate) fn iter(&self) -> impl Iterator<Item = (Capability, i32)> + '_ {
 		Capability::ALL
 			.into_iter()
 			.filter_map(|c| self.onset(c).map(|o| (c, o)))
 	}
 
-	pub fn merge(&mut self, other: &Capabilities) {
+	pub(crate) fn merge(&mut self, other: &Capabilities) {
 		for (cap, onset) in other.iter() {
 			match self.onset(cap) {
 				Some(existing) if existing <= onset => {}
@@ -103,15 +103,15 @@ impl Capabilities {
 }
 
 fn forgeable_secret_of(p: &Primitive) -> Option<&Value> {
-	let position = primitive_get(p.id).ok()?.forgeable_secret?;
+	let position = spec(p.id).ok()?.forgeable_secret?;
 	p.arguments.get(position)
 }
 
 pub(crate) fn supports(id: PrimitiveId, cap: Capability) -> bool {
-	if primitive_is_core(id) {
+	if is_core(id) {
 		return false;
 	}
-	let Ok(spec) = primitive_get(id) else {
+	let Ok(spec) = spec(id) else {
 		return false;
 	};
 	match cap {
@@ -122,10 +122,10 @@ pub(crate) fn supports(id: PrimitiveId, cap: Capability) -> bool {
 }
 
 pub(crate) fn unsupported_message(id: PrimitiveId, cap: Capability) -> String {
-	let name = primitive_name(id);
+	let name = name(id);
 	let exchange_key =
-		crate::primitive::commutativity_rule(id).map(|rule| primitive_name(rule.constructor));
-	if primitive_is_core(id) {
+		crate::primitive::commutativity_rule(id).map(|rule| super::name(rule.constructor));
+	if is_core(id) {
 		return format!(
 			"{} is a core primitive and carries no cryptographic guarantee to weaken",
 			name
@@ -201,34 +201,34 @@ fn annotated(v: &Value, capabilities: Capabilities) -> Value {
 	let Value::Primitive(p) = v else {
 		return v.clone();
 	};
-	let mut rebuilt = p.with_arguments(
-		p.arguments
+	Value::Primitive(Arc::new(p.with(|application| {
+		application.arguments = p
+			.arguments
 			.iter()
 			.map(|arg| annotated(arg, Capabilities::default()))
-			.collect(),
-	);
-	rebuilt.capabilities = capabilities;
-	Value::Primitive(Arc::new(rebuilt))
+			.collect();
+		application.capabilities = capabilities;
+	})))
 }
 
 #[derive(Clone, Debug)]
-pub enum Reach {
+pub(crate) enum Reach {
 	SameTerm(Value),
 	SameSecret(Value),
 }
 
 #[derive(Clone, Debug, Default)]
-pub struct CapabilityIndex {
+pub(crate) struct CapabilityIndex {
 	buckets: IdMap<u64, Vec<(Value, Capabilities)>>,
 	secrets: IdMap<(PrimitiveId, u64), Vec<(Value, Capabilities)>>,
 }
 
 impl CapabilityIndex {
-	pub fn is_empty(&self) -> bool {
+	pub(crate) fn is_empty(&self) -> bool {
 		self.buckets.is_empty()
 	}
 
-	pub fn insert(&mut self, v: &Value) {
+	pub(crate) fn insert(&mut self, v: &Value) {
 		for term in crate::term::subterms(v) {
 			let Value::Primitive(p) = term else {
 				continue;
@@ -278,8 +278,8 @@ impl CapabilityIndex {
 		bucket.push((secret.clone(), p.capabilities));
 	}
 
-	pub fn forgeable_secret_position(&self, p: &Primitive, phase: i32) -> Option<usize> {
-		let position = primitive_get(p.id).ok()?.forgeable_secret?;
+	pub(crate) fn forgeable_secret_position(&self, p: &Primitive, phase: i32) -> Option<usize> {
+		let position = spec(p.id).ok()?.forgeable_secret?;
 		if self.secrets.is_empty() {
 			return None;
 		}
@@ -293,7 +293,11 @@ impl CapabilityIndex {
 			.then_some(position)
 	}
 
-	pub fn forgeable_secrets(&self, id: PrimitiveId, phase: i32) -> impl Iterator<Item = &Value> {
+	pub(crate) fn forgeable_secrets(
+		&self,
+		id: PrimitiveId,
+		phase: i32,
+	) -> impl Iterator<Item = &Value> {
 		self.secrets
 			.iter()
 			.filter(move |((primitive, _), _)| *primitive == id)
@@ -302,7 +306,7 @@ impl CapabilityIndex {
 			.map(|(secret, _)| secret)
 	}
 
-	pub fn lookup(&self, p: &Primitive) -> Capabilities {
+	pub(crate) fn lookup(&self, p: &Primitive) -> Capabilities {
 		if self.buckets.is_empty() {
 			return Capabilities::default();
 		}
@@ -321,20 +325,23 @@ impl CapabilityIndex {
 		Capabilities::default()
 	}
 
-	pub fn in_force(&self, p: &Primitive, cap: Capability, phase: i32) -> bool {
+	pub(crate) fn in_force(&self, p: &Primitive, cap: Capability, phase: i32) -> bool {
 		if self.buckets.is_empty() {
 			return false;
 		}
 		self.lookup(p).in_force(cap, phase)
 	}
 
-	pub fn annotated_terms(&self) -> impl Iterator<Item = (&Value, &Capabilities)> {
+	pub(crate) fn annotated_terms(&self) -> impl Iterator<Item = (&Value, &Capabilities)> {
 		self.buckets
 			.values()
 			.flat_map(|b| b.iter().map(|(v, caps)| (v, caps)))
 	}
 
-	pub fn governed_occurrences(&self, slots: &[TraceSlot]) -> Vec<(String, Reach)> {
+	pub(crate) fn governed_occurrences<'a>(
+		&self,
+		slots: impl IntoIterator<Item = &'a TraceSlot>,
+	) -> Vec<(String, Reach)> {
 		if self.buckets.is_empty() {
 			return Vec::new();
 		}
@@ -391,7 +398,7 @@ mod tests {
 			)
 		};
 		for cap in Capability::ALL {
-			for spec in primitives_supporting(|id| supports(id, cap)) {
+			for spec in supporting(|id| supports(id, cap)) {
 				let id = spec.id;
 				for output in 0..*spec.output.iter().max().unwrap() as usize {
 					let arguments = (0..spec.arity[0])
@@ -572,8 +579,7 @@ mod tests {
 		let Value::Primitive(p) = v else {
 			panic!("expected a primitive");
 		};
-		let mut p = (*p).clone();
-		p.capabilities.set(cap, onset);
+		let p = p.with(|application| application.capabilities.set(cap, onset));
 		Value::Primitive(Arc::new(p))
 	}
 

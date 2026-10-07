@@ -6,16 +6,14 @@ use std::sync::Arc;
 use super::attacker::{AttackerState, DecomposeResult};
 use super::obtain::obtainable;
 use super::rewrite::reduce_once;
-use crate::primitive::{
-	Capability, CapabilityIndex, DecomposeRule, Reveal, primitive_get, primitive_is_core,
-};
+use crate::primitive::{Capability, CapabilityIndex, DecomposeRule, Reveal};
 use crate::term::{Primitive, Value};
 
 pub(crate) fn decompose_rule(p: &Primitive) -> Option<&'static DecomposeRule> {
-	if primitive_is_core(p.id) {
+	if crate::primitive::is_core(p.id) {
 		return None;
 	}
-	let rule = primitive_get(p.id).ok()?.decompose.as_ref()?;
+	let rule = crate::primitive::spec(p.id).ok()?.decompose.as_ref()?;
 	rule.output
 		.is_none_or(|output| p.output == output)
 		.then_some(rule)
@@ -48,13 +46,13 @@ pub(crate) fn can_break_weak(
 	capabilities: &CapabilityIndex,
 	attacker: &AttackerState,
 ) -> Option<Vec<Value>> {
-	if primitive_is_core(p.id) {
+	if crate::primitive::is_core(p.id) {
 		return None;
 	}
 	if !capabilities.in_force(p, Capability::Weak, attacker.current_phase) {
 		return None;
 	}
-	let revealed = revealed(p, &primitive_get(p.id).ok()?.weak_reveals);
+	let revealed = revealed(p, &crate::primitive::spec(p.id).ok()?.weak_reveals);
 	(!revealed.is_empty()).then_some(revealed)
 }
 

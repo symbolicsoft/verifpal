@@ -1,9 +1,11 @@
 /* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
  * SPDX-License-Identifier: GPL-3.0-only */
 
-use super::{Family, Search, Tried, compatible_with, normalize, runs_of};
-use crate::engine::exec::{Installs, UNSTARTED, install_at};
+use super::{Family, NodeIdx, Search, Tried, compatible_with, normalize, runs_of};
+use crate::engine::exec::{Install, Installs};
+use crate::engine::program::RunIdx;
 use crate::protocol::ProtocolTrace;
+use crate::protocol::SlotIdx;
 use crate::syntax::QueryKind;
 use crate::term::Value;
 use crate::util::IdMap;
@@ -35,7 +37,7 @@ fn choose(plan: &Installs, leaves: &[Vec<Installs>], failed: &mut [Tried]) -> Op
 		next.extend(
 			source
 				.iter()
-				.filter(|(run, slot, _)| install_at(plan, *run, *slot).is_none())
+				.filter(|install| !plan.iter().any(|held| held.same_input(install)))
 				.cloned(),
 		);
 		if let Some(done) = choose(&normalize(next), rest, failed) {
@@ -66,9 +68,9 @@ impl<'a, 'b> Search<'a, 'b> {
 			return;
 		}
 		seen.push(idx);
-		let (known, nodes) = self.closed_at;
+		let (known, nodes) = self.union.closed_at;
 		if idx < known {
-			let sources: Vec<Installs> = self.by_cost[idx]
+			let sources: Vec<Installs> = self.union.by_cost[idx]
 				.iter()
 				.flatten()
 				.filter(|&&n| n < nodes)
@@ -79,11 +81,11 @@ impl<'a, 'b> Search<'a, 'b> {
 				return;
 			}
 		}
-		let Some(record) = self.closed.state.derivations.get(idx) else {
+		let Some(record) = self.union.closed.state.derivations.get(idx) else {
 			return;
 		};
 		for ingredient in record.ingredients() {
-			if let Some(i) = self.closed.knows(ingredient) {
+			if let Some(i) = self.union.closed.knows(ingredient) {
 				self.leaves(i, out, seen);
 			}
 		}
@@ -91,7 +93,7 @@ impl<'a, 'b> Search<'a, 'b> {
 
 	pub(super) fn merge_for_queries(&mut self) {
 		let km = self.cx.km;
-		let mut targets: Vec<(usize, usize)> = Vec::new();
+		let mut targets: Vec<(usize, NodeIdx)> = Vec::new();
 		let mut index: IdMap<usize, usize> = IdMap::default();
 		for q in self.ctx.open_queries() {
 			if !matches!(
@@ -105,11 +107,11 @@ impl<'a, 'b> Search<'a, 'b> {
 					continue;
 				};
 				self.index_holders(slot, q.kind);
-				for (wanted, holder) in &self.holders[&(slot, q.kind)].values {
-					let Some(idx) = self.closed.knows(wanted) else {
+				for (wanted, holder) in &self.memo.holders[&(slot, q.kind)].values {
+					let Some(idx) = self.union.closed.knows(wanted) else {
 						continue;
 					};
-					if idx < self.closed_at.0 {
+					if idx < self.union.closed_at.0 {
 						continue;
 					}
 					match index.get(&idx) {
@@ -133,16 +135,18 @@ impl<'a, 'b> Search<'a, 'b> {
 			if self.done() {
 				break;
 			}
-			let value = &self.closed.state.known[idx];
+			let value = &self.union.closed.state.known[idx];
 			let key = (value.hash_value(), context);
 			if self
-				.merged_targets
+				.attempts
+				.merged
 				.get(&key)
 				.is_some_and(|seen| seen.iter().any(|held: &Value| held.equivalent(value, true)))
 			{
 				continue;
 			}
-			self.merged_targets
+			self.attempts
+				.merged
 				.entry(key)
 				.or_default()
 				.push(value.clone());
@@ -151,10 +155,10 @@ impl<'a, 'b> Search<'a, 'b> {
 			if leaves.is_empty() {
 				continue;
 			}
-			if self.debug {
+			if self.log.debug {
 				eprintln!(
 					"[search] merge target {}: context {}, sources {:?}",
-					self.closed.state.known[idx],
+					self.union.closed.state.known[idx],
 					context,
 					leaves.iter().map(Vec::len).collect::<Vec<_>>()
 				);
@@ -171,12 +175,12 @@ impl<'a, 'b> Search<'a, 'b> {
 		}
 	}
 
-	fn index_holders(&mut self, slot: usize, kind: QueryKind) {
+	fn index_holders(&mut self, slot: SlotIdx, kind: QueryKind) {
 		let km = self.cx.km;
-		let holders = self.holders.entry((slot, kind)).or_default();
-		for n in holders.scanned..self.nodes.len() {
+		let holders = self.memo.holders.entry((slot, kind)).or_default();
+		for n in self.nodes.indices_from(holders.scanned) {
 			let node = &self.nodes[n];
-			for run in 0..node.held.len() {
+			for run in node.held.indices() {
 				let Some(h) = node.held(run, slot) else {
 					continue;
 				};
@@ -201,13 +205,10 @@ impl<'a, 'b> Search<'a, 'b> {
 				}
 			}
 		}
-		holders.scanned = self.nodes.len();
+		holders.scanned = self.nodes.next_index();
 	}
 
-	fn sibling_slot(&self, slot: usize, r: usize) -> Option<usize> {
-		if slot == UNSTARTED {
-			return Some(UNSTARTED);
-		}
+	fn sibling_slot(&self, slot: SlotIdx, r: RunIdx) -> Option<SlotIdx> {
 		let km = self.cx.km;
 		let id = km.slots[slot].constant.id;
 		let group = km.copy_siblings.get(&id)?;
@@ -220,14 +221,14 @@ impl<'a, 'b> Search<'a, 'b> {
 		})
 	}
 
-	pub(super) fn transfer(&mut self, node: usize) {
+	pub(super) fn transfer(&mut self, node: NodeIdx) {
 		let km = self.cx.km;
 		let program = self.cx.program;
 		let installs = self.nodes[node].installs.clone();
 		let runs = runs_of(&installs);
 		let mut plans: Vec<Installs> = Vec::new();
 		for &q in &runs {
-			for r in 0..program.runs.len() {
+			for r in program.runs.indices() {
 				if r == q
 					|| runs.contains(&r)
 					|| !km.same_actor(program.runs[r].id, program.runs[q].id)
@@ -236,16 +237,23 @@ impl<'a, 'b> Search<'a, 'b> {
 				}
 				let mut plan: Installs = installs
 					.iter()
-					.filter(|(run, _, _)| *run != q)
+					.filter(|install| install.run() != q)
 					.cloned()
 					.collect();
 				let mut complete = true;
-				for (run, slot, value) in &installs {
-					if *run != q {
-						continue;
-					}
-					match self.sibling_slot(*slot, r) {
-						Some(mapped) => plan.push((r, mapped, value.clone())),
+				for install in installs.iter().filter(|install| install.run() == q) {
+					let moved = match install {
+						Install::Value { slot, value, .. } => {
+							self.sibling_slot(*slot, r).map(|slot| Install::Value {
+								run: r,
+								slot,
+								value: value.clone(),
+							})
+						}
+						Install::Idle { .. } => Some(Install::Idle { run: r }),
+					};
+					match moved {
+						Some(moved) => plan.push(moved),
 						None => {
 							complete = false;
 							break;

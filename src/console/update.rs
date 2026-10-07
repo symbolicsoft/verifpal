@@ -19,33 +19,35 @@ pub struct UpdateCheck {
 	current: String,
 }
 
-pub fn update_check_start(version: &str) -> UpdateCheck {
-	let (sender, receiver) = mpsc::channel();
-	let current = version.to_string();
-	if !crate::console::terminal::stdout_is_terminal() {
-		return UpdateCheck { receiver, current };
+impl UpdateCheck {
+	pub fn start(version: &str) -> UpdateCheck {
+		let (sender, receiver) = mpsc::channel();
+		let current = version.to_string();
+		if !crate::console::terminal::stdout_is_terminal() {
+			return UpdateCheck { receiver, current };
+		}
+		let user_agent = format!("verifpal/{}", version);
+		let requested = current.clone();
+		thread::spawn(move || {
+			let Some(body) = fetch_tags(&user_agent) else {
+				return;
+			};
+			if let Some(newer) = newer_version(&body, &requested) {
+				let _ = sender.send(newer);
+			}
+		});
+		UpdateCheck { receiver, current }
 	}
-	let user_agent = format!("verifpal/{}", version);
-	let requested = current.clone();
-	thread::spawn(move || {
-		let Some(body) = update_fetch_tags(&user_agent) else {
+
+	pub fn report(&self) {
+		let Ok(newer) = self.receiver.try_recv() else {
 			return;
 		};
-		if let Some(newer) = update_newer_version(&body, &requested) {
-			let _ = sender.send(newer);
-		}
-	});
-	UpdateCheck { receiver, current }
+		alert(&newer, &self.current);
+	}
 }
 
-pub fn update_check_report(check: &UpdateCheck) {
-	let Ok(newer) = check.receiver.try_recv() else {
-		return;
-	};
-	update_alert(&newer, &check.current);
-}
-
-fn update_fetch_tags(user_agent: &str) -> Option<String> {
+fn fetch_tags(user_agent: &str) -> Option<String> {
 	let agent: ureq::Agent = ureq::Agent::config_builder()
 		.timeout_global(Some(REQUEST_TIMEOUT))
 		.user_agent(user_agent)
@@ -61,7 +63,7 @@ fn update_fetch_tags(user_agent: &str) -> Option<String> {
 		.ok()
 }
 
-fn update_alert(newer: &str, current: &str) {
+fn alert(newer: &str, current: &str) {
 	let message = format!(
 		"Verifpal {} is available; you have {}. Get it at https://verifpal.com/",
 		newer, current
@@ -78,28 +80,28 @@ fn update_alert(newer: &str, current: &str) {
 	eprintln!("  Update ! {}", message);
 }
 
-fn update_newer_version(body: &str, current: &str) -> Option<String> {
-	let current = update_parse_version(current)?;
+fn newer_version(body: &str, current: &str) -> Option<String> {
+	let current = parse_version(current)?;
 	let mut newest: Option<(Vec<u64>, String)> = None;
-	for name in update_tag_names(body) {
-		let Some(components) = update_parse_version(&name) else {
+	for name in tag_names(body) {
+		let Some(components) = parse_version(&name) else {
 			continue;
 		};
 		let best = newest.as_ref().map_or(&current, |(best, _)| best);
-		if update_version_is_newer(&components, best) {
-			newest = Some((components, update_version_display(&name).to_string()));
+		if version_is_newer(&components, best) {
+			newest = Some((components, version_display(&name).to_string()));
 		}
 	}
 	newest.map(|(_, name)| name)
 }
 
-fn update_version_display(name: &str) -> &str {
+fn version_display(name: &str) -> &str {
 	let trimmed = name.trim();
 	trimmed.strip_prefix('v').unwrap_or(trimmed)
 }
 
-fn update_parse_version(text: &str) -> Option<Vec<u64>> {
-	let digits = update_version_display(text);
+fn parse_version(text: &str) -> Option<Vec<u64>> {
+	let digits = version_display(text);
 	if digits.is_empty() {
 		return None;
 	}
@@ -110,7 +112,7 @@ fn update_parse_version(text: &str) -> Option<Vec<u64>> {
 	Some(components)
 }
 
-fn update_version_is_newer(candidate: &[u64], current: &[u64]) -> bool {
+fn version_is_newer(candidate: &[u64], current: &[u64]) -> bool {
 	for index in 0..candidate.len().max(current.len()) {
 		let left = candidate.get(index).copied().unwrap_or(0);
 		let right = current.get(index).copied().unwrap_or(0);
@@ -121,7 +123,7 @@ fn update_version_is_newer(candidate: &[u64], current: &[u64]) -> bool {
 	false
 }
 
-fn update_tag_names(body: &str) -> Vec<String> {
+fn tag_names(body: &str) -> Vec<String> {
 	let Ok(serde_json::Value::Array(tags)) = serde_json::from_str(body) else {
 		return Vec::new();
 	};
@@ -153,76 +155,73 @@ mod tests {
 ]"#;
 
 	#[test]
-	fn update_parses_a_tag_name_into_components() {
-		assert_eq!(update_parse_version("v1.0.0"), Some(vec![1, 0, 0]));
-		assert_eq!(update_parse_version("1.0.0"), Some(vec![1, 0, 0]));
-		assert_eq!(update_parse_version("  v0.80.1 "), Some(vec![0, 80, 1]));
-		assert_eq!(update_parse_version("2"), Some(vec![2]));
+	fn parses_a_tag_name_into_components() {
+		assert_eq!(parse_version("v1.0.0"), Some(vec![1, 0, 0]));
+		assert_eq!(parse_version("1.0.0"), Some(vec![1, 0, 0]));
+		assert_eq!(parse_version("  v0.80.1 "), Some(vec![0, 80, 1]));
+		assert_eq!(parse_version("2"), Some(vec![2]));
 	}
 
 	#[test]
-	fn update_refuses_anything_that_is_not_purely_numeric() {
-		assert_eq!(update_parse_version("v1.0.0-beta"), None);
-		assert_eq!(update_parse_version("v1.0.0rc1"), None);
-		assert_eq!(update_parse_version("release-1.0.0"), None);
-		assert_eq!(update_parse_version("v"), None);
-		assert_eq!(update_parse_version(""), None);
-		assert_eq!(update_parse_version("1..0"), None);
+	fn refuses_anything_that_is_not_purely_numeric() {
+		assert_eq!(parse_version("v1.0.0-beta"), None);
+		assert_eq!(parse_version("v1.0.0rc1"), None);
+		assert_eq!(parse_version("release-1.0.0"), None);
+		assert_eq!(parse_version("v"), None);
+		assert_eq!(parse_version(""), None);
+		assert_eq!(parse_version("1..0"), None);
 	}
 
 	#[test]
-	fn update_compares_versions_component_wise() {
-		assert!(update_version_is_newer(&[1, 0, 1], &[1, 0, 0]));
-		assert!(update_version_is_newer(&[1, 1, 0], &[1, 0, 9]));
-		assert!(update_version_is_newer(&[2, 0, 0], &[1, 99, 99]));
-		assert!(update_version_is_newer(&[1, 10, 0], &[1, 9, 0]));
-		assert!(!update_version_is_newer(&[1, 0, 0], &[1, 0, 0]));
-		assert!(!update_version_is_newer(&[1, 0, 0], &[1, 0, 1]));
-		assert!(!update_version_is_newer(&[1, 0], &[1, 0, 0]));
-		assert!(!update_version_is_newer(&[1, 0, 0], &[1, 0]));
+	fn compares_versions_component_wise() {
+		assert!(version_is_newer(&[1, 0, 1], &[1, 0, 0]));
+		assert!(version_is_newer(&[1, 1, 0], &[1, 0, 9]));
+		assert!(version_is_newer(&[2, 0, 0], &[1, 99, 99]));
+		assert!(version_is_newer(&[1, 10, 0], &[1, 9, 0]));
+		assert!(!version_is_newer(&[1, 0, 0], &[1, 0, 0]));
+		assert!(!version_is_newer(&[1, 0, 0], &[1, 0, 1]));
+		assert!(!version_is_newer(&[1, 0], &[1, 0, 0]));
+		assert!(!version_is_newer(&[1, 0, 0], &[1, 0]));
 	}
 
 	#[test]
-	fn update_reads_only_tag_names_out_of_the_response() {
-		assert_eq!(update_tag_names(TAGS_FIXTURE), vec!["v1.0.0", "v0.80.1"]);
-		assert!(update_tag_names("[]").is_empty());
-		assert!(update_tag_names("not json at all").is_empty());
-		assert!(update_tag_names("{\"name\"").is_empty());
-		assert!(update_tag_names("{\"name\":").is_empty());
-		assert!(update_tag_names("{\"name\": \"v2.0.0\"}").is_empty());
+	fn reads_only_tag_names_out_of_the_response() {
+		assert_eq!(tag_names(TAGS_FIXTURE), vec!["v1.0.0", "v0.80.1"]);
+		assert!(tag_names("[]").is_empty());
+		assert!(tag_names("not json at all").is_empty());
+		assert!(tag_names("{\"name\"").is_empty());
+		assert!(tag_names("{\"name\":").is_empty());
+		assert!(tag_names("{\"name\": \"v2.0.0\"}").is_empty());
 		assert_eq!(
-			update_tag_names("[{\"name\": 7}, {\"name\": \"v2.0.0\"}]"),
+			tag_names("[{\"name\": 7}, {\"name\": \"v2.0.0\"}]"),
 			vec!["v2.0.0"]
 		);
 		assert_eq!(
-			update_tag_names(r#"[{"commit":{"name":"v9.0.0"},"name":"v1.0.0"}]"#),
+			tag_names(r#"[{"commit":{"name":"v9.0.0"},"name":"v1.0.0"}]"#),
 			vec!["v1.0.0"]
 		);
 	}
 
 	#[test]
-	fn update_reports_only_a_strictly_newer_release() {
+	fn reports_only_a_strictly_newer_release() {
 		assert_eq!(
-			update_newer_version(TAGS_FIXTURE, "0.80.0"),
+			newer_version(TAGS_FIXTURE, "0.80.0"),
 			Some("1.0.0".to_string())
 		);
-		assert_eq!(update_newer_version(TAGS_FIXTURE, "1.0.0"), None);
-		assert_eq!(update_newer_version(TAGS_FIXTURE, "1.0.1"), None);
-		assert_eq!(update_newer_version(TAGS_FIXTURE, "2.0.0"), None);
-		assert_eq!(update_newer_version("[]", "1.0.0"), None);
+		assert_eq!(newer_version(TAGS_FIXTURE, "1.0.0"), None);
+		assert_eq!(newer_version(TAGS_FIXTURE, "1.0.1"), None);
+		assert_eq!(newer_version(TAGS_FIXTURE, "2.0.0"), None);
+		assert_eq!(newer_version("[]", "1.0.0"), None);
 	}
 
 	#[test]
-	fn update_ignores_prerelease_tags_and_takes_the_highest() {
+	fn ignores_prerelease_tags_and_takes_the_highest() {
 		let body = r#"[{"name": "v1.2.0-rc1"}, {"name": "v1.1.0"}, {"name": "v1.10.0"}, {"name": "nightly"}]"#;
-		assert_eq!(
-			update_newer_version(body, "1.0.0"),
-			Some("1.10.0".to_string())
-		);
+		assert_eq!(newer_version(body, "1.0.0"), Some("1.10.0".to_string()));
 	}
 
 	#[test]
-	fn update_reports_nothing_when_the_running_version_is_unparseable() {
-		assert_eq!(update_newer_version(TAGS_FIXTURE, "unknown"), None);
+	fn reports_nothing_when_the_running_version_is_unparseable() {
+		assert_eq!(newer_version(TAGS_FIXTURE, "unknown"), None);
 	}
 }

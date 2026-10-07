@@ -8,7 +8,6 @@ use super::{
 	Block, BracketComments, Comment, CommentStyle, Declaration, Expression, LineComments, Message,
 	Model, Qualifier, Query, QueryKind, QueryOption, QueryOptionKind, Scenario, VResult,
 };
-use crate::primitive::{primitive_name, primitive_threshold};
 use crate::term::{Constant, Primitive, Value, VariableId};
 
 pub fn pretty_print(model_file: &str) -> VResult<String> {
@@ -26,8 +25,8 @@ impl fmt::Display for Constant {
 
 impl fmt::Display for Primitive {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		write!(f, "{}", primitive_name(self.id))?;
-		let threshold = primitive_threshold(self.id).map(|_| self.threshold);
+		write!(f, "{}", crate::primitive::name(self.id))?;
+		let threshold = crate::primitive::threshold(self.id).map(|_| self.threshold);
 		if threshold.is_some() || !self.capabilities.is_empty() {
 			let mut separator = "[";
 			if let Some(t) = threshold {

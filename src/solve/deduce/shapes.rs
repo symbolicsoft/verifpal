@@ -4,9 +4,7 @@
 use std::sync::Arc;
 
 use super::Deducer;
-use crate::primitive::{
-	RewriteRule, primitive_def, primitive_get, primitive_projects, rewrite_rule,
-};
+use crate::primitive::{RewriteRule, rewrite_rule};
 use crate::solve::matching::unifiers;
 use crate::solve::symbolic::SymbolicState;
 use crate::solve::vars::{Substitution, apply, as_var, contains_var};
@@ -19,7 +17,7 @@ pub(crate) fn rewrite_shapes_from(
 	mut fill: impl FnMut(usize) -> Value,
 	leave_free: bool,
 ) -> Vec<Value> {
-	let Ok(inner_spec) = primitive_get(rule.id) else {
+	let Ok(inner_spec) = crate::primitive::spec(rule.id) else {
 		return Vec::new();
 	};
 	let Some(&arity) = inner_spec.arity.first() else {
@@ -108,10 +106,10 @@ impl<'a> Deducer<'a> {
 	}
 
 	pub(super) fn tuple_shapes(&self, p: &Primitive, at_output: Option<&Value>) -> Vec<Value> {
-		let Some(tuple) = primitive_projects(p.id) else {
+		let Some(tuple) = crate::primitive::projects(p.id) else {
 			return Vec::new();
 		};
-		let Ok(tuple_spec) = primitive_def(tuple) else {
+		let Ok(tuple_spec) = crate::primitive::definition(tuple) else {
 			return Vec::new();
 		};
 		let mut arities: Vec<usize> = tuple_spec

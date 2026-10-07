@@ -3,24 +3,23 @@
 
 use std::sync::Arc;
 
-use crate::primitive::{
-	Capability, CapabilityIndex, primitive_core_reveals_args, recompose_rule, reuse_rule,
-};
+use super::program::RunIdx;
+use crate::primitive::{Capability, CapabilityIndex, recompose_rule, reuse_rule};
+use crate::protocol::SlotIdx;
 use crate::term::hashing::TermSet;
 use crate::term::{Primitive, Value};
 use crate::theory::attacker::next_chain;
 use crate::theory::{
-	AttackerState, DerivationRecord, Forged, ReconstructResult, SlotIdx, can_break_weak,
-	can_decompose, can_recompose, can_reconstruct_primitive, can_rewrite, obtainable, reused_pair,
-	revealed,
+	AttackerState, DerivationRecord, can_break_weak, can_decompose, can_recompose,
+	can_reconstruct_primitive, can_rewrite, obtainable, reused_pair, revealed,
 };
 use crate::util::{IdMap, IdSet};
 
 #[derive(Clone, Debug)]
 pub(crate) enum Origin {
 	Initial,
-	Wire { run: usize, slot: usize },
-	Leak { run: usize, slot: usize },
+	Wire { run: RunIdx, slot: SlotIdx },
+	Leak { run: RunIdx, slot: SlotIdx },
 	Derived(DerivationRecord),
 }
 
@@ -28,12 +27,8 @@ impl Origin {
 	fn record(&self) -> DerivationRecord {
 		match self {
 			Origin::Initial => DerivationRecord::Initial,
-			Origin::Wire { slot, .. } => DerivationRecord::Obtained {
-				slot: SlotIdx(*slot),
-			},
-			Origin::Leak { slot, .. } => DerivationRecord::Leaked {
-				slot: SlotIdx(*slot),
-			},
+			Origin::Wire { .. } => DerivationRecord::Obtained,
+			Origin::Leak { .. } => DerivationRecord::Leaked,
 			Origin::Derived(record) => record.clone(),
 		}
 	}
@@ -170,7 +165,10 @@ impl Knowledge {
 	pub(crate) fn learn(&mut self, v: &Value, origin: Origin) -> bool {
 		if let Some(at) = self.state.knows(v) {
 			if !matches!(origin, Origin::Derived(_))
-				&& !self.state.derivations[at.get()].ingredients().is_empty()
+				&& self.state.derivations[at.get()]
+					.ingredients()
+					.next()
+					.is_some()
 			{
 				let state = Arc::make_mut(&mut self.state);
 				Arc::make_mut(&mut state.derivations)[at.get()] = origin.record();
@@ -246,24 +244,28 @@ impl Knowledge {
 			return;
 		}
 		loop {
-			let (learned, pools, settled) = {
+			let Found {
+				learned,
+				grown,
+				settling,
+				..
+			} = {
 				let snapshot = Arc::clone(&self.state);
 				let _memo = crate::theory::DeductionMemo::scoped(capabilities, &snapshot);
-				pass(
+				Pass {
 					capabilities,
-					&snapshot,
-					&self.candidates,
-					&self.built,
-					&self.pools,
-					&self.settled,
-				)
+					attacker: &snapshot,
+					built: &self.built,
+					pools: &self.pools,
+				}
+				.run(&self.candidates, &self.settled)
 			};
-			if !pools.is_empty() {
-				Arc::make_mut(&mut self.pools).extend(pools);
+			if !grown.is_empty() {
+				Arc::make_mut(&mut self.pools).extend(grown);
 			}
-			if !settled.is_empty() {
+			if !settling.is_empty() {
 				let flags = Arc::make_mut(&mut self.settled);
-				for (at, bits) in settled {
+				for (at, bits) in settling {
 					if flags.len() <= at {
 						flags.resize(at + 1, 0);
 					}
@@ -303,65 +305,83 @@ impl Knowledge {
 
 type Pools = Vec<((usize, usize), usize)>;
 
-type Pass = (Vec<(Value, DerivationRecord)>, Pools, Vec<(usize, u8)>);
+struct Pass<'s> {
+	capabilities: &'s CapabilityIndex,
+	attacker: &'s AttackerState,
+	built: &'s TermSet,
+	pools: &'s IdMap<(usize, usize), usize>,
+}
 
-fn pass(
-	capabilities: &CapabilityIndex,
-	attacker: &AttackerState,
-	candidates: &Candidates,
-	built: &TermSet,
-	pools: &IdMap<(usize, usize), usize>,
-	settled: &[u8],
-) -> Pass {
-	let mut out: Vec<(Value, DerivationRecord)> = Vec::new();
-	let mut grown: Pools = Vec::new();
-	let mut settling: Vec<(usize, u8)> = Vec::new();
-	let mut seen = TermSet::default();
-	let mut push = |out: &mut Vec<(Value, DerivationRecord)>, v: Value, d: DerivationRecord| {
-		if attacker.knows(&v).is_none() && seen.insert(v.clone()) {
-			out.push((v, d));
+#[derive(Default)]
+struct Found {
+	learned: Vec<(Value, DerivationRecord)>,
+	grown: Pools,
+	settling: Vec<(usize, u8)>,
+	seen: TermSet,
+}
+
+impl Found {
+	fn push(&mut self, attacker: &AttackerState, v: Value, d: DerivationRecord) {
+		if attacker.knows(&v).is_none() && self.seen.insert(v.clone()) {
+			self.learned.push((v, d));
 		}
-	};
-	for (at, known) in attacker.known.iter().enumerate() {
+	}
+}
+
+fn settled_now(p: &Primitive, attacker: &AttackerState) -> u8 {
+	let held = |values: &[Value]| values.iter().all(|v| attacker.knows(v).is_some());
+	let mut now = 0;
+	let reveals = crate::theory::decomposition_reveals(p);
+	if reveals.as_deref().is_none_or(held) {
+		now |= DECOMPOSED;
+	}
+	if crate::primitive::spec(p.id).map_or(true, |spec| {
+		held(&crate::theory::revealed(p, &spec.weak_reveals))
+	}) {
+		now |= BROKEN;
+	}
+	if !crate::primitive::core_reveals_arguments(p.id) || held(&p.arguments) {
+		now |= FRAGMENTED;
+	}
+	if crate::primitive::rewriting(p.id).next().is_none() {
+		now |= UNREWRITTEN;
+	}
+	now
+}
+
+impl Pass<'_> {
+	fn run(&self, candidates: &Candidates, settled: &[u8]) -> Found {
+		let mut found = Found::default();
+		for (at, known) in self.attacker.known.iter().enumerate() {
+			let flags = settled.get(at).copied().unwrap_or(0);
+			if flags != SETTLED {
+				self.held(&mut found, at, known, flags);
+			}
+		}
+		self.reconstructions(&mut found, candidates);
+		self.recompositions(&mut found, candidates);
+		self.forward_rewrites(&mut found, candidates);
+		found
+	}
+
+	fn held(&self, found: &mut Found, at: usize, known: &Value, flags: u8) {
+		let (capabilities, attacker) = (self.capabilities, self.attacker);
 		let Value::Primitive(p) = known else {
-			continue;
+			return;
 		};
-		let flags = settled.get(at).copied().unwrap_or(0);
-		if flags == SETTLED {
-			continue;
-		}
-		let held = |values: &[Value]| values.iter().all(|v| attacker.knows(v).is_some());
-		let mut now = 0;
-		let reveals = crate::theory::decomposition_reveals(p);
-		if reveals.as_deref().is_none_or(held) {
-			now |= DECOMPOSED;
-		}
-		if crate::primitive::primitive_get(p.id).map_or(true, |spec| {
-			held(&crate::theory::revealed(p, &spec.weak_reveals))
-		}) {
-			now |= BROKEN;
-		}
-		if !primitive_core_reveals_args(p.id) || held(&p.arguments) {
-			now |= FRAGMENTED;
-		}
-		if crate::primitive::primitives_rewriting(p.id)
-			.next()
-			.is_none()
-		{
-			now |= UNREWRITTEN;
-		}
+		let now = settled_now(p, attacker);
 		if now & !flags != 0 {
-			settling.push((at, now));
+			found.settling.push((at, now));
 		}
 		if flags & DECOMPOSED == 0
 			&& now & DECOMPOSED == 0
 			&& let Some(result) = can_decompose(p, capabilities, attacker)
 			&& !forged(at, attacker)
-			&& !minted(p, known, capabilities, attacker, built)
+			&& !minted(p, known, capabilities, attacker, self.built)
 		{
 			for revealed in result.revealed {
-				push(
-					&mut out,
+				found.push(
+					attacker,
 					revealed,
 					DerivationRecord::Decomposed {
 						of: known.clone(),
@@ -375,8 +395,8 @@ fn pass(
 			&& let Some(revealed) = can_break_weak(p, capabilities, attacker)
 		{
 			for r in revealed {
-				push(
-					&mut out,
+				found.push(
+					attacker,
 					r,
 					DerivationRecord::Broken {
 						of: known.clone(),
@@ -387,92 +407,89 @@ fn pass(
 			}
 		}
 		if flags & UNREWRITTEN == 0 {
-			for (v, d) in rewrite_build(known, p, capabilities, attacker, at, pools, &mut grown) {
-				push(&mut out, v, d);
+			let rewrites = rewrite_build(
+				known,
+				p,
+				capabilities,
+				attacker,
+				at,
+				self.pools,
+				&mut found.grown,
+			);
+			for (v, d) in rewrites {
+				found.push(attacker, v, d);
 			}
 		}
 		if flags & FRAGMENTED == 0 && now & FRAGMENTED == 0 {
 			for arg in &p.arguments {
-				push(
-					&mut out,
+				found.push(
+					attacker,
 					arg.clone(),
 					DerivationRecord::Fragment { of: known.clone() },
 				);
 			}
 		}
 	}
-	for value in &candidates.recon {
-		let Value::Primitive(p) = value else {
-			continue;
-		};
-		if attacker.knows(value).is_some() {
-			continue;
-		}
-		let Some(built) = can_reconstruct_primitive(p, capabilities, attacker) else {
-			continue;
-		};
-		push(&mut out, value.clone(), reconstruction(built));
-	}
-	for value in &candidates.splits {
-		let Value::Primitive(p) = value else {
-			continue;
-		};
-		if let Some(rule) = recompose_rule(p.id)
-			&& p.arguments
-				.get(rule.reveal)
-				.is_some_and(|secret| attacker.knows(secret).is_some())
-		{
-			continue;
-		}
-		if let Some(result) = can_recompose(p, attacker) {
-			push(
-				&mut out,
-				result.revealed,
-				DerivationRecord::Recomposed {
-					of: value.clone(),
-					using: result.used,
-				},
-			);
-		}
-	}
-	for (pre, reduced) in &candidates.forward {
-		if attacker.knows(reduced).is_some() {
-			continue;
-		}
-		let Value::Primitive(p) = pre else {
-			continue;
-		};
-		if p.arguments
-			.iter()
-			.all(|arg| obtainable(arg, capabilities, attacker))
-		{
-			push(
-				&mut out,
-				reduced.clone(),
-				DerivationRecord::Rewritten {
-					of: pre.clone(),
-					using: p.arguments.clone(),
-					built: false,
-				},
-			);
-		}
-	}
-	(out, grown, settling)
-}
 
-pub(crate) fn reconstruction(built: ReconstructResult) -> DerivationRecord {
-	match built.forged {
-		Some(Forged::Assumption { capability, of }) => DerivationRecord::Broken {
-			of,
-			capability,
-			using: built.from,
-		},
-		Some(Forged::Reuse(with)) => DerivationRecord::ReusedForge {
-			with,
-			using: built.from,
-		},
-		None if built.combined => DerivationRecord::Combined { from: built.from },
-		None => DerivationRecord::Reconstructed { from: built.from },
+	fn reconstructions(&self, found: &mut Found, candidates: &Candidates) {
+		for value in &candidates.recon {
+			let Value::Primitive(p) = value else {
+				continue;
+			};
+			if self.attacker.knows(value).is_some() {
+				continue;
+			}
+			let Some(built) = can_reconstruct_primitive(p, self.capabilities, self.attacker) else {
+				continue;
+			};
+			found.push(self.attacker, value.clone(), built);
+		}
+	}
+
+	fn recompositions(&self, found: &mut Found, candidates: &Candidates) {
+		for value in &candidates.splits {
+			let Value::Primitive(p) = value else {
+				continue;
+			};
+			if let Some(rule) = recompose_rule(p.id)
+				&& p.arguments
+					.get(rule.reveal)
+					.is_some_and(|secret| self.attacker.knows(secret).is_some())
+			{
+				continue;
+			}
+			if let Some(result) = can_recompose(p, self.attacker) {
+				found.push(
+					self.attacker,
+					result.revealed,
+					DerivationRecord::Recomposed { using: result.used },
+				);
+			}
+		}
+	}
+
+	fn forward_rewrites(&self, found: &mut Found, candidates: &Candidates) {
+		for (pre, reduced) in &candidates.forward {
+			if self.attacker.knows(reduced).is_some() {
+				continue;
+			}
+			let Value::Primitive(p) = pre else {
+				continue;
+			};
+			if p.arguments
+				.iter()
+				.all(|arg| obtainable(arg, self.capabilities, self.attacker))
+			{
+				found.push(
+					self.attacker,
+					reduced.clone(),
+					DerivationRecord::Rewritten {
+						of: pre.clone(),
+						using: p.arguments.clone(),
+					},
+				);
+			}
+		}
 	}
 }
 
@@ -486,7 +503,7 @@ fn rewrite_build(
 	grown: &mut Pools,
 ) -> Vec<(Value, DerivationRecord)> {
 	let mut out = Vec::new();
-	let mut rewriting = crate::primitive::primitives_rewriting(inner.id).peekable();
+	let mut rewriting = crate::primitive::rewriting(inner.id).peekable();
 	if rewriting.peek().is_none() || can_decompose(inner, capabilities, attacker).is_some() {
 		return out;
 	}
@@ -552,7 +569,6 @@ fn rewrite_build(
 							DerivationRecord::Rewritten {
 								of: built.clone(),
 								using: p.arguments.clone(),
-								built: true,
 							},
 						));
 					}
@@ -597,7 +613,7 @@ fn minted(
 	built: &TermSet,
 ) -> bool {
 	!built.contains(held)
-		&& can_reconstruct_primitive(p, capabilities, attacker).is_some_and(|b| b.forged.is_some())
+		&& can_reconstruct_primitive(p, capabilities, attacker).is_some_and(|b| b.forged())
 }
 
 fn reuse_pairs(
@@ -678,7 +694,7 @@ fn reassembled(value: &Value, inputs: &TermSet, seen: &mut IdSet<usize>, out: &m
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::engine::exec::{Context, Installs, execute};
+	use crate::engine::exec::{Context, Install, Installs, execute};
 	use crate::engine::program::Program;
 
 	fn share_disclosed(src: &str, forge: bool) -> bool {
@@ -711,15 +727,17 @@ mod tests {
 			);
 			let run = program
 				.runs
-				.iter()
 				.position(|r| r.name == "Coordinator")
 				.expect("run");
 			let slot = km
 				.slots
-				.iter()
 				.position(|s| s.constant.name.as_ref() == "kmf_p")
 				.expect("declared");
-			vec![(run, slot, partial)]
+			vec![Install::Value {
+				run,
+				slot,
+				value: partial,
+			}]
 		} else {
 			Vec::new()
 		};
@@ -773,17 +791,10 @@ mod tests {
 			let cx = Context::new(&program, &km);
 			let slot = |name: &str| {
 				km.slots
-					.iter()
 					.position(|s| s.constant.name.as_ref() == name)
 					.expect("declared")
 			};
-			let run = |name: &str| {
-				program
-					.runs
-					.iter()
-					.position(|r| r.name == name)
-					.expect("run")
-			};
+			let run = |name: &str| program.runs.position(|r| r.name == name).expect("run");
 			let share =
 				crate::theory::reduce_once(&crate::protocol::trace::resolve_trace_constant(
 					&km.slots[slot("share")].constant,
@@ -792,12 +803,20 @@ mod tests {
 			let nil = crate::term::value_nil();
 			let bob = run("Bob");
 			let installs: Installs = vec![
-				(bob, slot("message"), nil.clone()),
-				(
-					bob,
-					slot("sig"),
-					Value::primitive(crate::primitive::PRIM_SIGN, vec![share.clone(), nil], 0),
-				),
+				Install::Value {
+					run: bob,
+					slot: slot("message"),
+					value: nil.clone(),
+				},
+				Install::Value {
+					run: bob,
+					slot: slot("sig"),
+					value: Value::primitive(
+						crate::primitive::PRIM_SIGN,
+						vec![share.clone(), nil],
+						0,
+					),
+				},
 			];
 			let ex = execute(&cx, &installs);
 			assert!(
@@ -821,17 +840,16 @@ mod tests {
 				ex.stuck.is_empty(),
 				"once Alice leaks her genuine partial, its share is derivable at Bob's receive"
 			);
-			let position = |r: usize, event: crate::engine::program::Event| {
+			let position = |r: RunIdx, event: crate::engine::program::Event| {
 				ex.order
 					.iter()
-					.position(|&(at, step, _)| {
-						at == r && program.runs[r].steps[step].event == event
+					.position(|taken| {
+						taken.run == r && program.runs[r].steps[taken.step].event == event
 					})
 					.expect("executed")
 			};
 			let signature = program
 				.deliveries
-				.iter()
 				.position(|d| d.recipient == bob && d.slots.iter().any(|&(s, _)| s == slot("sig")))
 				.expect("delivered");
 			assert!(

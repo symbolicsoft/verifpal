@@ -62,10 +62,7 @@ pub(super) fn aligned_held_free(
 		let Value::Primitive(h) = held else {
 			continue;
 		};
-		if crate::primitive::primitive_is_core(h.id)
-			|| h.arguments.len() < 2
-			|| !protocol.contains(held)
-		{
+		if crate::primitive::is_core(h.id) || h.arguments.len() < 2 || !protocol.contains(held) {
 			continue;
 		}
 		if let Some(shape) = held_shape(h) {
@@ -216,14 +213,10 @@ fn proposed_terms<'h, 's>(
 	sym: &'s SymbolicState,
 	proposal: &'s Substitution,
 ) -> impl Iterator<Item = (Value, &'h Value)> {
-	sym.var_slots
-		.iter()
+	sym.variables()
 		.zip(honest)
-		.filter(|(slot, _)| proposal.contains_key(&vars::attacker_var_id(**slot)))
-		.filter_map(|(&slot, honest)| {
-			let term = sym.var_terms.get(slot)?.as_ref()?;
-			Some((vars::apply(term, proposal), honest))
-		})
+		.filter(|((slot, _), _)| proposal.contains_key(&vars::attacker_var_id(*slot)))
+		.map(|((_, term), honest)| (vars::apply(term, proposal), honest))
 }
 
 fn free_positions<'a>(
@@ -282,9 +275,8 @@ pub(super) fn aligned_free_positions<'a>(
 /// besides, so resolving the whole trace inside that loop is the difference
 /// between a constant factor and a multiplicative one.
 pub(crate) fn honest_slot_terms(km: &ProtocolTrace, sym: &SymbolicState) -> Vec<Value> {
-	sym.var_slots
-		.iter()
-		.map(|&slot| match km.slots.get(slot) {
+	sym.var_slots()
+		.map(|slot| match km.slots.get(slot) {
 			Some(trace_slot) => resolve_trace_constant(&trace_slot.constant, km),
 			None => crate::term::value_nil(),
 		})

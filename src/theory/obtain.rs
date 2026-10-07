@@ -3,15 +3,14 @@
 
 use std::sync::Arc;
 
-use super::attacker::{AttackerState, Forged, KnownIdx, RecomposeResult, ReconstructResult};
+use super::attacker::{AttackerState, DerivationRecord, KnownIdx, RecomposeResult};
 use super::decompose::can_decompose;
 use super::memo::{DeductionMemo, with_memo};
 use super::reuse::reused;
 use super::rewrite::{can_rewrite, combine_binding_values, combine_bindings_hold};
 use crate::primitive::{
 	Capability, CapabilityIndex, CombineRule, MAX_SHARES, Reveal, combines_into,
-	commutativity_swap, primitive_core_get, primitive_get, primitive_is_core, recompose_rule,
-	reuse_rule,
+	commutativity_swap, recompose_rule, reuse_rule,
 };
 use crate::term::equivalence::{equivalent_primitives, structurally_identical};
 use crate::term::{Primitive, Value};
@@ -64,9 +63,9 @@ fn construction_inputs(
 	attacker: &AttackerState,
 ) -> Option<Vec<Value>> {
 	if let Some(built) = can_reconstruct_primitive(p, capabilities, attacker) {
-		return Some(built.ingredients().cloned().collect());
+		return Some(built.recipe().cloned().collect());
 	}
-	let Ok(spec) = primitive_get(p.id) else {
+	let Ok(spec) = crate::primitive::spec(p.id) else {
 		return None;
 	};
 	let projects_output = spec.decompose.as_ref().is_some_and(|rule| {
@@ -88,20 +87,6 @@ fn construction_inputs(
 			inputs.insert(0, projected);
 			Some(inputs)
 		})
-}
-
-impl ReconstructResult {
-	pub(crate) fn ingredients(&self) -> impl Iterator<Item = &Value> {
-		let source: &[Value] = match &self.forged {
-			Some(Forged::Reuse(pair)) => pair,
-			Some(Forged::Assumption {
-				capability: Capability::Malleable,
-				of,
-			}) => std::slice::from_ref(of),
-			_ => &[],
-		};
-		self.from.iter().chain(source)
-	}
 }
 
 pub(crate) struct KnowledgeInputs<'a> {
@@ -203,7 +188,7 @@ pub(crate) fn can_reconstruct_primitive(
 	p: &Arc<Primitive>,
 	capabilities: &CapabilityIndex,
 	attacker: &AttackerState,
-) -> Option<ReconstructResult> {
+) -> Option<DerivationRecord> {
 	can_reconstruct_primitive_directly(p, capabilities, attacker).or_else(|| {
 		let Value::Primitive(swapped) =
 			crate::term::hashing::hashcons(&Value::Primitive(Arc::new(commutativity_swap(p)?)))
@@ -218,26 +203,24 @@ fn can_reconstruct_primitive_directly(
 	p: &Arc<Primitive>,
 	capabilities: &CapabilityIndex,
 	attacker: &AttackerState,
-) -> Option<ReconstructResult> {
+) -> Option<DerivationRecord> {
 	let (rewritten, rewrite_value) = can_rewrite(p);
 	if !rewritten {
 		let Value::Primitive(failed) = &rewrite_value else {
 			return None;
 		};
-		return (!primitive_is_core(p.id)
+		return (!crate::primitive::is_core(p.id)
 			&& !p.instance_check
 			&& failed
 				.arguments
 				.iter()
 				.all(|a| obtainable(a, capabilities, attacker)))
-		.then(|| ReconstructResult {
+		.then(|| DerivationRecord::Reconstructed {
 			from: failed.arguments.clone(),
-			forged: None,
-			combined: false,
 		});
 	}
-	if primitive_is_core(p.id)
-		&& primitive_core_get(p.id).is_ok_and(|s| s.definition_check)
+	if crate::primitive::is_core(p.id)
+		&& crate::primitive::core_spec(p.id).is_ok_and(|s| s.definition_check)
 		&& rewrite_value.equivalent(&Value::Primitive(Arc::clone(p)), true)
 	{
 		return None;
@@ -269,24 +252,16 @@ fn can_reconstruct_primitive_directly(
 			return Some(reshaped);
 		}
 		let from = combinable(rewritten_prim, capabilities, attacker)?;
-		return Some(ReconstructResult {
-			from,
-			forged: None,
-			combined: true,
-		});
+		return Some(DerivationRecord::Combined { from });
 	}
-	let forged = match (skipped, reused) {
-		(0, _) => None,
-		(_, Some(pair)) => Some(Forged::Reuse(pair)),
-		(_, None) => Some(Forged::Assumption {
-			capability: Capability::Forgeable,
+	Some(match (skipped, reused) {
+		(0, _) => DerivationRecord::Reconstructed { from: has },
+		(_, Some(with)) => DerivationRecord::ReusedForge { with, using: has },
+		(_, None) => DerivationRecord::Broken {
 			of: rewrite_value.clone(),
-		}),
-	};
-	Some(ReconstructResult {
-		from: has,
-		forged,
-		combined: false,
+			capability: Capability::Forgeable,
+			using: has,
+		},
 	})
 }
 
@@ -294,7 +269,7 @@ fn can_reshape(
 	p: &Primitive,
 	capabilities: &CapabilityIndex,
 	attacker: &AttackerState,
-) -> Option<ReconstructResult> {
+) -> Option<DerivationRecord> {
 	let (of, vary) = malleable_source(p, capabilities, attacker)?;
 	let from: Vec<Value> = vary
 		.iter()
@@ -303,13 +278,10 @@ fn can_reshape(
 	if !from.iter().all(|v| obtainable(v, capabilities, attacker)) {
 		return None;
 	}
-	Some(ReconstructResult {
-		from,
-		forged: Some(Forged::Assumption {
-			capability: Capability::Malleable,
-			of,
-		}),
-		combined: false,
+	Some(DerivationRecord::Broken {
+		of,
+		capability: Capability::Malleable,
+		using: from,
 	})
 }
 
@@ -321,7 +293,7 @@ fn malleable_source(
 	if capabilities.is_empty() {
 		return None;
 	}
-	let vary = &primitive_get(p.id).ok()?.malleable_vary;
+	let vary = &crate::primitive::spec(p.id).ok()?.malleable_vary;
 	if vary.is_empty() {
 		return None;
 	}

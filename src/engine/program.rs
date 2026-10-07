@@ -1,18 +1,29 @@
 /* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
  * SPDX-License-Identifier: GPL-3.0-only */
 
-use crate::protocol::ProtocolTrace;
+use crate::protocol::{ProtocolTrace, SlotIdx};
 use crate::syntax::{Block, Declaration, Model, PrincipalId};
 use crate::term::Value;
 use crate::util::IdMap;
+use crate::util::index::{IndexVec, index_type};
+
+index_type!(
+	pub(crate) struct RunIdx;
+);
+index_type!(
+	pub(crate) struct StepIdx;
+);
+index_type!(
+	pub(crate) struct DeliveryIdx;
+);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Event {
-	Hold(usize),
-	Assign(usize),
-	Leak(usize),
-	Send(usize),
-	Recv(usize),
+	Hold(SlotIdx),
+	Assign(SlotIdx),
+	Leak(SlotIdx),
+	Send(DeliveryIdx),
+	Recv(DeliveryIdx),
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -23,23 +34,25 @@ pub(crate) struct Step {
 
 #[derive(Clone, Debug)]
 pub(crate) struct Delivery {
-	pub(crate) sender: usize,
-	pub(crate) recipient: usize,
-	pub(crate) slots: Vec<(usize, bool)>,
+	pub(crate) sender: RunIdx,
+	pub(crate) recipient: RunIdx,
+	pub(crate) slots: Vec<(SlotIdx, bool)>,
 }
 
 #[derive(Clone, Debug)]
 pub(crate) struct Run {
 	pub(crate) id: PrincipalId,
 	pub(crate) name: String,
-	pub(crate) steps: Vec<Step>,
-	pub(crate) step_of_slot: IdMap<usize, usize>,
+	pub(crate) steps: IndexVec<StepIdx, Step>,
+	pub(crate) step_of_slot: IdMap<SlotIdx, StepIdx>,
 }
 
 impl Run {
-	fn push(&mut self, event: Event, phase: i32, gives: impl IntoIterator<Item = usize>) {
+	fn push(&mut self, event: Event, phase: i32, gives: impl IntoIterator<Item = SlotIdx>) {
 		for slot in gives {
-			self.step_of_slot.entry(slot).or_insert(self.steps.len());
+			self.step_of_slot
+				.entry(slot)
+				.or_insert(self.steps.next_index());
 		}
 		self.steps.push(Step { event, phase });
 	}
@@ -47,27 +60,27 @@ impl Run {
 
 #[derive(Clone, Debug)]
 pub(crate) struct Program {
-	pub(crate) runs: Vec<Run>,
-	run_of: IdMap<PrincipalId, usize>,
-	pub(crate) deliveries: Vec<Delivery>,
+	pub(crate) runs: IndexVec<RunIdx, Run>,
+	run_of: IdMap<PrincipalId, RunIdx>,
+	pub(crate) deliveries: IndexVec<DeliveryIdx, Delivery>,
 }
 
 impl Program {
 	pub(crate) fn of(m: &Model, km: &ProtocolTrace) -> Program {
-		let mut runs: Vec<Run> = km
+		let mut runs: IndexVec<RunIdx, Run> = km
 			.principal_ids
 			.iter()
 			.zip(km.principals.iter())
 			.map(|(&id, name)| Run {
 				id,
 				name: name.clone(),
-				steps: Vec::new(),
+				steps: IndexVec::new(),
 				step_of_slot: IdMap::default(),
 			})
 			.collect();
-		let run_of: IdMap<PrincipalId, usize> =
-			runs.iter().enumerate().map(|(i, r)| (r.id, i)).collect();
-		let mut deliveries = Vec::new();
+		let run_of: IdMap<PrincipalId, RunIdx> =
+			runs.iter_enumerated().map(|(i, r)| (r.id, i)).collect();
+		let mut deliveries = IndexVec::new();
 		let mut phase = 0i32;
 		for block in &m.blocks {
 			match block {
@@ -94,12 +107,12 @@ impl Program {
 					else {
 						continue;
 					};
-					let slots: Vec<(usize, bool)> = msg
+					let slots: Vec<(SlotIdx, bool)> = msg
 						.constants
 						.iter()
 						.filter_map(|c| km.index_of(c).map(|slot| (slot, c.guard)))
 						.collect();
-					let d = deliveries.len();
+					let d = deliveries.next_index();
 					runs[sender].push(Event::Send(d), phase, None);
 					runs[recipient].push(
 						Event::Recv(d),
@@ -126,13 +139,12 @@ impl Program {
 
 	pub(crate) fn sends<'a>(
 		&'a self,
-		sent: &'a [Option<Vec<Value>>],
-	) -> impl Iterator<Item = (usize, &'a Delivery, usize, &'a Value)> + Clone + 'a {
+		sent: &'a IndexVec<DeliveryIdx, Option<Vec<Value>>>,
+	) -> impl Iterator<Item = (DeliveryIdx, &'a Delivery, SlotIdx, &'a Value)> + Clone + 'a {
 		self.deliveries
-			.iter()
+			.iter_enumerated()
 			.zip(sent)
-			.enumerate()
-			.filter_map(|(d, (delivery, sent))| Some((d, delivery, sent.as_ref()?)))
+			.filter_map(|((d, delivery), sent)| Some((d, delivery, sent.as_ref()?)))
 			.flat_map(|(d, delivery, sent)| {
 				delivery
 					.slots
@@ -142,11 +154,11 @@ impl Program {
 			})
 	}
 
-	pub(crate) fn run_index(&self, id: PrincipalId) -> Option<usize> {
+	pub(crate) fn run_index(&self, id: PrincipalId) -> Option<RunIdx> {
 		self.run_of.get(&id).copied()
 	}
 
-	pub(crate) fn phase_of(&self, id: PrincipalId, slot: usize) -> i32 {
+	pub(crate) fn phase_of(&self, id: PrincipalId, slot: SlotIdx) -> i32 {
 		self.run_index(id)
 			.and_then(|r| {
 				let run = &self.runs[r];

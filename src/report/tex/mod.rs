@@ -561,7 +561,6 @@ fn traces(a: &Analysis, model: &ModelReport, slug: &str, names: &Names) -> Vec<C
 					q.steps.iter().map(|step| step_ctx(step, names)).collect(),
 				)
 				.list("preconditions", prose_lines(&q.preconditions, names))
-				.list("notes", prose_lines(&q.notes, names))
 		})
 		.collect()
 }

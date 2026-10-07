@@ -2,11 +2,13 @@
  * SPDX-License-Identifier: GPL-3.0-only */
 
 use super::*;
+use crate::protocol::SlotIdx;
+use crate::util::index::Idx;
 
 #[test]
 fn solver_variables_are_not_admissible_messages() {
 	for variable in [
-		crate::solve::vars::attacker_var(0),
+		crate::solve::vars::attacker_var(SlotIdx::new(0)),
 		crate::solve::vars::free_var(0),
 	] {
 		assert!(!admissible(&variable));
@@ -34,26 +36,26 @@ fn admissibility_visits_shared_terms_once() {
 
 #[test]
 fn pubkey_and_dh_kex_resolve_by_name() {
-	assert!(primitive_get_enum("PUBKEY").is_ok());
-	assert!(primitive_get_enum("DH_KEX").is_ok());
+	assert!(id_of("PUBKEY").is_ok());
+	assert!(id_of("DH_KEX").is_ok());
 }
 
 #[test]
 fn identifying_positions_table() {
 	assert_eq!(
-		primitive_get(PRIM_SIGNVERIF).unwrap().identifying_positions,
+		super::spec(PRIM_SIGNVERIF).unwrap().identifying_positions,
 		vec![0]
 	);
 	assert_eq!(
-		primitive_get(PRIM_AEAD_DEC).unwrap().identifying_positions,
+		super::spec(PRIM_AEAD_DEC).unwrap().identifying_positions,
 		vec![0]
 	);
 	assert_eq!(
-		primitive_get(PRIM_KEM_DECAP).unwrap().identifying_positions,
+		super::spec(PRIM_KEM_DECAP).unwrap().identifying_positions,
 		vec![0]
 	);
 	assert!(
-		primitive_get(PRIM_RINGSIGNVERIF)
+		super::spec(PRIM_RINGSIGNVERIF)
 			.unwrap()
 			.identifying_positions
 			.is_empty()
@@ -62,84 +64,80 @@ fn identifying_positions_table() {
 
 #[test]
 fn pubkey_is_the_key_derivation_constructor() {
-	assert!(primitive_is_key_derivation(
-		primitive_get_enum("PUBKEY").unwrap()
-	));
-	assert!(!primitive_is_key_derivation(
-		primitive_get_enum("DH_KEX").unwrap()
-	));
-	assert!(!primitive_is_key_derivation(PRIM_HASH));
+	assert!(is_key_derivation(id_of("PUBKEY").unwrap()));
+	assert!(!is_key_derivation(id_of("DH_KEX").unwrap()));
+	assert!(!is_key_derivation(PRIM_HASH));
 }
 
 #[test]
 fn neither_new_primitive_may_be_checked() {
 	for name in ["PUBKEY", "DH_KEX"] {
-		let id = primitive_get_enum(name).unwrap();
-		assert!(!primitive_def(id).unwrap().definition_check());
+		let id = id_of(name).unwrap();
+		assert!(!definition(id).unwrap().definition_check());
 	}
 }
 
 #[test]
 fn new_primitive_arities_come_from_the_spec() {
-	let pk = primitive_def(primitive_get_enum("PUBKEY").unwrap()).unwrap();
+	let pk = definition(id_of("PUBKEY").unwrap()).unwrap();
 	assert_eq!(pk.arity(), &[1]);
-	let dh = primitive_def(primitive_get_enum("DH_KEX").unwrap()).unwrap();
+	let dh = definition(id_of("DH_KEX").unwrap()).unwrap();
 	assert_eq!(dh.arity(), &[2]);
 }
 
 #[test]
 fn primitive_def_core() {
-	let def = primitive_def(PRIM_ASSERT).unwrap();
+	let def = definition(PRIM_ASSERT).unwrap();
 	assert_eq!(def.name(), "ASSERT");
 	assert!(def.definition_check());
 }
 
 #[test]
 fn primitive_def_non_core() {
-	let def = primitive_def(PRIM_AEAD_ENC).unwrap();
+	let def = definition(PRIM_AEAD_ENC).unwrap();
 	assert_eq!(def.name(), "AEAD_ENC");
 	assert!(!def.definition_check());
 }
 
 #[test]
 fn primitive_def_check_property() {
-	let dec = primitive_def(PRIM_AEAD_DEC).unwrap();
+	let dec = definition(PRIM_AEAD_DEC).unwrap();
 	assert!(dec.definition_check());
-	let enc = primitive_def(PRIM_ENC).unwrap();
+	let enc = definition(PRIM_ENC).unwrap();
 	assert!(!enc.definition_check());
 }
 
 #[test]
 fn primitive_is_core_check() {
-	assert!(primitive_is_core(PRIM_ASSERT));
-	assert!(primitive_is_core(PRIM_CONCAT));
-	assert!(primitive_is_core(PRIM_SPLIT));
-	assert!(!primitive_is_core(PRIM_HASH));
-	assert!(!primitive_is_core(PRIM_AEAD_ENC));
+	assert!(is_core(PRIM_ASSERT));
+	assert!(is_core(PRIM_CONCAT));
+	assert!(is_core(PRIM_SPLIT));
+	assert!(!is_core(PRIM_HASH));
+	assert!(!is_core(PRIM_AEAD_ENC));
 }
 
 #[test]
 fn primitive_name_lookup() {
-	assert_eq!(primitive_name(PRIM_HASH), "HASH");
-	assert_eq!(primitive_name(PRIM_SIGN), "SIGN");
-	assert_eq!(primitive_name(PRIM_CONCAT), "CONCAT");
+	assert_eq!(name(PRIM_HASH), "HASH");
+	assert_eq!(name(PRIM_SIGN), "SIGN");
+	assert_eq!(name(PRIM_CONCAT), "CONCAT");
 }
 
 #[test]
 fn primitive_get_enum_roundtrip() {
-	let id = primitive_get_enum("AEAD_ENC").unwrap();
+	let id = id_of("AEAD_ENC").unwrap();
 	assert_eq!(id, PRIM_AEAD_ENC);
-	let id2 = primitive_get_enum("SPLIT").unwrap();
+	let id2 = id_of("SPLIT").unwrap();
 	assert_eq!(id2, PRIM_SPLIT);
-	assert!(primitive_get_enum("NONEXISTENT").is_err());
+	assert!(id_of("NONEXISTENT").is_err());
 }
 
 #[test]
 fn primitive_single_output() {
-	assert!(primitive_has_single_output(PRIM_HASH));
-	assert!(primitive_has_single_output(PRIM_ENC));
-	assert!(!primitive_has_single_output(PRIM_SPLIT));
-	assert!(!primitive_has_single_output(PRIM_HKDF));
+	assert!(has_single_output(PRIM_HASH));
+	assert!(has_single_output(PRIM_ENC));
+	assert!(!has_single_output(PRIM_SPLIT));
+	assert!(!has_single_output(PRIM_HKDF));
 }
 
 #[test]
@@ -187,7 +185,7 @@ fn a_commutativity_rule_exchanges_positions_with_equal_restrictions() {
 			wrapped,
 			"{}'s bare position and {}'s argument must forbid the same heads",
 			spec.name,
-			primitive_name(rule.constructor)
+			name(rule.constructor)
 		);
 	}
 }
@@ -306,7 +304,7 @@ fn every_spec_index_is_within_the_primitive_it_is_declared_on() {
 
 		if let Some(rule) = &spec.rewrite {
 			must("rewrite.from", rule.from);
-			let inner = primitive_get(rule.id)
+			let inner = super::spec(rule.id)
 				.unwrap_or_else(|_| panic!("{name}.rewrite.id is not a primitive"));
 			if let Some(output) = rule.from_output {
 				assert!(
@@ -332,7 +330,7 @@ fn every_spec_index_is_within_the_primitive_it_is_declared_on() {
 		}
 
 		if let Some(rule) = &spec.rebuild {
-			let inner = primitive_get(rule.id)
+			let inner = super::spec(rule.id)
 				.unwrap_or_else(|_| panic!("{name}.rebuild.id is not a primitive"));
 			assert!(
 				rule.reveal < narrowest(&inner.arity),
@@ -350,17 +348,17 @@ fn every_spec_index_is_within_the_primitive_it_is_declared_on() {
 		}
 
 		for rule in &spec.combine {
-			let partial = primitive_get(rule.partial)
+			let partial = super::spec(rule.partial)
 				.unwrap_or_else(|_| panic!("{name}.combine.partial is not a primitive"));
-			let split = primitive_get(rule.split)
+			let split = super::spec(rule.split)
 				.unwrap_or_else(|_| panic!("{name}.combine.split is not a primitive"));
-			let whole = primitive_get(rule.whole)
+			let whole = super::spec(rule.whole)
 				.unwrap_or_else(|_| panic!("{name}.combine.whole is not a primitive"));
 			let fewest = narrowest(&partial.arity);
 			for binding in &rule.bindings {
 				assert!(binding.argument < fewest && binding.list < fewest);
-				assert!(primitive_get(binding.wrapper).unwrap().arity.contains(&1));
-				assert!(primitive_is_core(binding.sequence));
+				assert!(super::spec(binding.wrapper).unwrap().arity.contains(&1));
+				assert!(is_core(binding.sequence));
 			}
 			for (what, i) in std::iter::once(("combine.share", rule.share))
 				.chain(rule.agree.iter().map(|&i| ("combine.agree", i)))
@@ -399,7 +397,7 @@ fn every_spec_index_is_within_the_primitive_it_is_declared_on() {
 			}) => {
 				must("check_key", i);
 				assert!(
-					primitive_get(constructor).is_ok(),
+					super::spec(constructor).is_ok(),
 					"{name}.check_key names a constructor that is not a primitive"
 				);
 			}
@@ -410,7 +408,7 @@ fn every_spec_index_is_within_the_primitive_it_is_declared_on() {
 			must("commutativity.wrapped", rule.wrapped);
 			must("commutativity.bare", rule.bare);
 			assert!(
-				primitive_get(rule.constructor).is_ok(),
+				super::spec(rule.constructor).is_ok(),
 				"{name}.commutativity names a constructor that is not a primitive"
 			);
 		}
@@ -456,7 +454,7 @@ fn every_spec_index_is_within_the_primitive_it_is_declared_on() {
 			may("argument_restrictions", restriction.position);
 			for &id in &restriction.banned {
 				assert!(
-					primitive_get(id).is_ok() || primitive_core_get(id).is_ok(),
+					super::spec(id).is_ok() || core_spec(id).is_ok(),
 					"{name}.argument_restrictions bans an id that is not a primitive"
 				);
 			}
@@ -485,8 +483,9 @@ fn every_spec_index_is_within_the_primitive_it_is_declared_on() {
 #[test]
 fn the_engine_names_no_primitive_outside_its_spec() {
 	let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-	let names = primitive_names();
+	let names = names();
 	let mut offenders: Vec<String> = Vec::new();
+	let mut scanned = 0usize;
 	let mut stack = vec![root.clone()];
 	while let Some(dir) = stack.pop() {
 		for entry in std::fs::read_dir(&dir).expect("read src") {
@@ -510,7 +509,8 @@ fn the_engine_names_no_primitive_outside_its_spec() {
 				continue;
 			}
 			let text = std::fs::read_to_string(&path).expect("read");
-			let code = text.split("#[cfg(test)]\nmod tests {").next().unwrap_or("");
+			let code = crate::testing::shipping_code(&rel, &text);
+			scanned += 1;
 			for (n, line) in code.lines().enumerate() {
 				let line = line.trim();
 				if line.starts_with("//") {
@@ -526,6 +526,11 @@ fn the_engine_names_no_primitive_outside_its_spec() {
 			}
 		}
 	}
+	assert!(
+		scanned > 0,
+		"the scan found no engine source under {}",
+		root.display()
+	);
 	assert!(
 		offenders.is_empty(),
 		"a primitive is declared once, in src/primitive/spec.rs, and the engine \

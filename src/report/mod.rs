@@ -27,13 +27,13 @@ pub(crate) const DISCLAIMER: &str = "Verifpal is sound but incomplete. Every att
 
 #[derive(Debug, Serialize)]
 pub struct Run {
-	pub version: String,
-	pub ok: bool,
-	pub models: Vec<ModelReport>,
+	pub(crate) version: String,
+	pub(crate) ok: bool,
+	pub(crate) models: Vec<ModelReport>,
 }
 
 #[derive(Debug, Serialize)]
-pub struct ModelReport {
+pub(crate) struct ModelReport {
 	pub file: String,
 	pub ok: bool,
 	#[serde(skip_serializing_if = "Option::is_none")]
@@ -50,7 +50,7 @@ pub struct ModelReport {
 
 #[derive(Debug, Serialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
-pub enum DiagramRow {
+pub(crate) enum DiagramRow {
 	#[serde(rename_all = "camelCase")]
 	Message {
 		hop: usize,
@@ -77,7 +77,7 @@ pub enum DiagramRow {
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct Computation {
+pub(crate) struct Computation {
 	pub names: Vec<String>,
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub primitive: Option<String>,
@@ -89,7 +89,7 @@ pub struct Computation {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct DiagramValue {
+pub(crate) struct DiagramValue {
 	pub name: String,
 	#[serde(skip_serializing_if = "std::ops::Not::not")]
 	pub guarded: bool,
@@ -97,7 +97,7 @@ pub struct DiagramValue {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct Analysis {
+pub(crate) struct Analysis {
 	pub model: String,
 	pub attacker: String,
 	pub sessions: u8,
@@ -116,7 +116,7 @@ pub struct Analysis {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ScenarioReport {
+pub(crate) struct ScenarioReport {
 	pub principal: String,
 	pub bindings: Vec<Binding>,
 	pub honest: bool,
@@ -126,14 +126,14 @@ pub struct ScenarioReport {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct Binding {
+pub(crate) struct Binding {
 	pub target: String,
 	pub value: String,
 }
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct Assumption {
+pub(crate) struct Assumption {
 	pub term: String,
 	pub capability: String,
 	pub from_phase: i32,
@@ -154,7 +154,7 @@ impl Assumption {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct EnvelopeReport {
+pub(crate) struct EnvelopeReport {
 	pub sessions: u8,
 	pub truncations: Vec<String>,
 	pub exhausted: bool,
@@ -163,7 +163,7 @@ pub struct EnvelopeReport {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct QueryReport {
+pub(crate) struct QueryReport {
 	pub query: String,
 	pub kind: String,
 	pub resolved: bool,
@@ -175,15 +175,13 @@ pub struct QueryReport {
 	pub subtype: Option<String>,
 	pub steps: Vec<TraceStep>,
 	pub preconditions: Vec<String>,
-	#[serde(skip_serializing_if = "Vec::is_empty")]
-	pub notes: Vec<String>,
 	#[serde(skip_serializing_if = "std::ops::Not::not")]
 	pub generated: bool,
 	pub variants: usize,
 }
 
 #[derive(Clone, Copy, Debug, Serialize)]
-pub struct SourceRange {
+pub(crate) struct SourceRange {
 	pub start: usize,
 	pub end: usize,
 	pub line: usize,
@@ -381,7 +379,6 @@ impl QueryReport {
 			subtype: r.subtype.map(|s| s.name().to_string()),
 			steps: r.steps.clone(),
 			preconditions: r.options.iter().map(|o| o.summary.clone()).collect(),
-			notes: r.notes.clone(),
 			generated: r.query.span == Span::default(),
 			variants: r.variants.len(),
 		}
@@ -491,7 +488,7 @@ fn computation(expr: &Expression) -> Option<Computation> {
 		.collect();
 	let (primitive, checked) = match &expr.assigned {
 		Some(Value::Primitive(p)) => (
-			Some(crate::primitive::primitive_name(p.id).to_string()),
+			Some(crate::primitive::name(p.id).to_string()),
 			p.instance_check,
 		),
 		_ => (None, false),

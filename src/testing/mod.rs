@@ -6,12 +6,13 @@ mod model_tests;
 
 use std::sync::{Arc, LazyLock, Mutex};
 
-use crate::protocol::{ProtocolTrace, SendEvent, TraceSlot};
+use crate::protocol::{ProtocolTrace, SendEvent, SlotIdx, TraceSlot};
 use crate::syntax::names::ValueNames;
 use crate::syntax::{Declaration, PrincipalId, Qualifier, Span};
 use crate::term::{Constant, PrimitiveId, Value, ValueId};
 use crate::theory::{AttackerState, DerivationRecord};
 use crate::util::IdMap;
+use crate::util::index::IndexVec;
 
 static TEST_NAMES: LazyLock<Mutex<ValueNames>> = LazyLock::new(|| Mutex::new(ValueNames::new()));
 
@@ -24,9 +25,9 @@ pub(crate) fn test_value_id(name: &str) -> ValueId {
 }
 
 pub(crate) fn make_trace(slots: Vec<TraceSlot>) -> ProtocolTrace {
+	let slots: IndexVec<SlotIdx, TraceSlot> = IndexVec::from(slots);
 	let index = slots
-		.iter()
-		.enumerate()
+		.iter_enumerated()
 		.map(|(i, slot)| (slot.constant.id, i))
 		.collect();
 	ProtocolTrace {
@@ -113,4 +114,35 @@ pub(crate) fn make_attacker_state(known: Vec<Value>) -> AttackerState {
 		known_map: Arc::new(known_map),
 		chain: crate::theory::attacker::next_chain(),
 	}
+}
+
+pub(crate) fn shipping_code<'a>(file: &str, source: &'a str) -> &'a str {
+	let Some(at) = source.find("#[cfg(test)]\nmod tests {") else {
+		return source;
+	};
+	let tail = &source[at..];
+	let close = tail
+		.match_indices("\n}\n")
+		.next()
+		.map_or(tail.len(), |(i, _)| i + 3);
+	assert!(
+		tail[close..].trim().is_empty(),
+		"{file}: code follows its inline test module, so a scan that stops at the tests \
+		 would never read it"
+	);
+	&source[..at]
+}
+
+#[test]
+fn shipping_code_stops_at_a_trailing_test_module_and_refuses_code_after_one() {
+	let trailing = "fn shipped() {}\n\n#[cfg(test)]\nmod tests {\n\tfn t() {}\n}\n";
+	assert_eq!(shipping_code("a.rs", trailing), "fn shipped() {}\n\n");
+	assert_eq!(
+		shipping_code("b.rs", "fn shipped() {}\n"),
+		"fn shipped() {}\n"
+	);
+	let declared = "#[cfg(test)]\nmod tests;\n\nfn shipped() {}\n";
+	assert_eq!(shipping_code("c.rs", declared), declared);
+	let followed = "#[cfg(test)]\nmod tests {\n\tfn t() {}\n}\n\nfn hidden() {}\n";
+	assert!(std::panic::catch_unwind(|| shipping_code("d.rs", followed)).is_err());
 }

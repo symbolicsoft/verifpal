@@ -3,8 +3,9 @@
 
 pub(crate) mod collections;
 pub(crate) mod generation;
+pub(crate) mod index;
 pub(crate) mod parallel;
 pub(crate) mod sync;
 pub(crate) mod text;
 
-pub use collections::{IdHasher, IdMap, IdSet};
+pub(crate) use collections::{IdHasher, IdMap, IdSet};

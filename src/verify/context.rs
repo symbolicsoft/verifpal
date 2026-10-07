@@ -212,7 +212,6 @@ impl VerifyContext {
 			vr.conclusion = result.conclusion.clone();
 			vr.subtype = result.subtype;
 			vr.trace = result.trace.clone();
-			vr.notes = result.notes.clone();
 			vr.steps = result.steps.clone();
 			vr.options = result.options.clone();
 			if result.resolved {
@@ -233,7 +232,7 @@ impl VerifyContext {
 	}
 
 	pub(crate) fn analysis_count_increment(&self) {
-		if !crate::console::info_is_quiet() {
+		if !crate::console::is_quiet() {
 			ANALYSIS_COUNT.with(|c| c.set(c.get() + 1));
 		}
 	}

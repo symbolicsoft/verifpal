@@ -3,16 +3,18 @@
 
 use std::sync::Arc;
 
-use super::exec::{Context, Execution};
+use super::exec::{Context, Execution, Taken};
+use super::judgment::Violation;
 use super::knowledge::Origin;
-use super::program::Event;
-use crate::primitive::{Capability, primitive_name};
-use crate::syntax::Span;
+use super::program::{DeliveryIdx, Event, RunIdx};
+use crate::primitive::Capability;
+use crate::protocol::{ProtocolTrace, SlotIdx};
 use crate::syntax::names::copy_base_name;
+use crate::syntax::{PrincipalId, Query, Span};
 use crate::term::{Constant, Primitive, Value, ValueId};
 use crate::theory::{AttackerState, DerivationRecord};
 use crate::util::IdMap;
-use crate::verify::{TraceStep, TraceValue};
+use crate::verify::{Subtype, TraceStep, TraceValue};
 
 pub(crate) struct Narrator<'a, 'b> {
 	cx: &'a Context<'b>,
@@ -22,7 +24,7 @@ pub(crate) struct Narrator<'a, 'b> {
 	unshaped: Names,
 	honest_names: Names,
 	cutoff: usize,
-	gated: Vec<(usize, usize)>,
+	gated: Vec<(RunIdx, SlotIdx)>,
 	pub(crate) steps: Vec<TraceStep>,
 	explained: crate::term::hashing::TermSet,
 }
@@ -46,8 +48,8 @@ impl Names {
 			entries: IdMap::default(),
 			shaped: Vec::new(),
 		};
-		for (r, run) in ex.runs.iter().enumerate() {
-			for (slot, held) in run.env.iter().enumerate() {
+		for (r, run) in ex.runs.iter_enumerated() {
+			for (slot, held) in run.env.iter_enumerated() {
 				let Some(h) = held else {
 					continue;
 				};
@@ -114,9 +116,9 @@ impl Names {
 }
 
 fn head(p: &Primitive) -> String {
-	match crate::primitive::primitive_threshold(p.id) {
-		Some(_) => format!("{}[{}]", primitive_name(p.id), p.threshold),
-		None => primitive_name(p.id).to_string(),
+	match crate::primitive::threshold(p.id) {
+		Some(_) => format!("{}[{}]", crate::primitive::name(p.id), p.threshold),
+		None => crate::primitive::name(p.id).to_string(),
 	}
 }
 
@@ -141,7 +143,7 @@ impl<'a, 'b> Narrator<'a, 'b> {
 		self.ex
 			.order
 			.get(self.cutoff)
-			.map_or(self.ex.knowledge.len(), |&(_, _, known)| known)
+			.map_or(self.ex.knowledge.len(), |taken| taken.known)
 	}
 
 	fn disclosure(&self, v: &Value) -> Option<Origin> {
@@ -149,7 +151,7 @@ impl<'a, 'b> Narrator<'a, 'b> {
 		self.ex.order[..self.cutoff]
 			.iter()
 			.find_map(
-				|&(run, step, _)| match program.runs[run].steps[step].event {
+				|&Taken { run, step, .. }| match program.runs[run].steps[step].event {
 					Event::Leak(slot) => self.ex.runs[run]
 						.held(slot)
 						.is_some_and(|h| h.value.equivalent(v, true))
@@ -202,7 +204,7 @@ impl<'a, 'b> Narrator<'a, 'b> {
 			.iter()
 			.map(|a| self.named(names, a, exclude))
 			.collect();
-		let projection = if crate::primitive::primitive_has_single_output(oriented.id) {
+		let projection = if crate::primitive::has_single_output(oriented.id) {
 			String::new()
 		} else {
 			format!("|{}", oriented.output + 1)
@@ -263,7 +265,7 @@ impl<'a, 'b> Narrator<'a, 'b> {
 			.join(", ")
 	}
 
-	pub(crate) fn declared(&self, slot: usize) -> String {
+	pub(crate) fn declared(&self, slot: SlotIdx) -> String {
 		self.cx.km.slots[slot].initial_value.to_string()
 	}
 
@@ -273,7 +275,7 @@ impl<'a, 'b> Narrator<'a, 'b> {
 
 	fn say_routed(
 		&mut self,
-		(sender, recipient): (usize, usize),
+		(sender, recipient): (RunIdx, RunIdx),
 		kind: &'static str,
 		text: String,
 		values: Vec<TraceValue>,
@@ -320,10 +322,10 @@ impl<'a, 'b> Narrator<'a, 'b> {
 				&& let Some(built) =
 					crate::theory::can_reconstruct_primitive(p, &self.cx.km.capabilities, state)
 			{
-				for ingredient in built.ingredients() {
+				for ingredient in built.recipe() {
 					self.visit(ingredient);
 				}
-				self.derives(&super::knowledge::reconstruction(built), v);
+				self.derives(&built, v);
 				return;
 			}
 			let mut inputs = crate::theory::KnowledgeInputs::new(&self.cx.km.capabilities, state);
@@ -404,7 +406,7 @@ impl<'a, 'b> Narrator<'a, 'b> {
 			),
 			DerivationRecord::Rewritten { of, using, .. } => {
 				let name = match of {
-					Value::Primitive(p) => primitive_name(p.id),
+					Value::Primitive(p) => crate::primitive::name(p.id),
 					Value::Constant(_) | Value::Variable(_) => "a rewrite",
 				};
 				format!(
@@ -446,14 +448,14 @@ impl<'a, 'b> Narrator<'a, 'b> {
 				self.term(&with[0], &[]),
 				self.term(&with[1], &[])
 			),
-			DerivationRecord::Initial
-			| DerivationRecord::Leaked { .. }
-			| DerivationRecord::Obtained { .. } => return,
+			DerivationRecord::Initial | DerivationRecord::Leaked | DerivationRecord::Obtained => {
+				return;
+			}
 		};
 		self.say(line);
 	}
 
-	fn received_at(&self, run: usize, slot: usize) -> usize {
+	fn received_at(&self, run: RunIdx, slot: SlotIdx) -> usize {
 		let program = self.cx.program;
 		program.runs[run]
 			.step_of_slot
@@ -462,30 +464,33 @@ impl<'a, 'b> Narrator<'a, 'b> {
 				self.ex
 					.order
 					.iter()
-					.position(|&(r, s, _)| r == run && s == step)
+					.position(|taken| taken.run == run && taken.step == step)
 			})
 			.unwrap_or(self.ex.order.len())
 	}
 
-	fn sent_before(&self, d: usize, at: usize) -> bool {
+	fn sent_before(&self, d: DeliveryIdx, at: usize) -> bool {
 		let program = self.cx.program;
 		let sender = program.deliveries[d].sender;
 		self.ex.order[..at.min(self.ex.order.len())]
 			.iter()
-			.any(|&(r, s, _)| r == sender && program.runs[r].steps[s].event == Event::Send(d))
+			.any(|taken| {
+				taken.run == sender
+					&& program.runs[taken.run].steps[taken.step].event == Event::Send(d)
+			})
 	}
 
 	pub(crate) fn replayed_from(
 		&self,
-		run: usize,
-		slot: usize,
+		run: RunIdx,
+		slot: SlotIdx,
 		value: &Value,
 	) -> Option<&'static str> {
 		let at = self.received_at(run, slot);
 		let program = self.cx.program;
 		let km = self.cx.km;
 		let id = km.slots[slot].constant.id;
-		let within = |groups: &IdMap<ValueId, Arc<Vec<ValueId>>>, s: usize| {
+		let within = |groups: &IdMap<ValueId, Arc<Vec<ValueId>>>, s: SlotIdx| {
 			groups
 				.get(&id)
 				.is_some_and(|group| group.contains(&km.slots[s].constant.id))
@@ -497,7 +502,7 @@ impl<'a, 'b> Narrator<'a, 'b> {
 				delivery.recipient == run && delivery.slots.iter().any(|&(s, _)| s == slot)
 			})
 			.map(|delivery| delivery.sender);
-		let copy_of_sender = |other: usize| {
+		let copy_of_sender = |other: RunIdx| {
 			sender.is_some_and(|sender| {
 				other != sender
 					&& km.interchangeable_for(program.runs[other].id, program.runs[sender].id, slot)
@@ -523,8 +528,7 @@ impl<'a, 'b> Narrator<'a, 'b> {
 
 	pub(crate) fn installs(&mut self) {
 		let program = self.cx.program;
-		let km = self.cx.km;
-		for (run, state) in self.ex.runs.iter().enumerate() {
+		for (run, state) in self.ex.runs.iter_enumerated() {
 			if state.idle {
 				let mut step = TraceStep::new(
 					"idle",
@@ -537,134 +541,154 @@ impl<'a, 'b> Narrator<'a, 'b> {
 				self.steps.push(step);
 			}
 		}
-		for (at, &(run, step, _)) in self.ex.order.iter().enumerate() {
-			let d = match program.runs[run].steps[step].event {
-				Event::Recv(d) => d,
-				Event::Assign(slot) => {
-					if self.influenced(run, slot, &mut Vec::new()) {
-						self.gate(run, slot);
-					}
-					continue;
+		for (at, &Taken { run, step, .. }) in self.ex.order.iter().enumerate() {
+			match program.runs[run].steps[step].event {
+				Event::Recv(d) => self.delivery(at, run, d),
+				Event::Assign(slot) if self.influenced(run, slot, &mut Vec::new()) => {
+					self.gate(run, slot);
 				}
-				_ => continue,
-			};
-			let delivery = &program.deliveries[d];
-			let route = format!(
-				"{} to {}",
-				program.runs[delivery.sender].name, program.runs[delivery.recipient].name
-			);
-			let mut was = Vec::new();
-			let mut items = Vec::new();
-			let mut replayed = Vec::new();
-			for &(slot, _) in &delivery.slots {
-				let Some(h) = self.ex.runs[run].held(slot) else {
-					continue;
-				};
-				if h.installed.is_none() {
-					continue;
-				}
-				let Some(axis) = self.replayed_from(run, slot, &h.value) else {
-					continue;
-				};
-				let value = h.value.clone();
-				let name = km.slots[slot].constant.to_string();
-				let shown = self.spelled(&value, &[&name]);
-				self.explained.insert(value.clone());
-				replayed.push(slot);
-				self.say_routed(
-					(delivery.sender, delivery.recipient),
-					"replay",
-					format!(
-						"Attacker replays {name} ({route}) from another {axis}, where it is {shown}."
-					),
-					vec![TraceValue {
-						name,
-						installed: Some(shown),
-						was: None,
-						guarded: false,
-					}],
-				);
+				_ => {}
 			}
-			for (k, &(slot, _)) in delivery.slots.iter().enumerate() {
-				let Some(h) = self.ex.runs[run].held(slot) else {
-					continue;
-				};
-				if h.installed.is_none() || replayed.contains(&slot) {
-					continue;
-				}
-				let value = h.value.clone();
-				let constant = km.slots[slot].constant.to_string();
-				let own: [&str; 1] = [&constant];
-				self.explain(&value, at);
-				let previous = self.honest.runs[run].held(slot).map(|honest| &honest.value);
-				let displaced = previous.map(|honest| self.spell(&self.honest_names, honest, &own));
-				let mut shown = self.delivered(&value, &own);
-				if displaced.as_ref() == Some(&shown)
-					&& previous.is_some_and(|honest| !honest.equivalent(&value, true))
-				{
-					shown = self.named(&self.unshaped, &value, &own);
-				}
-				let shown_was = previous.filter(|honest| {
-					!honest.equivalent(&value, true)
-						&& honest
-							.as_constant()
-							.is_none_or(|c| c.name.as_ref() != constant)
-				});
-				if shown_was.is_some()
-					&& let Some(honest) = &displaced
-				{
-					was.push(format!("{constant} was {honest}"));
-				} else if previous.is_some_and(|honest| honest.equivalent(&value, true)) {
-					match self.ex.sent[d].as_ref().and_then(|sent| sent.get(k)) {
-						Some(sent) if !sent.equivalent(&value, true) => was.push(format!(
-							"{} sent {} in this execution",
-							program.runs[delivery.sender].name,
-							self.spelled(sent, &own)
-						)),
-						None => {
-							let unsent = format!(
-								"{} does not send this message in this execution",
-								program.runs[delivery.sender].name
-							);
-							if !was.contains(&unsent) {
-								was.push(unsent);
-							}
-						}
-						Some(_) => {}
-					}
-				}
-				items.push(TraceValue {
-					name: constant,
-					installed: Some(shown),
-					was: displaced,
-					guarded: false,
-				});
-			}
-			if items.is_empty() {
+		}
+	}
+
+	fn delivery(&mut self, at: usize, run: RunIdx, d: DeliveryIdx) {
+		let program = self.cx.program;
+		let delivery = &program.deliveries[d];
+		let route = format!(
+			"{} to {}",
+			program.runs[delivery.sender].name, program.runs[delivery.recipient].name
+		);
+		let replayed = self.replays(run, d, &route);
+		let mut was = Vec::new();
+		let mut items = Vec::new();
+		for (k, &(slot, _)) in delivery.slots.iter().enumerate() {
+			if replayed.contains(&slot) {
 				continue;
 			}
-			let note = if was.is_empty() {
-				String::new()
-			} else {
-				format!(" ({})", was.join("; "))
+			if let Some(item) = self.replacement(at, run, d, k, slot, &mut was) {
+				items.push(item);
+			}
+		}
+		if items.is_empty() {
+			return;
+		}
+		let note = if was.is_empty() {
+			String::new()
+		} else {
+			format!(" ({})", was.join("; "))
+		};
+		let names: Vec<&str> = items.iter().map(|item| item.name.as_str()).collect();
+		let values: Vec<&str> = items
+			.iter()
+			.filter_map(|item| item.installed.as_deref())
+			.collect();
+		let text = format!(
+			"Attacker replaces {} (sent by {route}) with {}.{note}",
+			names.join(", "),
+			values.join(", "),
+		);
+		self.say_routed(
+			(delivery.sender, delivery.recipient),
+			"mutations",
+			text,
+			items,
+		);
+	}
+
+	fn replays(&mut self, run: RunIdx, d: DeliveryIdx, route: &str) -> Vec<SlotIdx> {
+		let km = self.cx.km;
+		let delivery = &self.cx.program.deliveries[d];
+		let mut replayed = Vec::new();
+		for &(slot, _) in &delivery.slots {
+			let Some(h) = self.ex.runs[run].held(slot) else {
+				continue;
 			};
-			let names: Vec<&str> = items.iter().map(|item| item.name.as_str()).collect();
-			let values: Vec<&str> = items
-				.iter()
-				.filter_map(|item| item.installed.as_deref())
-				.collect();
-			let text = format!(
-				"Attacker replaces {} (sent by {route}) with {}.{note}",
-				names.join(", "),
-				values.join(", "),
-			);
+			if h.installed.is_none() {
+				continue;
+			}
+			let Some(axis) = self.replayed_from(run, slot, &h.value) else {
+				continue;
+			};
+			let value = h.value.clone();
+			let name = km.slots[slot].constant.to_string();
+			let shown = self.spelled(&value, &[&name]);
+			self.explained.insert(value.clone());
+			replayed.push(slot);
 			self.say_routed(
 				(delivery.sender, delivery.recipient),
-				"mutations",
-				text,
-				items,
+				"replay",
+				format!(
+					"Attacker replays {name} ({route}) from another {axis}, where it is {shown}."
+				),
+				vec![TraceValue {
+					name,
+					installed: Some(shown),
+					was: None,
+					guarded: false,
+				}],
 			);
 		}
+		replayed
+	}
+
+	fn replacement(
+		&mut self,
+		at: usize,
+		run: RunIdx,
+		d: DeliveryIdx,
+		k: usize,
+		slot: SlotIdx,
+		was: &mut Vec<String>,
+	) -> Option<TraceValue> {
+		let program = self.cx.program;
+		let km = self.cx.km;
+		let h = self.ex.runs[run].held(slot)?;
+		h.installed.as_ref()?;
+		let value = h.value.clone();
+		let constant = km.slots[slot].constant.to_string();
+		let own: [&str; 1] = [&constant];
+		self.explain(&value, at);
+		let previous = self.honest.runs[run].held(slot).map(|honest| &honest.value);
+		let displaced = previous.map(|honest| self.spell(&self.honest_names, honest, &own));
+		let mut shown = self.delivered(&value, &own);
+		if displaced.as_ref() == Some(&shown)
+			&& previous.is_some_and(|honest| !honest.equivalent(&value, true))
+		{
+			shown = self.named(&self.unshaped, &value, &own);
+		}
+		let shown_was = previous.filter(|honest| {
+			!honest.equivalent(&value, true)
+				&& honest
+					.as_constant()
+					.is_none_or(|c| c.name.as_ref() != constant)
+		});
+		if shown_was.is_some()
+			&& let Some(honest) = &displaced
+		{
+			was.push(format!("{constant} was {honest}"));
+		} else if previous.is_some_and(|honest| honest.equivalent(&value, true)) {
+			let sender = &program.runs[program.deliveries[d].sender].name;
+			match self.ex.sent[d].as_ref().and_then(|sent| sent.get(k)) {
+				Some(sent) if !sent.equivalent(&value, true) => was.push(format!(
+					"{sender} sent {} in this execution",
+					self.spelled(sent, &own)
+				)),
+				None => {
+					let unsent = format!("{sender} does not send this message in this execution");
+					if !was.contains(&unsent) {
+						was.push(unsent);
+					}
+				}
+				Some(_) => {}
+			}
+		}
+		Some(TraceValue {
+			name: constant,
+			installed: Some(shown),
+			was: displaced,
+			guarded: false,
+		})
 	}
 
 	pub(crate) fn public(&mut self, v: &Value) {
@@ -677,7 +701,7 @@ impl<'a, 'b> Narrator<'a, 'b> {
 		}
 	}
 
-	pub(crate) fn received(&mut self, run: usize, slot: usize, sender: usize) {
+	pub(crate) fn received(&mut self, run: RunIdx, slot: SlotIdx, sender: RunIdx) {
 		let runs = &self.cx.program.runs;
 		let name = self.cx.km.slots[slot].constant.to_string();
 		let text = format!(
@@ -697,7 +721,7 @@ impl<'a, 'b> Narrator<'a, 'b> {
 		);
 	}
 
-	pub(crate) fn built_from(&mut self, slot: usize, value: &Value) {
+	pub(crate) fn built_from(&mut self, slot: SlotIdx, value: &Value) {
 		let mut leaves: Vec<String> = Vec::new();
 		for c in value.constant_leaves() {
 			let name = c.to_string();
@@ -729,7 +753,7 @@ impl<'a, 'b> Narrator<'a, 'b> {
 		}
 	}
 
-	fn influenced(&self, run: usize, slot: usize, seen: &mut Vec<usize>) -> bool {
+	fn influenced(&self, run: RunIdx, slot: SlotIdx, seen: &mut Vec<SlotIdx>) -> bool {
 		if seen.contains(&slot) {
 			return false;
 		}
@@ -753,9 +777,9 @@ impl<'a, 'b> Narrator<'a, 'b> {
 				.any(|at| at != slot && self.influenced(run, at, seen))
 	}
 
-	pub(crate) fn gate(&mut self, run: usize, slot: usize) {
+	pub(crate) fn gate(&mut self, run: RunIdx, slot: SlotIdx) {
 		let span = self.cx.km.slots[slot].declared_span;
-		let same_assignment = |&(r, s): &(usize, usize)| {
+		let same_assignment = |&(r, s): &(RunIdx, SlotIdx)| {
 			r == run
 				&& (s == slot
 					|| (span != Span::default() && self.cx.km.slots[s].declared_span == span))
@@ -775,8 +799,7 @@ impl<'a, 'b> Narrator<'a, 'b> {
 		let principal = self.cx.program.runs[run].name.clone();
 		let installed: Vec<String> = self.ex.runs[run]
 			.env
-			.iter()
-			.enumerate()
+			.iter_enumerated()
 			.filter(|(_, held)| held.as_ref().is_some_and(|h| h.installed.is_some()))
 			.map(|(s, _)| self.cx.km.slots[s].constant.to_string())
 			.chain(std::iter::once(self.cx.km.slots[slot].constant.to_string()))
@@ -792,6 +815,189 @@ impl<'a, 'b> Narrator<'a, 'b> {
 		self.steps.push(step);
 	}
 
+	fn run_name(&self, run: RunIdx) -> &'a str {
+		self.cx.program.runs[run].name.as_str()
+	}
+
+	fn shown(&self, slot: SlotIdx, value: &Value) -> String {
+		let own = self.cx.km.slots[slot].constant.to_string();
+		self.spelled(value, &[&own])
+	}
+
+	pub(crate) fn conclude(&mut self, q: &Query, v: &Violation) -> (String, Option<Subtype>) {
+		let km = self.cx.km;
+		let text = match v {
+			Violation::Disclosed { run, slot, value } => return self.disclosed(*run, *slot, value),
+			Violation::Forged {
+				run,
+				slot,
+				value,
+				used,
+			} => {
+				self.gate(*run, *used);
+				format!(
+					"{} ({}), sent by Attacker and not by {}, is successfully used in {} within {}'s state.",
+					km.slots[*slot].constant,
+					self.shown(*slot, value),
+					q.message.sender_name,
+					self.declared(*used),
+					self.run_name(*run)
+				)
+			}
+			Violation::Replayed {
+				run,
+				slot,
+				value,
+				used,
+				emissions,
+				acceptances,
+			} => {
+				self.gate(*run, *used);
+				let subtype =
+					if recipient_contributed(&km.slots[*slot].constant, km, q.message.recipient) {
+						Subtype::DuplicateAcceptance
+					} else {
+						Subtype::ReplayableFirstFlight
+					};
+				let text = self.replayed(q, *run, *slot, value, *used, [*emissions, *acceptances]);
+				return (text, Some(subtype));
+			}
+			Violation::Substituted {
+				run,
+				slot,
+				sender,
+				used,
+			} => {
+				self.received(*run, *slot, *sender);
+				format!(
+					"{}, sent by {} and not by {}, is successfully used in {} within {}'s state.",
+					km.slots[*slot].constant,
+					self.run_name(*sender),
+					q.message.sender_name,
+					self.declared(*used),
+					self.run_name(*run)
+				)
+			}
+			Violation::Stale {
+				run,
+				slot,
+				value,
+				used,
+				repeated,
+			} => self.stale(*run, *slot, value, *used, *repeated),
+			Violation::Linked { link, resolved } => {
+				self.resolves(resolved);
+				let [a, b] = [&resolved[0].0, &resolved[1].0].map(ToString::to_string);
+				format!(
+					"Attacker links {a} and {b} {}.",
+					link.describe(|v| self.term(v, &[&a, &b]))
+				)
+			}
+			Violation::Differ { resolved } => {
+				self.resolves(resolved);
+				format!(
+					"{} are not equivalent.",
+					q.constants
+						.iter()
+						.map(|c| c.name.to_string())
+						.collect::<Vec<_>>()
+						.join(", ")
+				)
+			}
+		};
+		(text, None)
+	}
+
+	fn stale(
+		&mut self,
+		run: RunIdx,
+		slot: SlotIdx,
+		value: &Value,
+		used: SlotIdx,
+		repeated: Option<RunIdx>,
+	) -> String {
+		let constant = &self.cx.km.slots[slot].constant;
+		let Some(other) = repeated else {
+			self.built_from(slot, value);
+			return format!(
+				"{} ({}) is used by {} in {} despite not being a fresh value.",
+				constant,
+				self.shown(slot, value),
+				self.run_name(run),
+				self.declared(used)
+			);
+		};
+		self.gate(run, used);
+		format!(
+			"{} ({}) is used by {} in {}, and {} accepts the same value: the attacker keeps \
+			 it the same across sessions, so it is not fresh.",
+			constant,
+			self.shown(slot, value),
+			self.run_name(run),
+			self.declared(used),
+			self.run_name(other)
+		)
+	}
+
+	fn disclosed(
+		&mut self,
+		run: RunIdx,
+		slot: SlotIdx,
+		value: &Value,
+	) -> (String, Option<Subtype>) {
+		let km = self.cx.km;
+		self.public(value);
+		self.explain(value, self.ex.order.len());
+		let constant = &km.slots[slot].constant;
+		let value_shown = self.shown(slot, value);
+		if !crate::theory::reduce_once(value)
+			.equivalent(&super::unlink::honest_reduct(km, slot), true)
+			&& !carries_a_secret(value, km)
+		{
+			let text = format!(
+				"{constant} ({value_shown}) is obtained by Attacker, but that is the value the \
+				 attacker put there: it carries nothing {} generated or holds privately, so the \
+				 honest {constant} is not shown to be disclosed.",
+				self.run_name(run)
+			);
+			return (text, Some(Subtype::AttackerSuppliedValue));
+		}
+		(
+			format!("{constant} ({value_shown}) is obtained by Attacker."),
+			None,
+		)
+	}
+
+	fn replayed(
+		&self,
+		q: &Query,
+		run: RunIdx,
+		slot: SlotIdx,
+		value: &Value,
+		used: SlotIdx,
+		[emissions, acceptances]: [usize; 2],
+	) -> String {
+		let axis = self.replayed_from(run, slot, value).unwrap_or("run");
+		let times = |n: usize| match n {
+			1 => "once".to_string(),
+			2 => "twice".to_string(),
+			n => format!("{n} times"),
+		};
+		format!(
+			"{} ({}), which {s} sent in another {axis} and not in this one, is \
+			 successfully used in {} within {}'s state: {s} sent it {}, {r} accepts it \
+			 {}, so agreement is not injective.",
+			self.cx.km.slots[slot].constant,
+			self.shown(slot, value),
+			self.declared(used),
+			self.run_name(run),
+			times(emissions),
+			times(acceptances),
+			s = copy_base_name(&q.message.sender_name),
+			r = copy_base_name(&q.message.recipient_name),
+		)
+	}
+
 	pub(crate) fn trace(&self) -> String {
 		self.steps
 			.iter()
@@ -800,4 +1006,20 @@ impl<'a, 'b> Narrator<'a, 'b> {
 			.collect::<Vec<_>>()
 			.join("\n")
 	}
+}
+
+fn carries_a_secret(v: &Value, km: &ProtocolTrace) -> bool {
+	v.constant_leaves()
+		.any(|c| super::unlink::declared_secret(c, km))
+}
+
+fn recipient_contributed(c: &Constant, km: &ProtocolTrace, recipient: PrincipalId) -> bool {
+	crate::protocol::trace::resolve_trace_constant(c, km)
+		.constant_leaves()
+		.any(|inner| {
+			km.index_of(inner).is_some_and(|i| {
+				let slot = &km.slots[i];
+				slot.constant.fresh && km.same_actor(slot.creator, recipient)
+			})
+		})
 }

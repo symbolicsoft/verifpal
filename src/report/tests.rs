@@ -70,7 +70,6 @@ fn a_report_serializes_to_the_documented_shape() {
 						},
 					],
 					preconditions: vec![],
-					notes: vec![],
 					generated: false,
 					variants: 2,
 				}],
