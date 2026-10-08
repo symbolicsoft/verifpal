@@ -37,6 +37,6 @@ Verifpal verifies the security of cryptographic protocols. It is written for pra
 
 ## License
 
-Verifpal is free software under the [GNU General Public License, version 3](https://www.gnu.org/licenses/gpl-3.0.en.html). The User Manual is under [CC BY-NC-ND 4.0](https://creativecommons.org/licenses/by-nc-nd/4.0/).
+Verifpal is free software under the [GNU General Public License, version 3](https://www.gnu.org/licenses/gpl-3.0.en.html).
 
 © Copyright 2019-2026 Nadim Kobeissi. “Verifpal” and the “Verifpal” logo/mascot are registered trademarks of Nadim Kobeissi.
