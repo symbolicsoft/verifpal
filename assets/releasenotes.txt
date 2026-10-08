@@ -1,4 +1,14 @@
-Verifpal 1.6.4
+Verifpal 1.6.5
+
+Changes since v1.6.4:
+
+- Improve message dropping discipline for guarded messages
+- Fix #50
+- Performance improvements for multi-phase models
+- Clarify remote AA witness expectations
+- Clarify private NFC search limits and pin attack traces
+- Add private NFC comparisons for remote AA
+- Clarify plaintext NFC visibility in the remote AA examples
 
 Changes since v1.6.3:
 
