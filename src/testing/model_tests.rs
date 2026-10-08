@@ -1646,7 +1646,7 @@ fn test_epassport_remote_aa_nfc_visibility() {
 			if model == "remote_aa_private_nfc.vp" {
 				assert!(
 					derives("Attacker opens resp@2", "obtaining aasig"),
-					"{model} at {sessions} sessions: the dishonest verifier must obtain \
+					"{model} at {sessions} sessions: expected the documented witness to obtain \
 					 the signature from the phone's Internet response: {}",
 					results[0].summary
 				);
@@ -1655,7 +1655,7 @@ fn test_epassport_remote_aa_nfc_visibility() {
 				assert!(
 					derives("Attacker forges ", "under the key and nonce")
 						&& derives("Attacker observes aasig", "on the wire"),
-					"{model}: the nonce-reuse attack must obtain the signature from \
+					"{model}: expected the documented nonce-reuse witness to obtain the signature from \
 					 the plaintext NFC exchange: {}",
 					results[0].summary
 				);
