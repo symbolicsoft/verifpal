@@ -12,10 +12,12 @@
 // The phone reaches the service the way a browser reaches a server: it
 // sends a fresh channel key encrypted to the service's public key, which it
 // knows authentically, and both directions then travel under that key. The
-// service does not authenticate the phone. NFC between phone and chip is
-// guarded: the attacker is somewhere on the internet, not near the passport.
-// The bank opens the answer and checks the chip's signature in one step, so
-// that the first use of the answer is the bank's decision.
+// service does not authenticate the phone. In this model, the attacker can
+// interfere with the internet connection and read the plaintext NFC
+// exchange between phone and chip, including aaSig. NFC messages are guarded
+// against replacement; BAC/PACE Secure Messaging is not modeled on this
+// link. The bank opens the answer and checks the chip's signature in one
+// step, so that the first use of the answer is the bank's decision.
 //
 // The holder may also be asked to prove their identity to a dishonest
 // service. The scenarios[] block gives the phone two configurations: the
