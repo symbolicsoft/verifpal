@@ -2,30 +2,16 @@
 // SPDX-FileCopyrightText: © 2026 Mounir IDRASSI <mounir.idrassi@amcrypto.jp>
 // SPDX-License-Identifier: GPL-3.0-only
 //
-// remote_aa_bound.vp with the private NFC exchange of
-// remote_aa_private_nfc.vp. The phone encrypts the value to sign and the
-// chip encrypts its answer under nfcKey, known only to Phone and Passport.
-// Guards prevent replacement. This is an ideal private local link; it
-// doesn't implement BAC or PACE Secure Messaging.
+// Expected: a0 at one session, a1 at two (GitHub issue #50).
 //
-// Expected: a0, at one session and at two. No attack is found in these
-// searches, with the session count applying per principal, per scenario;
-// this is not a security proof, even within those bounds. The signature
-// obtained by a dishonest verifier covers that verifier's key, while the
-// bank expects its own key. The relay in remote_aa_private_nfc.vp no longer
-// answers the bank's challenge.
+// examples/epassport/remote_aa_bound_private_nfc.vp where Phone leaks
+// nfcKey, so the attacker opens the chip's answer and reads aaSig. The attack
+// and the search's route to it are those of
+// remote_aa_bound_leaked_signature.vp: at two sessions a nonce reuse forges
+// Bank's challenge for Phone#2, whose signature the attacker hands Bank under
+// its own key.
 //
-// The reported attack at two sessions in remote_aa_bound.vp obtains aaSig
-// from NFC after exploiting nonce reuse on the internet connection. Here
-// that local exchange is private. The internet connection still uses the
-// original key transport and fixed record nonces, so these results don't
-// establish the security of that connection: disclosing aaSig any other
-// way brings the attack back (examples/test/remote_aa_bound_weak_nfc.vp,
-// remote_aa_bound_leaked_nfc_key.vp, remote_aa_bound_leaked_signature.vp).
-//
-// Active Authentication accepts a challenge of eight bytes. The HASH used
-// for the service binding has no length limit in this model; a concrete
-// encoding would need its own analysis.
+// remote_aa_bound_private_nfc.vp, without the leak, holds.
 
 attacker[active]
 
@@ -62,6 +48,7 @@ Evil -> Phone: [evilPub]
 
 principal Phone[
 	knows private nfcKey
+	leaks nfcKey
 	knows public rpPub, nChal, nResp
 	generates ck
 	ckMsg = PKE_ENC(rpPub, ck)

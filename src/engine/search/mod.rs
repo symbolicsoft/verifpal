@@ -39,9 +39,13 @@ struct Node {
 	installs: Installs,
 	held: IndexVec<RunIdx, Vec<HeldValue>>,
 	sent: IndexVec<DeliveryIdx, Option<Vec<Value>>>,
-	knowledge: Vec<Arc<AttackerState>>,
-	memo: std::cell::RefCell<crate::theory::SavedMemo>,
+	knowledge: Vec<PhaseKnowledge>,
 }
+
+type PhaseKnowledge = (
+	Arc<AttackerState>,
+	std::cell::RefCell<crate::theory::SavedMemo>,
+);
 
 struct HeldValue {
 	slot: SlotIdx,
@@ -86,17 +90,17 @@ impl Node {
 				.chain(std::iter::once(ex))
 				.map(|phase| {
 					let state = &phase.knowledge.state;
-					Arc::new(AttackerState {
+					let state = Arc::new(AttackerState {
 						current_phase: state.current_phase,
 						known: Arc::clone(&state.known),
 						known_map: Arc::clone(&state.known_map),
 						derivations: Arc::default(),
 						reused: Arc::clone(&state.reused),
 						chain: next_chain(),
-					})
+					});
+					(state, std::cell::RefCell::default())
 				})
 				.collect(),
-			memo: std::cell::RefCell::default(),
 		}
 	}
 
@@ -108,15 +112,11 @@ impl Node {
 			.map(|at| &values[at])
 	}
 
-	fn state(&self) -> &AttackerState {
-		self.knowledge.last().unwrap()
-	}
-
-	fn at(&self, phase: i32) -> &AttackerState {
+	fn at(&self, phase: i32) -> &PhaseKnowledge {
 		usize::try_from(phase)
 			.ok()
 			.and_then(|phase| self.knowledge.get(phase))
-			.map_or_else(|| self.state(), AsRef::as_ref)
+			.unwrap_or_else(|| self.knowledge.last().unwrap())
 	}
 }
 
@@ -164,14 +164,14 @@ struct Attempts {
 struct Retries {
 	stuck: Vec<Stuck>,
 	fresh: IdMap<u64, Vec<(Value, Source, Vec<RunIdx>)>>,
-	by_install: IdMap<(RunIdx, Option<SlotIdx>, u64), Vec<NodeIdx>>,
+	by_input: IdMap<(RunIdx, Option<SlotIdx>), Vec<NodeIdx>>,
 	routes: Vec<Route>,
 	rerouting: bool,
 }
 
 #[derive(Default)]
 struct Memo {
-	derivable: std::cell::RefCell<IdMap<(NodeIdx, usize), bool>>,
+	derivable: std::cell::RefCell<IdMap<(NodeIdx, usize, i32), bool>>,
 	cheapest: std::cell::RefCell<IdMap<usize, Cheapest>>,
 	holders: IdMap<(SlotIdx, QueryKind), Holders>,
 }
@@ -332,12 +332,8 @@ fn same_installs(a: &Installs, b: &Installs) -> bool {
 	a.len() == b.len() && a.iter().zip(b).all(|(x, y)| x.same(y))
 }
 
-fn install_key(install: &Install) -> (RunIdx, Option<SlotIdx>, u64) {
-	(
-		install.run(),
-		install.slot(),
-		install.value().map_or(0, Value::hash_value),
-	)
+fn input_key(install: &Install) -> (RunIdx, Option<SlotIdx>) {
+	(install.run(), install.slot())
 }
 
 fn runs_of(installs: &Installs) -> Vec<RunIdx> {
@@ -474,7 +470,7 @@ impl<'a, 'b> Search<'a, 'b> {
 		}
 	}
 
-	fn project(&mut self, mut installs: Installs) -> Installs {
+	fn project(&self, mut installs: Installs) -> Installs {
 		installs.retain(|install| self.relevant(install));
 		for install in &mut installs {
 			if let Install::Value { value, .. } = install {

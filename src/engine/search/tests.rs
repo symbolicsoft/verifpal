@@ -44,7 +44,7 @@ fn removing_inputs_after_relevant_actions_preserves_query_violations() {
 		let cx = Context::new(&program, &km);
 		let ctx = VerifyContext::new(&model, Vec::new(), 1, None, Vec::new(), Vec::new());
 		let root = execute(&cx, &Vec::new());
-		let mut search = Search::new(&ctx, &cx, root);
+		let search = Search::new(&ctx, &cx, root);
 		let mut choices: Installs = program
 			.deliveries
 			.iter()

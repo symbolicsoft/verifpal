@@ -162,15 +162,12 @@ impl<'a, 'b> Search<'a, 'b> {
 		self.union.closed.close(&self.cx.km.capabilities);
 	}
 
-	pub(super) fn derivable_in(&self, node: NodeIdx, v: &Value) -> bool {
+	pub(super) fn derivable_in(&self, node: NodeIdx, v: &Value, phase: i32) -> bool {
 		let derive = || {
 			let capabilities = &self.cx.km.capabilities;
-			let node = &self.nodes[node];
-			node.memo
-				.borrow_mut()
-				.within(capabilities, node.state(), || {
-					obtainable(v, capabilities, node.state())
-				})
+			let (state, memo) = self.nodes[node].at(phase);
+			memo.borrow_mut()
+				.within(capabilities, state, || obtainable(v, capabilities, state))
 		};
 		let Value::Primitive(p) = v else {
 			return derive();
@@ -178,7 +175,7 @@ impl<'a, 'b> Search<'a, 'b> {
 		if !crate::term::hashing::hashconsed(p) {
 			return derive();
 		}
-		let key = (node, Arc::as_ptr(p) as usize);
+		let key = (node, Arc::as_ptr(p) as usize, phase);
 		if let Some(&known) = self.memo.derivable.borrow().get(&key) {
 			return known;
 		}

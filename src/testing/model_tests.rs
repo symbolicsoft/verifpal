@@ -3,7 +3,11 @@
 
 const ATTACK_IS_REPORTED_WITHOUT_A_TRACE: [(&str, usize); 0] = [];
 
-const SWEPT_MODELS_OUTSIDE_EXAMPLES_TEST: [&str; 23] = [
+const SWEPT_MODELS_OUTSIDE_EXAMPLES_TEST: [&str; 27] = [
+	"examples/epassport/remote_aa.vp",
+	"examples/epassport/remote_aa_bound.vp",
+	"examples/epassport/remote_aa_private_nfc.vp",
+	"examples/epassport/remote_aa_bound_private_nfc.vp",
 	"examples/transport-layer/tls13-0rtt.vp",
 	"examples/transport-layer/piknik.vp",
 	"examples/transport-layer/needham-schroeder.vp",
@@ -5180,6 +5184,34 @@ fn test_search_broadcast_subset() {
 	for sessions in [1, 2] {
 		run_model_sessions("search_broadcast_subset.vp", sessions, "c1");
 		run_model_sessions("search_broadcast_subset_guarded.vp", sessions, "c0");
+	}
+}
+
+#[test]
+fn test_search_supplier_same_input() {
+	for sessions in [1, 2] {
+		run_model_sessions("search_supplier_same_input.vp", sessions, "a1");
+		run_model_sessions("search_supplier_same_input_guarded.vp", sessions, "a0");
+	}
+}
+
+#[test]
+fn test_search_starved_not_stuck() {
+	for sessions in [1, 2] {
+		run_model_sessions("search_starved_not_stuck.vp", sessions, "a1");
+		run_model_sessions("search_starved_not_stuck_guarded.vp", sessions, "a0");
+	}
+}
+
+#[test]
+fn test_remote_aa_bound_disclosed_signature() {
+	for model in [
+		"remote_aa_bound_leaked_signature.vp",
+		"remote_aa_bound_weak_nfc.vp",
+		"remote_aa_bound_leaked_nfc_key.vp",
+	] {
+		run_model_sessions(model, 1, "a0");
+		run_model(model, "a1");
 	}
 }
 

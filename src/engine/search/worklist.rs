@@ -4,7 +4,7 @@
 use std::sync::Arc;
 
 use super::{
-	Attempt, AttemptIdx, Bypassed, Family, HONEST_NODE, Node, Outcome, Search, Stuck, install_key,
+	Attempt, AttemptIdx, Bypassed, Family, HONEST_NODE, Node, Outcome, Search, Stuck, input_key,
 	normalize, runs_of,
 };
 use crate::engine::exec::{Execution, Install, Installs, execute};
@@ -92,8 +92,8 @@ impl<'a, 'b> Search<'a, 'b> {
 		let at = self.nodes.next_index();
 		for install in &node.installs {
 			self.retries
-				.by_install
-				.entry(install_key(install))
+				.by_input
+				.entry(input_key(install))
 				.or_default()
 				.push(at);
 		}
@@ -293,9 +293,9 @@ impl<'a, 'b> Search<'a, 'b> {
 				.filter(|(_, install)| {
 					!admitted.is_empty()
 						&& stuck_at(install)
-						&& install
-							.value()
-							.is_some_and(|value| self.derivable_in(HONEST_NODE, value))
+						&& install.value().is_some_and(|value| {
+							self.derivable_in(HONEST_NODE, value, self.cx.km.max_phase)
+						})
 				})
 				.map(|(install, _)| (install, HONEST_NODE.next()))
 				.collect();

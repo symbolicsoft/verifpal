@@ -2,14 +2,13 @@
  * SPDX-License-Identifier: GPL-3.0-only */
 
 use super::{
-	Family, HONEST_NODE, Node, NodeIdx, Search, Source, compatible_with, install_key, normalize,
+	Family, HONEST_NODE, Node, NodeIdx, Search, Source, compatible_with, input_key, normalize,
 	runs_of, same_installs,
 };
 use crate::engine::exec::{Install, Installs, install_at};
 use crate::engine::program::{Event, RunIdx};
 use crate::protocol::SlotIdx;
 use crate::term::Value;
-use crate::theory::obtainable;
 use crate::util::index::Idx;
 
 impl<'a, 'b> Search<'a, 'b> {
@@ -151,7 +150,7 @@ impl<'a, 'b> Search<'a, 'b> {
 				.filter_map(|install| Some((install.value()?, None))),
 		);
 		let tried_with = &self.retries.stuck[at].tried_with;
-		let mut suppliers: Vec<NodeIdx> = Vec::new();
+		let mut suppliers: Vec<(NodeIdx, Installs)> = Vec::new();
 		let context: Vec<&Install> = installs
 			.iter()
 			.filter(|install| !stuck_at(install))
@@ -160,8 +159,8 @@ impl<'a, 'b> Search<'a, 'b> {
 			.iter()
 			.map(|install| {
 				self.retries
-					.by_install
-					.get(&install_key(install))
+					.by_input
+					.get(&input_key(install))
 					.map_or(&[][..], Vec::as_slice)
 			})
 			.min_by_key(|posting| posting.len())
@@ -180,22 +179,28 @@ impl<'a, 'b> Search<'a, 'b> {
 			for &n in &rarest[start..] {
 				*next = n.next();
 				if sources.iter().any(|s| s.node == n)
-					|| suppliers.contains(&n)
+					|| suppliers.iter().any(|(m, _)| *m == n)
 					|| tried_with.contains(&n)
 				{
 					continue;
 				}
-				let within = context
-					.iter()
-					.all(|install| self.nodes[n].installs.iter().any(|held| held.same(install)));
-				if within
-					&& compatible_with(&installs, &self.nodes[n].installs)
-					&& obtainable(value, &self.cx.km.capabilities, self.nodes[n].at(phase))
-				{
-					suppliers.push(n);
-					found = true;
-					break;
+				let within = context.iter().all(|install| {
+					self.nodes[n]
+						.installs
+						.iter()
+						.any(|held| held.same_input(install))
+				});
+				if !within || !self.derivable_in(n, value, phase) {
+					continue;
 				}
+				let plan = self.project(self.merged(&[n], installs.clone()));
+				if same_installs(&plan, &installs) || self.attempts.tried.position(&plan).is_some()
+				{
+					continue;
+				}
+				suppliers.push((n, plan));
+				found = true;
+				break;
 			}
 			if !found {
 				*next = self.nodes.next_index();
@@ -206,16 +211,13 @@ impl<'a, 'b> Search<'a, 'b> {
 			sources
 				.iter()
 				.map(|s| s.node)
-				.chain(suppliers.iter().copied()),
+				.chain(suppliers.iter().map(|(n, _)| *n)),
 		);
-		for n in suppliers {
+		for (_, plan) in suppliers {
 			if self.done() {
 				return;
 			}
-			let plan = self.merged(&[n], installs.clone());
-			if !same_installs(&plan, &installs) {
-				self.as_family(Family::Stuck, |search| search.consider(plan));
-			}
+			self.as_family(Family::Stuck, |search| search.consider(plan));
 		}
 		self.try_sources(&installs, &slots, sources);
 	}

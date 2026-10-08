@@ -38,9 +38,10 @@ impl<'a, 'b> Search<'a, 'b> {
 			crate::theory::KnowledgeInputs::new(capabilities, &self.union.knowledge.state);
 		let mut chosen: Vec<NodeIdx> = Vec::new();
 		let mut emitted: Option<Knowledge> = None;
+		let last = self.cx.km.max_phase;
 		for (_, value, _) in signature {
-			if self.derivable_in(HONEST_NODE, value)
-				|| chosen.iter().any(|&n| self.derivable_in(n, value))
+			if self.derivable_in(HONEST_NODE, value, last)
+				|| chosen.iter().any(|&n| self.derivable_in(n, value, last))
 			{
 				continue;
 			}
@@ -117,7 +118,7 @@ impl<'a, 'b> Search<'a, 'b> {
 				for &n in &bucket[start..] {
 					if n == HONEST_NODE
 						|| !used.iter().all(|&idx| self.supplies(idx, n))
-						|| !self.derivable_in(n, value)
+						|| !self.derivable_in(n, value, self.cx.km.max_phase)
 					{
 						continue;
 					}

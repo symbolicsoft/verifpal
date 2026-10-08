@@ -1,0 +1,100 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-FileCopyrightText: © 2026 Mounir IDRASSI <mounir.idrassi@amcrypto.jp>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a1 at one session and at two (GitHub issue #50).
+//
+// The attacker replaces Bank's ckMsg with PKE_ENC(bankPub, nil) and opens
+// chalMsg, learning chal. It opens ckMsg@2 with Evil's leaked key and hands
+// Phone@2 chal under ck@2, so Passport@2 signs chal. The weak NFC answer
+// discloses that signature, which the attacker encrypts under nil for Bank.
+// Bank accepts a resp that no Phone sent: a1.
+//
+// The honest execution discloses SIGN(aaKey, chal) through the weak answer,
+// so the candidate replacing ckMsg and resp takes the signature on trust and
+// is stuck: its own ckMsg halts the honest Phone, and nobody signs chal. The
+// executions that have Phone@2 sign chal replace ckMsg too, with another key.
+// Retrying the stuck candidate only with executions holding its exact ckMsg
+// found none. One that replaces the same input is a source, and the
+// candidate's ckMsg wins the merge. Without the weak answer the signature is
+// not honestly derivable, the cheapest execution deriving it supplies Phone@2's
+// install directly, and the attack was found all along.
+//
+// search_supplier_same_input_guarded.vp guards chalMsg and holds.
+
+attacker[active]
+
+principal Passport[
+	knows private aaKey
+	dg15 = PUBKEY(aaKey)
+]
+
+Passport -> Bank: [dg15]
+
+principal Evil[
+	knows private evilKey
+	evilPub = PUBKEY(evilKey)
+	leaks evilKey
+]
+
+principal Bank[
+	knows private bankKey
+	bankPub = PUBKEY(bankKey)
+]
+
+Bank -> Phone: [bankPub]
+Evil -> Phone: [evilPub]
+
+principal Phone[
+	knows private nfcKey
+	knows public rpPub, nChal, nResp
+	generates ck
+	ckMsg = PKE_ENC(rpPub, ck)
+]
+
+Phone -> Bank: ckMsg
+
+principal Bank[
+	knows public nChal, nResp
+	ck_b = PKE_DEC(bankKey, ckMsg)
+	generates chal
+	chalMsg = AEAD_ENC(ck_b, nChal, chal, nil)
+]
+
+Bank -> Phone: chalMsg
+
+principal Phone[
+	chal_p = AEAD_DEC(ck, nChal, chalMsg, nil)?
+	nfcRequest = ENC(nfcKey, chal_p)
+]
+
+Phone -> Passport: [nfcRequest]
+
+principal Passport[
+	knows private nfcKey
+	challenge_p = DEC(nfcKey, nfcRequest)
+	aaSig = SIGN(aaKey, challenge_p)
+	nfcAnswer = ENC[weak](nfcKey, aaSig)
+]
+
+Passport -> Phone: [nfcAnswer]
+
+principal Phone[
+	aaSig_phone = DEC(nfcKey, nfcAnswer)
+	resp = AEAD_ENC(ck, nResp, aaSig_phone, nil)
+]
+
+Phone -> Bank: resp
+
+principal Bank[
+	_ = SIGNVERIF(dg15, chal, AEAD_DEC(ck_b, nResp, resp, nil))?
+]
+
+scenarios[
+	Phone[rpPub = bankPub]
+	Phone[rpPub = evilPub]
+]
+
+queries[
+	authentication? Phone -> Bank: resp
+]

@@ -2,30 +2,30 @@
 // SPDX-FileCopyrightText: © 2026 Mounir IDRASSI <mounir.idrassi@amcrypto.jp>
 // SPDX-License-Identifier: GPL-3.0-only
 //
-// remote_aa_bound.vp with the private NFC exchange of
-// remote_aa_private_nfc.vp. The phone encrypts the value to sign and the
-// chip encrypts its answer under nfcKey, known only to Phone and Passport.
-// Guards prevent replacement. This is an ideal private local link; it
-// doesn't implement BAC or PACE Secure Messaging.
+// Expected: a0 at one session, a1 at two (GitHub issue #50).
 //
-// Expected: a0, at one session and at two. No attack is found in these
-// searches, with the session count applying per principal, per scenario;
-// this is not a security proof, even within those bounds. The signature
-// obtained by a dishonest verifier covers that verifier's key, while the
-// bank expects its own key. The relay in remote_aa_private_nfc.vp no longer
-// answers the bank's challenge.
+// examples/epassport/remote_aa_bound_private_nfc.vp, where the chip also
+// leaks aaSig. The chip signs HASH(rpPub, chal_p) and Bank checks a
+// signature over HASH(bankPub, chal), so only a phone that trusts Bank can
+// produce one Bank accepts. Bank opens resp under the key in ckMsg, so the
+// attacker must replace ckMsg with a key of its own. At one session that
+// halts Phone, the only phone whose signature Bank accepts: a0.
 //
-// The reported attack at two sessions in remote_aa_bound.vp obtains aaSig
-// from NFC after exploiting nonce reuse on the internet connection. Here
-// that local exchange is private. The internet connection still uses the
-// original key transport and fixed record nonces, so these results don't
-// establish the security of that connection: disclosing aaSig any other
-// way brings the attack back (examples/test/remote_aa_bound_weak_nfc.vp,
-// remote_aa_bound_leaked_nfc_key.vp, remote_aa_bound_leaked_signature.vp).
+// At two sessions the attacker replaces Bank's ckMsg with PKE_ENC(bankPub,
+// nil), reads chal, and replays Phone#2's ckMsg#2 to Bank@2, so Bank#2 and
+// Bank@2 both encrypt under ck#2 and the fixed nChal. That pair lets it
+// forge chal under ck#2 for Phone#2, whose chip signs HASH(bankPub, chal)
+// and leaks it. Sealed under nil, the signature is a resp that Bank accepts
+// and no Phone sent: a1.
 //
-// Active Authentication accepts a challenge of eight bytes. The HASH used
-// for the service binding has no length limit in this model; a concrete
-// encoding would need its own analysis.
+// The search reaches this through a merge in which Bank's receive of resp
+// also waits on dg1_phone, dg15_phone and sodSig_phone, which the halted
+// Phone never sends. That receive counted as stuck although its resp install
+// was derivable, so the merge was dropped instead of having those slots
+// filled. The stuck candidate also spent its one supplier per round on
+// suppliers whose merge it had already tried, and never reached this one.
+//
+// remote_aa_bound_private_nfc.vp, without the leak, holds.
 
 attacker[active]
 
@@ -91,6 +91,7 @@ principal Passport[
 	sodSig_p = DEC(persoKey, perso)
 	challenge_p = DEC(nfcKey, nfcRequest)
 	aaSig = SIGN(aaKey, challenge_p)
+	leaks aaSig
 	nfcAnswer = ENC(nfcKey, CONCAT(dg1, dg15, sodSig_p, aaSig))
 ]
 

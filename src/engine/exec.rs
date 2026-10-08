@@ -352,7 +352,12 @@ fn freeze(cx: &Context, ex: &mut Execution, installs: &Installs, phase: i32) {
 			}
 			match install_at(installs, r, slot) {
 				None if ex.sent[d].is_none() => ex.withheld.push((r, slot)),
-				Some(_) if !ex.stuck.contains(&(r, slot)) => ex.stuck.push((r, slot)),
+				Some(t)
+					if !ex.stuck.contains(&(r, slot))
+						&& !(deliverable(t) && ex.knowledge.derivable(t, &cx.km.capabilities)) =>
+				{
+					ex.stuck.push((r, slot))
+				}
 				_ => {}
 			}
 		}
