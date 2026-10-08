@@ -1624,6 +1624,47 @@ fn test_cap_noop_annotated() {
 	run_model("cap_noop_annotated.vp", "c0a1");
 }
 #[test]
+fn test_epassport_remote_aa_nfc_visibility() {
+	for (model, codes) in [
+		("remote_aa.vp", ["a1", "a1"]),
+		("remote_aa_bound.vp", ["a0", "a1"]),
+		("remote_aa_private_nfc.vp", ["a1", "a1"]),
+		("remote_aa_bound_private_nfc.vp", ["a0", "a0"]),
+	] {
+		let path = format!("examples/epassport/{model}");
+		for (sessions, expected) in [(1, codes[0]), (2, codes[1])] {
+			let (results, code) = crate::verify::verify_with_sessions(&path, sessions)
+				.unwrap_or_else(|e| panic!("{model} at {sessions} sessions: {e}"));
+			assert_code(model, Some(sessions), &results, &code, expected);
+			let derives = |prefix: &str, detail: &str| {
+				results[0].steps.iter().any(|step| {
+					step.kind == "derive"
+						&& step.text.starts_with(prefix)
+						&& step.text.contains(detail)
+				})
+			};
+			if model == "remote_aa_private_nfc.vp" {
+				assert!(
+					derives("Attacker opens resp@2", "obtaining aasig"),
+					"{model} at {sessions} sessions: expected the documented witness to obtain \
+					 the signature from the phone's Internet response: {}",
+					results[0].summary
+				);
+			}
+			if model == "remote_aa_bound.vp" && sessions == 2 {
+				assert!(
+					derives("Attacker forges ", "under the key and nonce")
+						&& derives("Attacker observes aasig", "on the wire"),
+					"{model}: expected the documented nonce-reuse witness to obtain the signature from \
+					 the plaintext NFC exchange: {}",
+					results[0].summary
+				);
+			}
+		}
+	}
+}
+
+#[test]
 fn test_cen() {
 	run_model_at("examples/contact-tracing/cen.vp", "cen.vp", "c0c1c0");
 }
