@@ -1,0 +1,48 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a0 at one session, a1 at two.
+//
+// search_bases_after_own_leak.vp with Alice's key guarded on its way to
+// Carol: s is disclosed only by Bob's leak, after his receive, so no forged c
+// can reach him. At two sessions s is long-term and Bob's leak precedes
+// Bob#2's receive, so the attacker forges c#2 for Bob#2.
+attacker[active]
+
+principal Alice[
+	knows private s, ska
+	pka = PUBKEY(ska)
+	generates m, gv, nn
+	c = AEAD_ENC(s, nn, m, gv)
+]
+
+Alice -> Carol: [pka]
+
+principal Carol[
+	knows private s
+	e = PKE_ENC(pka, s)
+]
+
+Carol -> Alice: e
+
+principal Alice[
+	ds = PKE_DEC(ska, e)
+]
+
+Alice -> Bob: [gv], [nn], c
+
+principal Bob[
+	knows private s
+	d = AEAD_DEC(s, nn, c, gv)?
+	leaks s
+]
+
+phase[1]
+
+principal Carol[
+	leaks s
+]
+
+queries[
+	authentication? Alice -> Bob: c
+]

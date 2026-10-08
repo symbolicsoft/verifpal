@@ -155,13 +155,32 @@ pub(crate) fn can_recompose(p: &Primitive, attacker: &AttackerState) -> Option<R
 	if p.threshold == 0 {
 		return None;
 	}
-	let mut candidates = Vec::new();
+	let used = held_shares(p, attacker, None, p.threshold);
+	(used.len() == p.threshold).then(|| RecomposeResult {
+		revealed: p.arguments[rule.reveal].clone(),
+		used,
+	})
+}
+
+fn held_shares(
+	p: &Primitive,
+	attacker: &AttackerState,
+	except: Option<usize>,
+	enough: usize,
+) -> Vec<Value> {
+	let mut held = Vec::new();
 	for output_idx in 0..MAX_SHARES {
+		if held.len() == enough {
+			break;
+		}
+		if except == Some(output_idx) {
+			continue;
+		}
 		let hash = crate::term::hashing::primitive_hash_at_output(p, output_idx);
 		let Some(indices) = attacker.known_map.get(&hash) else {
 			continue;
 		};
-		let held = indices.iter().find_map(|&i| match attacker.known.get(i) {
+		if let Some(known) = indices.iter().find_map(|&i| match attacker.known.get(i) {
 			Some(known @ Value::Primitive(known_prim))
 				if equivalent_primitives(known_prim, p, false)
 					&& known_prim.output == output_idx =>
@@ -169,19 +188,31 @@ pub(crate) fn can_recompose(p: &Primitive, attacker: &AttackerState) -> Option<R
 				Some(known.clone())
 			}
 			_ => None,
-		});
-		let Some(known) = held else {
-			continue;
-		};
-		candidates.push(known);
-		if candidates.len() == p.threshold {
-			return Some(RecomposeResult {
-				revealed: p.arguments[rule.reveal].clone(),
-				used: candidates,
-			});
+		}) {
+			held.push(known);
 		}
 	}
-	None
+	held
+}
+
+fn can_interpolate(
+	p: &Primitive,
+	capabilities: &CapabilityIndex,
+	attacker: &AttackerState,
+) -> Option<DerivationRecord> {
+	let rule = recompose_rule(p.id)?;
+	let secret = p.arguments.get(rule.reveal)?;
+	if p.threshold == 0 {
+		return None;
+	}
+	if obtainable(secret, capabilities, attacker) {
+		let others = held_shares(p, attacker, Some(p.output), p.threshold - 1);
+		return (others.len() + 1 == p.threshold).then(|| DerivationRecord::Reconstructed {
+			from: vec![secret.clone()],
+		});
+	}
+	let using = held_shares(p, attacker, Some(p.output), p.threshold);
+	(using.len() == p.threshold).then_some(DerivationRecord::Recomposed { using })
 }
 
 pub(crate) fn can_reconstruct_primitive(
@@ -189,6 +220,11 @@ pub(crate) fn can_reconstruct_primitive(
 	capabilities: &CapabilityIndex,
 	attacker: &AttackerState,
 ) -> Option<DerivationRecord> {
+	if p.instance != 0
+		&& crate::primitive::spec(p.id).is_ok_and(|spec| spec.distinct_per_assignment)
+	{
+		return can_interpolate(p, capabilities, attacker);
+	}
 	can_reconstruct_primitive_directly(p, capabilities, attacker).or_else(|| {
 		let Value::Primitive(swapped) =
 			crate::term::hashing::hashcons(&Value::Primitive(Arc::new(commutativity_swap(p)?)))

@@ -1,0 +1,77 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0a1 at one session and at two.
+//
+// SPLICE/AS (Yamaguchi et al., 1990) with the certificate exchange elided:
+// public keys travel on guarded wires.
+//   3. C -> S: C, S, {C, T, L, {N2}PK(S)}SK(C)
+//   6. S -> C: S, C, {S, N2+1}PK(C)
+// Hwang and Chen (1995): {N2}PK(S) does not name C, so Mallory, a legitimate
+// client whose key leaks, re-signs Client's message 3 as her own. The server
+// run that serves her answers {S, N2+1}PK(M); the attacker opens it and
+// reseals it for Client, which accepts a reply the server never sent her.
+// The server's peer is the scenario axis.
+//
+// The honest server has to start, because Client waits on its guarded key,
+// and then must not answer: the attacker intercepts Client's message 3 to it.
+// The search once left a relied-on sender either running or unstarted, so the
+// attack appeared only at two sessions, through an accidental sibling
+// transfer. spore_splice_as_hwang_chen.vp is the counterweight.
+attacker[active]
+
+principal Server[
+	knows private s
+	knows public gpeer, s_name
+	gs = PUBKEY(s)
+]
+
+principal Client[
+	knows private c
+	knows public s_name
+	gc = PUBKEY(c)
+	generates n2, t
+]
+
+principal Mallory[
+	knows private mk
+	gm = PUBKEY(mk)
+	leaks mk
+]
+
+Server -> Client: [gs]
+Client -> Server: [gc]
+Mallory -> Server: [gm]
+
+principal Client[
+	e3 = PKE_ENC(gs, n2)
+	sig3 = SIGN(c, CONCAT(t, e3))
+]
+
+Client -> Server: t, e3, sig3
+
+principal Server[
+	_ = SIGNVERIF(gpeer, CONCAT(t, e3), sig3)?
+	n2_s = PKE_DEC(s, e3)
+	m6 = PKE_ENC(gpeer, CONCAT(s_name, HASH(n2_s)))
+]
+
+Server -> Client: m6
+
+principal Client[
+	d6 = PKE_DEC(c, m6)
+	sn, hn = SPLIT(d6)?
+	_ = ASSERT(sn, s_name)?
+	_ = ASSERT(hn, HASH(n2))?
+	done = HASH(sn, hn)
+]
+
+scenarios[
+	Server[gpeer = gc]
+	Server[gpeer = gm]
+]
+
+queries[
+	confidentiality? n2
+	authentication? Server -> Client: m6
+]

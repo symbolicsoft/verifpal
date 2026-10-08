@@ -26,6 +26,19 @@ fn projects_a_variable(v: &Value) -> bool {
 	})
 }
 
+fn shapes_a_variable(v: &Value) -> bool {
+	crate::term::subterms(v).any(|term| match term {
+		Value::Primitive(p) => {
+			(rewrite_rule(p.id).is_some()
+				|| commutativity_rule(p.id).is_some()
+				|| crate::primitive::is_projection(p.id)
+				|| crate::primitive::is_equality(p.id))
+				&& p.arguments.iter().any(contains_var)
+		}
+		Value::Constant(_) | Value::Variable(_) => false,
+	})
+}
+
 impl<'a> Deducer<'a> {
 	pub(super) fn solve_by_reuse(
 		&self,
@@ -253,8 +266,11 @@ impl<'a> Deducer<'a> {
 			.ok()
 			.and_then(|spec| spec.forgeable_secret);
 		let by_reuse = forgeable_by_reuse(p, self.attacker);
+		let (shaping, carried): (Vec<usize>, Vec<usize>) =
+			(0..p.arguments.len()).partition(|&i| shapes_a_variable(&p.arguments[i]));
 		let mut frontier = vec![s.clone()];
-		for (i, arg) in p.arguments.iter().enumerate() {
+		for i in shaping.into_iter().chain(carried) {
+			let arg = &p.arguments[i];
 			let exempt = Some(i) == forgeable_secret || by_reuse.contains(&i);
 			let mut next = Vec::new();
 			for candidate in &frontier {

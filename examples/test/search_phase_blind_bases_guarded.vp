@@ -1,0 +1,44 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a0 at one session and at two. Counterweight to
+// search_phase_blind_bases.vp: Alice's public key reaches Carol guarded, so s
+// is only disclosed by the phase-1 leak, after Bob has already accepted c.
+attacker[active]
+
+principal Alice[
+	knows private s, ska
+	pka = PUBKEY(ska)
+	generates m, gv, nn
+	c = AEAD_ENC(s, nn, m, gv)
+]
+
+Alice -> Carol: [pka]
+
+principal Carol[
+	knows private s
+	e = PKE_ENC(pka, s)
+]
+
+Carol -> Alice: e
+
+principal Alice[
+	ds = PKE_DEC(ska, e)
+]
+
+Alice -> Bob: [gv], [nn], c
+
+principal Bob[
+	knows private s
+	d = AEAD_DEC(s, nn, c, gv)?
+]
+
+phase[1]
+
+principal Carol[
+	leaks s
+]
+
+queries[
+	authentication? Alice -> Bob: c
+]

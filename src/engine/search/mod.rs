@@ -167,12 +167,13 @@ struct Retries {
 	by_input: IdMap<(RunIdx, Option<SlotIdx>), Vec<NodeIdx>>,
 	routes: Vec<Route>,
 	rerouting: bool,
+	wants: Vec<(Installs, Vec<(RunIdx, SlotIdx)>)>,
 }
 
 #[derive(Default)]
 struct Memo {
 	derivable: std::cell::RefCell<IdMap<(NodeIdx, usize, i32), bool>>,
-	cheapest: std::cell::RefCell<IdMap<usize, Cheapest>>,
+	cheapest: std::cell::RefCell<IdMap<(usize, i32), Cheapest>>,
 	holders: IdMap<(SlotIdx, QueryKind), Holders>,
 }
 
@@ -207,6 +208,7 @@ impl Default for Holders {
 #[derive(Clone)]
 struct Outcome {
 	halts: Vec<(RunIdx, SlotIdx)>,
+	waits: Vec<(RunIdx, SlotIdx)>,
 	settled: bool,
 }
 
@@ -319,6 +321,7 @@ fn installs_hash(installs: &Installs) -> u64 {
 		let (input, value) = match install {
 			Install::Value { slot, value, .. } => (run | slot.index() as u64, value.hash_value()),
 			Install::Idle { .. } => (run | u64::from(u32::MAX), 0),
+			Install::Drop { slot, .. } => (run | slot.index() as u64, 1),
 		};
 		acc = acc
 			.rotate_left(13)
@@ -467,6 +470,7 @@ impl<'a, 'b> Search<'a, 'b> {
 		match install {
 			Install::Value { run, slot, .. } => self.relevant_input(*run, *slot),
 			Install::Idle { run } => self.facts.relevant[*run] > StepIdx::new(0),
+			Install::Drop { run, slot } => self.relevant_input(*run, *slot),
 		}
 	}
 
@@ -508,6 +512,7 @@ impl<'a, 'b> Search<'a, 'b> {
 			self.as_family(Family::Unshaped, |search| search.fixpoint(Mode::Unshaped));
 		}
 		self.reroute();
+		self.supply_wants();
 	}
 
 	fn spoken(&self, install: &Install) -> String {
@@ -517,6 +522,9 @@ impl<'a, 'b> Search<'a, 'b> {
 				format!("{name}'s {} is {value}", self.cx.km.slots[*slot].constant)
 			}
 			Install::Idle { .. } => format!("{name} never starts"),
+			Install::Drop { slot, .. } => {
+				format!("{name} never receives {}", self.cx.km.slots[*slot].constant)
+			}
 		}
 	}
 
@@ -530,6 +538,9 @@ impl<'a, 'b> Search<'a, 'b> {
 						format!("{name}.{}={value}", self.cx.km.slots[*slot].constant)
 					}
 					Install::Idle { .. } => format!("{name}.unstarted"),
+					Install::Drop { slot, .. } => {
+						format!("{name}.{}=dropped", self.cx.km.slots[*slot].constant)
+					}
 				}
 			})
 			.collect::<Vec<String>>()
@@ -563,7 +574,7 @@ impl<'a, 'b> Search<'a, 'b> {
 	}
 }
 
-type Bypassed = Vec<(RunIdx, usize)>;
+type Bypassed = Vec<(RunIdx, StepIdx)>;
 
 type Route = (Installs, Vec<(Value, RunIdx, Bypassed)>);
 
@@ -573,6 +584,7 @@ fn compatible_with(plan: &Installs, source: &Installs) -> bool {
 			install_at(plan, *run, *slot).is_none_or(|held| held.equivalent(value, true))
 		}
 		Install::Idle { .. } => true,
+		Install::Drop { run, slot } => install_at(plan, *run, *slot).is_none(),
 	})
 }
 

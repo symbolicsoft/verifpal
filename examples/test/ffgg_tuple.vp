@@ -1,0 +1,58 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0 at one session, c1 at two.
+//
+// ffgg.vp with Bob's two nonces sent as one pair that Alice splits. Millen's
+// parallel attack is unchanged: the attacker hands Alice#2 CONCAT(n1#2, n1),
+// keeping the first nonce Bob#2 checks and putting Bob's n1 second, so
+// Bob#2's reply msg2#2 is PKE_ENC(pkb, CONCAT(n1, m, n1#2)). Replayed to Bob as
+// msg, it passes his check on n1 and he sends m in clear as y1. At one session
+// there is no second Bob run to serve as the oracle.
+//
+// The oracle's shape fixes only the pair's second field, so the solver must
+// see through Alice's projections of one received pair, and must leave the
+// unconstrained first field to the free-position policy, which keeps the
+// honest n1#2, rather than fixing it to nil. Unification now opens a projected
+// variable into a tuple of fresh fields, and oracle input proposals keep
+// their free positions open. ffgg_tuple_guarded.vp is the counterweight.
+attacker[active]
+
+principal Bob[
+	knows private skb
+	pkb = PUBKEY(skb)
+]
+
+principal Alice[
+	knows private m
+]
+
+Bob -> Alice: [pkb]
+
+principal Bob[
+	generates n1
+	generates n2
+	nonces = CONCAT(n1, n2)
+]
+
+Bob -> Alice: nonces
+
+principal Alice[
+	n1_a, n2_a = SPLIT(nonces)
+	msg = PKE_ENC(pkb, CONCAT(n1_a, n2_a, m))
+]
+
+Alice -> Bob: msg
+
+principal Bob[
+	clear = PKE_DEC(skb, msg)
+	x, y1, y2 = SPLIT(clear)?
+	_ = ASSERT(x, n1)?
+	msg2 = PKE_ENC(pkb, CONCAT(y1, y2, n1))
+]
+
+Bob -> Alice: y1, msg2
+
+queries[
+	confidentiality? m
+]

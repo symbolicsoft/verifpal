@@ -1,0 +1,44 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a1 at one session and at two. Bob splits c, checks its second half
+// against his own guarded challenge, and only then verifies Alice's signature
+// over the whole of c. The attacker sends CONCAT(nil, nb): the split and the
+// challenge check pass, so Bob has used c, and the signature check fails as the
+// last step that mentions c, so no later use cancels the acceptance. Under
+// positional acceptance this is a forgery. The search once reported a0: every
+// constraint group it solved for Bob ended at his last check, so it never
+// proposed a value that passes the uses before the signature and fails it.
+
+attacker[active]
+
+principal Alice[
+	knows private ska
+	pka = PUBKEY(ska)
+]
+
+Alice -> Bob: [pka]
+
+principal Bob[
+	generates nb
+]
+
+Bob -> Alice: [nb]
+
+principal Alice[
+	generates n
+	c = CONCAT(n, nb)
+	sig = SIGN(ska, c)
+]
+
+Alice -> Bob: c, [sig]
+
+principal Bob[
+	a, b = SPLIT(c)?
+	_ = ASSERT(b, nb)?
+	_ = SIGNVERIF(pka, c, sig)?
+]
+
+queries[
+	authentication? Alice -> Bob: c
+]

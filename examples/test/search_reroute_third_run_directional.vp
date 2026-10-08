@@ -1,0 +1,60 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a0 at one session and at two. Counterweight to
+// search_reroute_third_run.vp: Carol's box2 is bound to HASH(sid) rather than
+// sid, so Bob's own box1 no longer decrypts as box2, Bob cannot be made to
+// send box3 before Carol has spoken, and nothing Alice could take as box1
+// exists before her receive.
+
+attacker[active]
+
+principal Bob[
+	knows private k
+	knows private mb1, mb3
+	generates sid
+]
+
+Bob -> Alice: [sid]
+
+Bob -> Carol: [sid]
+
+principal Bob[
+	generates n1
+	box1 = AEAD_ENC(k, n1, mb1, sid)
+]
+
+Bob -> Alice: n1, box1
+
+principal Alice[
+	knows private k
+	d1 = AEAD_DEC(k, n1, box1, sid)?
+	generates go
+]
+
+Alice -> Carol: [go]
+
+principal Carol[
+	knows private k
+	knows private mc
+	generates n2
+	box2 = AEAD_ENC(k, n2, mc, HASH(sid))
+]
+
+Carol -> Bob: n2, box2
+
+principal Bob[
+	d2 = AEAD_DEC(k, n2, box2, HASH(sid))?
+	generates n3
+	box3 = AEAD_ENC(k, n3, mb3, sid)
+]
+
+Bob -> Alice: n3, box3
+
+principal Alice[
+	d3 = AEAD_DEC(k, n3, box3, sid)?
+]
+
+queries[
+	authentication? Bob -> Alice: box1
+]

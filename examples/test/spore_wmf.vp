@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
 //
-// Expected: c1a1f0 — Wide-Mouth Frog, ported from the Scyther distribution's
+// Expected: c1a1f1 — Wide-Mouth Frog, ported from the Scyther distribution's
 // gui/Protocols/wmf.spdl. Alice picks the session key herself and the server
 // only re-encrypts it for Bob. Timestamps have no symbolic equivalent, so
 // ta and ts stand in as generated values; nothing in the queries turns on
@@ -21,12 +21,15 @@
 //          alone is broken. Scyther has no injective claim at all — every
 //          authentication claim it offers is non-injective, so its Nisynch on
 //          this role reports Ok.
-// f0 kab_b — the key Bob ends up with really is fresh, Alice generating it per
-//          run. The SPDL model records this concern as claim_R3(R, Empty,
-//          (Fresh, Kir)), and `Empty` is a SIGNAL claim: isClaimSignal() marks
-//          it as never verified, so Scyther prints no verdict for it. The
-//          concern was documented and never checked. Here it is checked, and
-//          it holds.
+// f1 kab_b — the key is not fresh for Bob. Alice generates it per run, but
+//          the attacker replays the server's m2 from the sibling session, so
+//          Bob and Bob#2 both end up with kab#2: the replay behind Lowe's attack
+//          on the protocol, with timestamps elided. The SPDL model records this
+//          concern as claim_R3(R, Empty, (Fresh, Kir)), and `Empty` is a SIGNAL
+//          claim: isClaimSignal() marks it as never verified, so Scyther prints
+//          no verdict for it. Here it is checked. A replay was once recognized
+//          only on a received slot, so the key Bob decrypts out of a replayed
+//          m2 read as fresh.
 
 attacker[active]
 

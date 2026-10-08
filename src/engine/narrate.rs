@@ -339,9 +339,17 @@ impl<'a, 'b> Narrator<'a, 'b> {
 			return;
 		};
 		let origin = match knowledge.origin(i) {
-			Origin::Derived(_) => self
-				.disclosure(v)
-				.unwrap_or_else(|| knowledge.origin(i).clone()),
+			Origin::Derived(first) => self.disclosure(v).unwrap_or_else(|| {
+				let upgraded = &knowledge.state.derivations[i];
+				let settled = upgraded
+					.ingredients()
+					.all(|ingredient| knowledge.knows(ingredient).is_some_and(|at| at < len));
+				if first.forged() && !upgraded.forged() && settled {
+					Origin::Derived(upgraded.clone())
+				} else {
+					Origin::Derived(first.clone())
+				}
+			}),
 			origin => origin.clone(),
 		};
 		match origin {
@@ -559,11 +567,30 @@ impl<'a, 'b> Narrator<'a, 'b> {
 			"{} to {}",
 			program.runs[delivery.sender].name, program.runs[delivery.recipient].name
 		);
+		let dropped: Vec<String> = delivery
+			.slots
+			.iter()
+			.filter(|&&(slot, _)| self.ex.runs[run].held(slot).is_none())
+			.map(|&(slot, _)| self.cx.km.slots[slot].constant.to_string())
+			.collect();
+		if !dropped.is_empty() {
+			let recipient = &program.runs[delivery.recipient].name;
+			let mut step = TraceStep::new(
+				"drop",
+				format!(
+					"Attacker drops {} ({route}), and {recipient} continues without {}.",
+					dropped.join(", "),
+					if dropped.len() == 1 { "it" } else { "them" }
+				),
+			);
+			step.principal = Some(recipient.clone());
+			self.steps.push(step);
+		}
 		let replayed = self.replays(run, d, &route);
 		let mut was = Vec::new();
 		let mut items = Vec::new();
 		for (k, &(slot, _)) in delivery.slots.iter().enumerate() {
-			if replayed.contains(&slot) {
+			if replayed.contains(&slot) || self.ex.runs[run].held(slot).is_none() {
 				continue;
 			}
 			if let Some(item) = self.replacement(at, run, d, k, slot, &mut was) {
@@ -950,8 +977,7 @@ impl<'a, 'b> Narrator<'a, 'b> {
 		self.explain(value, self.ex.order.len());
 		let constant = &km.slots[slot].constant;
 		let value_shown = self.shown(slot, value);
-		if !crate::theory::reduce_once(value)
-			.equivalent(&super::unlink::honest_reduct(km, slot), true)
+		if !value.equivalent(&super::unlink::honest_reduct(km, slot), true)
 			&& !carries_a_secret(value, km)
 		{
 			let text = format!(

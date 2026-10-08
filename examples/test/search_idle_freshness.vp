@@ -1,0 +1,42 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: f0 at one session, f1 at two. Carol's reply check binds h to her
+// own t, so a replay of h#2 to Carol only passes if Carol is also fed
+// session 2's s and t; then Carol's u is u#2 and a running Bob would compute
+// and send h#2 himself, which is not a replay. With Bob never started, the
+// attacker replays h#2 from Bob#2 to Carol, who accepts it, and Carol#2
+// accepts the same value: Stale. The search once reported f0 at two sessions: the
+// search only ever leaves a run unstarted for authentication queries.
+// Counterweight: search_idle_freshness_guarded.vp.
+attacker[active]
+
+principal Alice[
+	knows private k
+	generates s
+	t = MAC(k, s)
+]
+
+Alice -> Carol: s, t
+
+principal Carol[
+	knows private k
+	_ = ASSERT(MAC(k, s), t)?
+	u = MAC(k, t)
+]
+
+Carol -> Bob: u
+
+principal Bob[
+	h = HASH(u)
+]
+
+Bob -> Carol: h
+
+principal Carol[
+	_ = ASSERT(HASH(MAC(k, t)), h)?
+]
+
+queries[
+	freshness? h
+]

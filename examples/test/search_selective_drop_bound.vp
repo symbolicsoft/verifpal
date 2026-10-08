@@ -1,0 +1,39 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a0 at one session and at two.
+//
+// search_selective_drop.vp with Bob's tag bound to Carol's challenge: Bob's
+// MAC(k, c) does not verify for Carol#2's c#2, so silencing Bob#2 leaves
+// nothing to replay.
+attacker[active]
+
+principal Carol[
+	knows private k
+	generates nc, c
+]
+
+Carol -> Bob: [nc], c
+
+principal Bob[
+	knows private k
+	ack = MAC(k, nc)
+]
+
+Bob -> Carol: [ack]
+
+principal Bob[
+	hc = HASH(c)
+	t = MAC(k, c)
+]
+
+Bob -> Carol: t
+
+principal Carol[
+	_ = ASSERT(ack, MAC(k, nc))?
+	_ = ASSERT(t, MAC(k, c))?
+]
+
+queries[
+	authentication? Bob -> Carol: t
+]

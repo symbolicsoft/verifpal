@@ -1,0 +1,52 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a1 at one session and at two.
+//
+// search_phase_blind_bases.vp with Bob also leaking s after his check. The
+// forgery is unchanged: the attacker hands Carol its own key, opens her e and
+// forges c for Bob in phase 0. Bob's leak makes s honestly derivable within
+// phase 0, so placement took the forgery's key on trust and added no source,
+// though the leak comes only after the receive that needs it, and the
+// flight was stuck: adding a leak lost an attack. A flight stuck with a value
+// taken on trust from the honest execution is now placed again with its
+// sources. search_bases_after_own_leak_guarded.vp is the counterweight.
+attacker[active]
+
+principal Alice[
+	knows private s, ska
+	pka = PUBKEY(ska)
+	generates m, gv, nn
+	c = AEAD_ENC(s, nn, m, gv)
+]
+
+Alice -> Carol: pka
+
+principal Carol[
+	knows private s
+	e = PKE_ENC(pka, s)
+]
+
+Carol -> Alice: e
+
+principal Alice[
+	ds = PKE_DEC(ska, e)
+]
+
+Alice -> Bob: [gv], [nn], c
+
+principal Bob[
+	knows private s
+	d = AEAD_DEC(s, nn, c, gv)?
+	leaks s
+]
+
+phase[1]
+
+principal Carol[
+	leaks s
+]
+
+queries[
+	authentication? Alice -> Bob: c
+]

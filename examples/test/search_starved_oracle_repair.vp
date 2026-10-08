@@ -1,0 +1,73 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a1a0 at one session and at two.
+//
+// spore_x509_three_way.vp where Bob accepts s1 on its signature check alone.
+// Alice, in her run with Mallory, signs whatever nonce Mallory presents with
+// a valid Mallory signature; presented CONCAT(nil, gb), her message 3 is a
+// message 1 for Bob with na = nil, which Alice never sent as s1.
+//
+// That run's partner, Bob@2, rejects Alice@2's first message, so her receive
+// of the nonce and signature is starved, not halted, and the search repaired
+// only halted proposers. A proposer starved on slots the honest execution
+// also withholds is now repaired at the first check they feed.
+// search_starved_oracle_repair_tagged.vp is the counterweight.
+attacker[active]
+
+principal Alice[
+	knows private a
+	knows public gpeer
+	ga = PUBKEY(a)
+	generates na
+]
+
+principal Bob[
+	knows private b
+	gb = PUBKEY(b)
+	generates nb
+]
+
+principal Mallory[
+	knows private mk
+	gm = PUBKEY(mk)
+	leaks mk
+]
+
+Alice -> Bob: [ga]
+Bob -> Alice: [gb]
+Mallory -> Alice: [gm]
+
+principal Alice[
+	s1 = SIGN(a, CONCAT(na, gpeer))
+]
+
+Alice -> Bob: na, s1
+
+principal Bob[
+	_ = SIGNVERIF(ga, CONCAT(na, gb), s1)?
+	s2 = SIGN(b, CONCAT(nb, ga, na))
+]
+
+Bob -> Alice: nb, s2
+
+principal Alice[
+	_ = SIGNVERIF(gpeer, CONCAT(nb, ga, na), s2)?
+	s3 = SIGN(a, nb)
+]
+
+Alice -> Bob: s3
+
+principal Bob[
+	_ = SIGNVERIF(ga, nb, s3)?
+]
+
+scenarios[
+	Alice[gpeer = gb]
+	Alice[gpeer = gm]
+]
+
+queries[
+	authentication? Alice -> Bob: s1
+	authentication? Alice -> Bob: s3
+]

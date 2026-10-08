@@ -1,0 +1,68 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0a0 at one session and at two.
+//
+// spore_splice_as.vp with Hwang and Chen's repair, {C, N2}PK(S): the server
+// checks that the sealed nonce names its peer, so the server run serving
+// Mallory rejects Client's re-signed message 3 and there is no reply to
+// reseal.
+attacker[active]
+
+principal Server[
+	knows private s
+	knows public gpeer, s_name
+	gs = PUBKEY(s)
+]
+
+principal Client[
+	knows private c
+	knows public s_name
+	gc = PUBKEY(c)
+	generates n2, t
+]
+
+principal Mallory[
+	knows private mk
+	gm = PUBKEY(mk)
+	leaks mk
+]
+
+Server -> Client: [gs]
+Client -> Server: [gc]
+Mallory -> Server: [gm]
+
+principal Client[
+	e3 = PKE_ENC(gs, CONCAT(gc, n2))
+	sig3 = SIGN(c, CONCAT(t, e3))
+]
+
+Client -> Server: t, e3, sig3
+
+principal Server[
+	_ = SIGNVERIF(gpeer, CONCAT(t, e3), sig3)?
+	d3 = PKE_DEC(s, e3)
+	id3, n2_s = SPLIT(d3)?
+	_ = ASSERT(id3, gpeer)?
+	m6 = PKE_ENC(gpeer, CONCAT(s_name, HASH(n2_s)))
+]
+
+Server -> Client: m6
+
+principal Client[
+	d6 = PKE_DEC(c, m6)
+	sn, hn = SPLIT(d6)?
+	_ = ASSERT(sn, s_name)?
+	_ = ASSERT(hn, HASH(n2))?
+	done = HASH(sn, hn)
+]
+
+scenarios[
+	Server[gpeer = gc]
+	Server[gpeer = gm]
+]
+
+queries[
+	confidentiality? n2
+	authentication? Server -> Client: m6
+]

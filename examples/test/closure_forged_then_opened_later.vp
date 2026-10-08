@@ -1,0 +1,37 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1 at one session and at two.
+//
+// Alice's partial x is THRESHOLD_SIGN[forgeable], and its nonce leaks, so the
+// attacker can forge a partial from the start. Alice also sends her genuine x
+// under kx, which leaks in phase 1: the attacker then opens e and holds the
+// genuine partial with its nonce, commitment and message, which reveals s1.
+//
+// A value first held as a forgery kept that record when its genuine copy was
+// later derived, so it was never opened, and declaring `forgeable` lost the
+// disclosure that the unannotated model reports. A genuine derivation that
+// does not pass through the forgery now replaces the record.
+// closure_forged_container_unsent.vp is the counterweight.
+attacker[passive]
+principal Alice[
+	generates k, na, m, nx
+	knows private kx
+	s1, s2 = THRESHOLD_SPLIT[2](k)
+	ca = PUBKEY(na)
+	x = THRESHOLD_SIGN[forgeable](s1, na, ca, m)
+	e = AEAD_ENC(kx, nx, x, nil)
+	leaks na
+]
+Alice -> Bob: ca, m, nx, e
+principal Bob[
+	knows private kx
+	_ = AEAD_DEC(kx, nx, e, nil)
+]
+phase[1]
+principal Alice[
+	leaks kx
+]
+queries[
+	confidentiality? s1
+]

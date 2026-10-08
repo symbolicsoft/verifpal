@@ -1,0 +1,68 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a0a0 at one session, a1a0 at two.
+//
+// search_starved_oracle_repair.vp with messages 1 and 3 signed under distinct
+// tags, so Alice's message 3 never verifies as a message 1. At two sessions
+// s1 is still a plain replay into Bob#2: it carries no challenge of his.
+attacker[active]
+
+principal Alice[
+	knows private a
+	knows public tag1, tag3
+	knows public gpeer
+	ga = PUBKEY(a)
+	generates na
+]
+
+principal Bob[
+	knows private b
+	knows public tag1, tag3
+	gb = PUBKEY(b)
+	generates nb
+]
+
+principal Mallory[
+	knows private mk
+	gm = PUBKEY(mk)
+	leaks mk
+]
+
+Alice -> Bob: [ga]
+Bob -> Alice: [gb]
+Mallory -> Alice: [gm]
+
+principal Alice[
+	s1 = SIGN(a, CONCAT(tag1, na, gpeer))
+]
+
+Alice -> Bob: na, s1
+
+principal Bob[
+	_ = SIGNVERIF(ga, CONCAT(tag1, na, gb), s1)?
+	s2 = SIGN(b, CONCAT(nb, ga, na))
+]
+
+Bob -> Alice: nb, s2
+
+principal Alice[
+	_ = SIGNVERIF(gpeer, CONCAT(nb, ga, na), s2)?
+	s3 = SIGN(a, CONCAT(tag3, nb))
+]
+
+Alice -> Bob: s3
+
+principal Bob[
+	_ = SIGNVERIF(ga, CONCAT(tag3, nb), s3)?
+]
+
+scenarios[
+	Alice[gpeer = gb]
+	Alice[gpeer = gm]
+]
+
+queries[
+	authentication? Alice -> Bob: s1
+	authentication? Alice -> Bob: s3
+]

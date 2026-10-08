@@ -2,7 +2,9 @@
  * SPDX-License-Identifier: GPL-3.0-only */
 
 use super::deduce::Deducer;
-use super::free::{aligned_held_free, honest_slot_terms, keyed_free, preserved_free, swapped_free};
+use super::free::{
+	aligned_held_free, honest_slot_terms, keyed_free, preserved_free, rekeyed_free, swapped_free,
+};
 use super::goals::{goals_for_query, oracle_input_goals};
 use super::symbolic::SymbolicState;
 use super::vars::Substitution;
@@ -48,7 +50,9 @@ pub(crate) fn propose(
 	}
 
 	if pass == Pass::Constructed {
-		proposals.extend(constructed(km, attacker, sym, &deducer, protocol, &blanket));
+		proposals.extend(constructed(
+			km, principal, attacker, sym, &deducer, protocol, &blanket,
+		));
 	}
 
 	let equivalence = open.iter().any(|q| q.kind == QueryKind::Equivalence);
@@ -112,13 +116,14 @@ fn targeted_goals(
 
 fn constructed(
 	km: &ProtocolTrace,
+	principal: PrincipalId,
 	attacker: &AttackerState,
 	sym: &SymbolicState,
 	deducer: &Deducer,
 	protocol: &TermSet,
 	blanket: &Substitution,
 ) -> Vec<Substitution> {
-	let mut proposals = sibling_flight_substitutions(km, sym);
+	let mut proposals = sibling_flight_substitutions(km, principal, sym);
 	let lanes = deducer
 		.lanes(sym.var_slots().count())
 		.into_iter()
@@ -163,6 +168,7 @@ fn with_free_positions(
 			[
 				keyed_free(&honest, sym, proposal),
 				preserved_free(&honest, sym, proposal, attacker, &km.capabilities),
+				rekeyed_free(&honest, sym, proposal, attacker, &km.capabilities),
 			]
 		})
 		.into_iter()
@@ -300,7 +306,11 @@ fn blanket_substitution(sym: &SymbolicState) -> Substitution {
 	out
 }
 
-fn sibling_flight_substitutions(km: &ProtocolTrace, sym: &SymbolicState) -> Vec<Substitution> {
+fn sibling_flight_substitutions(
+	km: &ProtocolTrace,
+	principal: PrincipalId,
+	sym: &SymbolicState,
+) -> Vec<Substitution> {
 	let siblings: Vec<(SlotIdx, Vec<Value>)> = sym
 		.var_slots()
 		.filter_map(|slot| {
@@ -313,16 +323,39 @@ fn sibling_flight_substitutions(km: &ProtocolTrace, sym: &SymbolicState) -> Vec<
 		.map(|(_, values)| values.len())
 		.max()
 		.unwrap_or(0);
-	let mut out = Vec::new();
-	for i in 0..widest {
-		let mut flight = Substitution::default();
-		for (slot, values) in &siblings {
-			if let Some(v) = values.get(i) {
-				flight.insert(vars::attacker_var_id(*slot), v.clone());
-			}
+	let message = |slot: SlotIdx| {
+		km.slots[slot]
+			.sent_by
+			.iter()
+			.find(|event| event.recipient == principal)
+			.map(|event| (event.declared_at, event.sender))
+	};
+	let mut messages: Vec<Option<(i32, PrincipalId)>> = Vec::new();
+	for (slot, _) in &siblings {
+		let key = message(*slot);
+		if !messages.contains(&key) {
+			messages.push(key);
 		}
-		if !flight.is_empty() {
-			out.push(flight);
+	}
+	let mut scopes = vec![None];
+	if messages.len() > 1 {
+		scopes.extend(messages.into_iter().map(Some));
+	}
+	let mut out = Vec::new();
+	for scope in &scopes {
+		for i in 0..widest {
+			let mut flight = Substitution::default();
+			for (slot, values) in &siblings {
+				if scope.is_some_and(|key| message(*slot) != key) {
+					continue;
+				}
+				if let Some(v) = values.get(i) {
+					flight.insert(vars::attacker_var_id(*slot), v.clone());
+				}
+			}
+			if !flight.is_empty() {
+				out.push(flight);
+			}
 		}
 	}
 	out

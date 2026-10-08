@@ -1,0 +1,38 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a0 at one session and at two. Counterweight to
+// search_message_replay.vp: t covers Bob's challenge as well, so Alice#2's
+// second message fails Bob's MAC check.
+attacker[active]
+
+principal Bob[
+	generates nb
+]
+
+Bob -> Alice: nb
+
+principal Alice[
+	knows private k
+	generates n1, m
+	e1 = AEAD_ENC(k, n1, nb, nil)
+	x = ENC(k, m)
+	e2 = ENC(k, x)
+	t = MAC(k, CONCAT(x, nb))
+]
+
+Alice -> Bob: n1, e1
+
+Alice -> Bob: e2, t
+
+principal Bob[
+	knows private k
+	d1 = AEAD_DEC(k, n1, e1, nil)?
+	_ = ASSERT(d1, nb)?
+	dx = DEC(k, e2)
+	_ = ASSERT(MAC(k, CONCAT(dx, nb)), t)?
+]
+
+queries[
+	authentication? Alice -> Bob: t
+]

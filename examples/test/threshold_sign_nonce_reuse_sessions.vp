@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
 //
-// Expected: c0c0a0 at one session, c0c1a1 at two — a long-term key and a
+// Expected: c0c0a1 at one session, c0c1a1 at two — a long-term key and a
 // long-term nonce. Each session's coordinator picks its own message, so
 // across two sessions Alice produces two partials under one share and one
 // nonce over different commitments and messages, which is exactly the reuse
@@ -13,8 +13,13 @@
 // duplicate acceptance rather than a forgery.
 //
 // The participants' commitments and partials reach the coordinator over
-// authenticated channels, as in threshold_sign.vp, so the attacker cannot
-// make the coordinator abort and aggregate in its place.
+// authenticated channels, but aggregation needs nothing secret: the attacker
+// drops one partial on its way to the coordinator, which then never signs,
+// combines the partials it observed and hands the verifier the signature
+// itself. The verifier accepts a signature the coordinator never sent, so
+// the authentication query fails (threshold_sign_public_aggregation.vp does
+// the same over open channels; threshold_sign_sealed_partials.vp seals the
+// partials and holds).
 
 attacker[active]
 

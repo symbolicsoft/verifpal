@@ -1,0 +1,51 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a1 at one session and at two. Carol leaks MAC(k, sid) in phase 0,
+// so with Alice never started the attacker can hand Bob x = MAC(k, sid) and
+// y = nil, and Bob accepts an x that Alice never sent. The search once reported a0 at
+// both counts: the search does leave Alice unstarted, but when it fills Bob's
+// starved receive it asks whether the honest y = HASH(s, sid) is obtainable
+// in the execution's final knowledge, where Carol's phase-1 leak of s makes
+// it so; the fill installs the honest y, is stuck at Bob's phase-0 receive and
+// is dropped, and the nil alternative is never built. Counterweight:
+// search_fill_phase_blind_bound.vp.
+attacker[active]
+
+principal Bob[
+	knows private k
+	generates sid
+]
+
+Bob -> Alice: [sid]
+
+Bob -> Carol: [sid]
+
+principal Carol[
+	knows private k, s
+	z = MAC(k, sid)
+	leaks z
+]
+
+principal Alice[
+	knows private k, s
+	x = MAC(k, sid)
+	y = HASH(s, sid)
+]
+
+Alice -> Bob: x, y
+
+principal Bob[
+	_ = ASSERT(MAC(k, sid), x)?
+	w = HASH(y)
+]
+
+phase[1]
+
+principal Carol[
+	leaks s
+]
+
+queries[
+	authentication? Alice -> Bob: x
+]

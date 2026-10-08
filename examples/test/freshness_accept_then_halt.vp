@@ -1,0 +1,31 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: f1 at one session and at two. The attacker replaces c with
+// CONCAT(nil, nil): Bob's split passes, so he uses a value with no fresh leaf,
+// and his decryption then fails as the last step that mentions c. The search
+// once reported f0 at one session (at two it found the cross-session replay
+// instead): freshness has no goals, and the only constraint group for Bob
+// ended at the decryption, whose solutions keep Alice's fresh nonce. Each
+// check that mentions a queried value now also ends a constraint group.
+
+attacker[active]
+
+principal Alice[
+	knows private k
+	generates n, s
+	e = AEAD_ENC(k, n, s, nil)
+	c = CONCAT(n, e)
+]
+
+Alice -> Bob: c
+
+principal Bob[
+	knows private k
+	a, b = SPLIT(c)?
+	d = AEAD_DEC(k, a, b, nil)?
+]
+
+queries[
+	freshness? c
+]

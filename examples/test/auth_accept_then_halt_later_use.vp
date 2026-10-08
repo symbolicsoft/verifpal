@@ -1,0 +1,41 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a0 at one session and at two. Counterweight to
+// auth_accept_then_halt.vp: Bob hashes c after verifying the signature, so a
+// forged c that halts him at the signature leaves that later use unreached and
+// cancels the acceptance (as in halted_use_is_not_acceptance.vp).
+
+attacker[active]
+
+principal Alice[
+	knows private ska
+	pka = PUBKEY(ska)
+]
+
+Alice -> Bob: [pka]
+
+principal Bob[
+	generates nb
+]
+
+Bob -> Alice: [nb]
+
+principal Alice[
+	generates n
+	c = CONCAT(n, nb)
+	sig = SIGN(ska, c)
+]
+
+Alice -> Bob: c, [sig]
+
+principal Bob[
+	a, b = SPLIT(c)?
+	_ = ASSERT(b, nb)?
+	_ = SIGNVERIF(pka, c, sig)?
+	h = HASH(c)
+]
+
+queries[
+	authentication? Alice -> Bob: c
+]

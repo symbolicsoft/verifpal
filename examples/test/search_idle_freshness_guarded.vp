@@ -1,0 +1,37 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: f0 at one session and at two. Counterweight to
+// search_idle_freshness.vp: Bob's reply is guarded, so with Bob silent Carol never
+// receives an h at all, and with Bob running his h#2 is not a replay.
+attacker[active]
+
+principal Alice[
+	knows private k
+	generates s
+	t = MAC(k, s)
+]
+
+Alice -> Carol: s, t
+
+principal Carol[
+	knows private k
+	_ = ASSERT(MAC(k, s), t)?
+	u = MAC(k, t)
+]
+
+Carol -> Bob: u
+
+principal Bob[
+	h = HASH(u)
+]
+
+Bob -> Carol: [h]
+
+principal Carol[
+	_ = ASSERT(HASH(MAC(k, t)), h)?
+]
+
+queries[
+	freshness? h
+]

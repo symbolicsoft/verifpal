@@ -1,0 +1,37 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: f0 at one session and at two. Counterweight to
+// search_fill_from_sources.vp: s reaches Bob guarded, so Bob cannot be made
+// to encrypt nil and Bob#2 cannot be made to sign Alice's s.
+attacker[active]
+
+principal Bob[
+	knows private skb, kab
+	pkb = PUBKEY(skb)
+]
+
+Bob -> Alice: [pkb]
+
+principal Alice[
+	knows private kab
+	generates s
+]
+
+Alice -> Bob: [s]
+
+principal Bob[
+	sg = SIGN(skb, s)
+	e = ENC(kab, s)
+]
+
+Bob -> Alice: sg, [e]
+
+principal Alice[
+	_ = SIGNVERIF(pkb, s, sg)?
+	d = DEC(kab, e)
+]
+
+queries[
+	freshness? e
+]

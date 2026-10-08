@@ -1,0 +1,92 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0c0a0 at one session and at two.
+//
+// threshold_sign.vp with each partial sealed to the coordinator under a key
+// the participant shares with it. The attacker can still drop a partial and
+// stop the coordinator, but it never sees the partials, so it has nothing to
+// aggregate, and the only signature the verifier accepts is the one the
+// coordinator sent. Counterweight to threshold_sign.vp and
+// threshold_sign_public_aggregation.vp, where aggregation needs nothing
+// secret.
+
+attacker[active]
+
+principal Dealer[
+	knows private psk_a
+	knows private psk_b
+	generates k
+	pk = PUBKEY(k)
+	s1, s2, s3 = THRESHOLD_SPLIT[2](k)
+	generates nd_a
+	ea = AEAD_ENC(psk_a, nd_a, s1, pk)
+	generates nd_b
+	eb = AEAD_ENC(psk_b, nd_b, s2, pk)
+]
+
+Dealer -> Alice: [pk], nd_a, ea
+Dealer -> Bob: [pk], nd_b, eb
+Dealer -> Coordinator: [pk]
+Dealer -> Verifier: [pk]
+
+principal Alice[
+	knows private psk_a, k_ac
+	sa = AEAD_DEC(psk_a, nd_a, ea, pk)?
+	generates na
+	ca = PUBKEY(na)
+]
+
+principal Bob[
+	knows private psk_b, k_bc
+	sb = AEAD_DEC(psk_b, nd_b, eb, pk)?
+	generates nb
+	cb = PUBKEY(nb)
+]
+
+Alice -> Coordinator: [ca]
+Bob -> Coordinator: [cb]
+
+principal Coordinator[
+	generates m
+]
+
+Coordinator -> Alice: [m], [cb]
+Coordinator -> Bob: [m], [ca]
+
+principal Alice[
+	cl_a = CONCAT(ca, cb)
+	pa = THRESHOLD_SIGN(sa, na, cl_a, m)
+	generates n_pa
+	sealed_a = AEAD_ENC(k_ac, n_pa, pa, m)
+]
+
+principal Bob[
+	cl_b = CONCAT(ca, cb)
+	pb = THRESHOLD_SIGN(sb, nb, cl_b, m)
+	generates n_pb
+	sealed_b = AEAD_ENC(k_bc, n_pb, pb, m)
+]
+
+Alice -> Coordinator: n_pa, sealed_a
+Bob -> Coordinator: n_pb, sealed_b
+
+principal Coordinator[
+	knows private k_ac, k_bc
+	pa_c = AEAD_DEC(k_ac, n_pa, sealed_a, m)?
+	pb_c = AEAD_DEC(k_bc, n_pb, sealed_b, m)?
+	sig = THRESHOLD_JOIN(pa_c, pb_c)
+	_ = SIGNVERIF(pk, m, sig)?
+]
+
+Coordinator -> Verifier: m, sig
+
+principal Verifier[
+	_ = SIGNVERIF(pk, m, sig)?
+]
+
+queries[
+	confidentiality? k
+	confidentiality? s1
+	authentication? Coordinator -> Verifier: sig
+]

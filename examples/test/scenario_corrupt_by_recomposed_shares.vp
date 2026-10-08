@@ -1,0 +1,40 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0 at one session and at two.
+//
+// Mallory leaks two of the three shares of THRESHOLD_SPLIT[2](mk), so the
+// attacker recomposes mk and the gpeer = gm scenario is a corrupt peer:
+// Alice's m encrypted to gm is no claim. The corruption inference once
+// followed decomposition but not recomposition, labelled that scenario
+// honest and reported m disclosed. scenario_corrupt_by_recomposed_shares_late.vp
+// is the counterweight, with the shares leaked in phase 1.
+attacker[active]
+principal Bob[
+	knows private b
+	gb = PUBKEY(b)
+]
+principal Mallory[
+	knows private mk
+	gm = PUBKEY(mk)
+	s1, s2, s3 = THRESHOLD_SPLIT[2](mk)
+	leaks s1, s2
+]
+Bob -> Alice: [gb]
+Mallory -> Alice: [gm]
+principal Alice[
+	knows public gpeer
+	generates m
+	e = PKE_ENC(gpeer, m)
+]
+Alice -> Bob: e
+principal Bob[
+	_ = PKE_DEC(b, e)
+]
+scenarios[
+	Alice[gpeer = gb]
+	Alice[gpeer = gm]
+]
+queries[
+	confidentiality? m
+]

@@ -1,0 +1,36 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0 at one session and at two.
+//
+// Alice's symmetric peer key is bound to kpub, a public constant: the
+// attacker knows it from the start, so the kpeer = kpub scenario is a
+// corrupt peer and m in it is no claim. The corruption inference once
+// treated only declared secrets as compromisable, labelled that scenario
+// honest and reported its m disclosed.
+// scenario_corrupt_by_public_constant_only.vp is the counterweight: with
+// no honest scenario left the corrupt one is judged, and m fails.
+attacker[active]
+principal Bob[
+	knows private kb
+]
+principal Mallory[
+	knows public kpub
+]
+principal Alice[
+	knows private kb
+	knows private kpeer
+	generates m, n
+	e = AEAD_ENC(kpeer, n, m, nil)
+]
+Alice -> Bob: n, e
+principal Bob[
+	d = AEAD_DEC(kb, n, e, nil)
+]
+scenarios[
+	Alice[kpeer = kb]
+	Alice[kpeer = kpub]
+]
+queries[
+	confidentiality? m
+]

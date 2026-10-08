@@ -1,16 +1,19 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
 //
-// Expected: c0c0a0 — FROST at a 3-of-5 threshold with three participants, a leaked
+// Expected: c0c0a1 — FROST at a 3-of-5 threshold with three participants, a leaked
 // fourth share and one unguarded participant. One share plus one oracle is
 // two pieces, and the threshold is three, so the attacker is one partial
-// short and the verifier accepts only the coordinator's signature.
+// short of a signature over any message but the coordinator's.
 //
 // The participants' commitments and partials reach the coordinator over
-// authenticated channels. Aggregation needs nothing secret, so on open
-// channels the attacker makes the coordinator abort and hands the verifier
-// the signature itself, which the verifier accepts though the coordinator
-// never sent it: threshold_sign_public_aggregation.vp pins that separately.
+// authenticated channels, but aggregation needs nothing secret: the attacker
+// drops one partial on its way to the coordinator, which then never signs,
+// combines the partials it observed and hands the verifier the signature
+// itself. The verifier accepts a signature the coordinator never sent, so
+// the authentication query fails (threshold_sign_public_aggregation.vp does
+// the same over open channels; threshold_sign_sealed_partials.vp seals the
+// partials and holds).
 
 attacker[active]
 

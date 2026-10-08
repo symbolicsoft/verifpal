@@ -1,0 +1,50 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a0 at one session, a1 at two.
+//
+// Carol sends Bob her guarded nonce and a challenge in one message. Bob
+// acknowledges the nonce, which Carol needs and which only Bob can compute,
+// then records the challenge and replies with a static tag. Carol#2 needs
+// Bob#2's acknowledgement, so Bob#2 has to start and has to receive nc#2.
+// The attacker drops only c#2 from that message: Bob#2 acknowledges nc#2,
+// stops at the first step that needs c#2 and never sends t#2, and Bob's own
+// tag is handed to Carol#2. One emission, two acceptances. Dropping the whole
+// message would starve Carol#2 of the acknowledgement, and replacing c#2
+// would let Bob#2 send his tag; only dropping one value works. At one session
+// there is no second acceptance.
+//
+// A started run could once be silenced only by never starting it, and the
+// attacker could not drop a value it was not allowed to replace.
+// search_selective_drop_bound.vp is the counterweight.
+attacker[active]
+
+principal Carol[
+	knows private k
+	generates nc, c
+]
+
+Carol -> Bob: [nc], c
+
+principal Bob[
+	knows private k
+	ack = MAC(k, nc)
+]
+
+Bob -> Carol: [ack]
+
+principal Bob[
+	hc = HASH(c)
+	t = MAC(k, nil)
+]
+
+Bob -> Carol: t
+
+principal Carol[
+	_ = ASSERT(ack, MAC(k, nc))?
+	_ = ASSERT(t, MAC(k, nil))?
+]
+
+queries[
+	authentication? Bob -> Carol: t
+]

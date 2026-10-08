@@ -208,7 +208,7 @@ fn oracle_proposal(
 		if vars::as_var(&value).as_ref() == Some(&id) || vars::occurs(&id, &value, &empty) {
 			continue;
 		}
-		proposal.insert(id, vars::ground_free(&vars::apply(&value, foreign)));
+		proposal.insert(id, vars::apply(&value, foreign));
 	}
 	if proposal.is_empty() {
 		return None;
@@ -219,10 +219,7 @@ fn oracle_proposal(
 	{
 		let value = vars::apply(emission, bound);
 		if !vars::occurs(target, &value, &proposal) {
-			proposal.insert(
-				target.clone(),
-				vars::ground_free(&vars::apply(&value, foreign)),
-			);
+			proposal.insert(target.clone(), vars::apply(&value, foreign));
 		}
 	}
 	Some(proposal)

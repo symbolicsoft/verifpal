@@ -1,0 +1,38 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: f0a0 at one session and at two.
+//
+// Counterweight to freshness_projected_replay.vp: Bob's challenge nb is inside
+// the signed bundle, so no bundle is accepted by two Bob runs.
+attacker[active]
+
+principal Bob[
+	knows public tag
+	generates nb
+]
+
+Bob -> Alice: nb
+
+principal Alice[
+	knows private ska
+	knows public tag
+	gka = PUBKEY(ska)
+	generates na
+	bundle = CONCAT(na, nb)
+	s1 = SIGN(ska, bundle)
+]
+
+Alice -> Bob: [gka], bundle, s1
+
+principal Bob[
+	_ = SIGNVERIF(gka, bundle, s1)?
+	na_b, nb_b = SPLIT(bundle)?
+	_ = ASSERT(nb_b, nb)?
+	u = HASH(na_b)
+]
+
+queries[
+	freshness? na_b
+	authentication? Alice -> Bob: bundle
+]

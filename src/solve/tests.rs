@@ -204,3 +204,38 @@ fn a_proposal_shaped_unlike_the_honest_term_is_declined() {
 fn free_var_id(n: usize) -> VariableId {
 	vars::as_var(&free_var(n)).unwrap()
 }
+
+#[test]
+fn a_held_honest_key_can_still_be_swapped_beside_a_kept_field() {
+	let tag = make_constant("rekeyed_tag");
+	let key = Value::primitive(PRIM_PUBKEY, vec![make_constant("rekeyed_x")], 0);
+	let nonce = make_constant("rekeyed_nonce");
+	let honest = vec![Value::primitive(
+		PRIM_CONCAT,
+		vec![tag.clone(), key.clone(), nonce.clone()],
+		0,
+	)];
+	let slot = vars::attacker_var_id(SlotIdx::new(0));
+	let sym = SymbolicState {
+		terms: IndexVec::from(vec![vars::attacker_var(SlotIdx::new(0))]),
+		var_terms: IndexVec::from(vec![Some(vars::attacker_var(SlotIdx::new(0)))]),
+	};
+	let proposal = Substitution::from_iter([(
+		slot.clone(),
+		Value::primitive(PRIM_CONCAT, vec![tag, free_var(0), free_var(1)], 0),
+	)]);
+	let attacker = make_attacker_state(vec![key.clone(), nonce.clone()]);
+	let capabilities = crate::primitive::CapabilityIndex::default();
+	let preserved =
+		free::preserved_free(&honest, &sym, &proposal, &attacker, &capabilities).unwrap();
+	assert!(preserved[&free_var_id(0)].equivalent(&key, true));
+	let rekeyed = free::rekeyed_free(&honest, &sym, &proposal, &attacker, &capabilities).unwrap();
+	assert!(
+		rekeyed[&free_var_id(0)].equivalent(&attacker_public_key(), true),
+		"the key the attacker holds is still the key it wants to replace"
+	);
+	assert!(
+		rekeyed[&free_var_id(1)].equivalent(&nonce, true),
+		"and the field beside it keeps the honest value the attacker holds"
+	);
+}

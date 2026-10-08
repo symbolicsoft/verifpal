@@ -1,0 +1,25 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0 at one session and at two.
+//
+// Counterweight to closure_forged_then_opened_later.vp: Alice wraps her
+// partial in CONCAT(x, nil) but never sends it. The attacker can forge x and
+// build that tuple itself, but a container built from the forgery is no
+// genuine copy, so s1 stays secret.
+attacker[passive]
+principal Alice[
+	generates k, na, m
+	s1, s2 = THRESHOLD_SPLIT[2](k)
+	ca = PUBKEY(na)
+	x = THRESHOLD_SIGN[forgeable](s1, na, ca, m)
+	c = CONCAT(x, nil)
+	leaks na
+]
+Alice -> Bob: ca, m
+principal Bob[
+	_ = HASH(ca, m)
+]
+queries[
+	confidentiality? s1
+]

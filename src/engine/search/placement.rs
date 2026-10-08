@@ -32,17 +32,27 @@ impl<'a, 'b> Search<'a, 'b> {
 		&self,
 		signature: &[(SlotIdx, Value, Vec<RunIdx>)],
 		chained: &[Value],
+		trusted: bool,
 	) -> Option<Vec<NodeIdx>> {
 		let capabilities = &self.cx.km.capabilities;
 		let mut inputs =
 			crate::theory::KnowledgeInputs::new(capabilities, &self.union.knowledge.state);
 		let mut chosen: Vec<NodeIdx> = Vec::new();
 		let mut emitted: Option<Knowledge> = None;
-		let last = self.cx.km.max_phase;
-		for (_, value, _) in signature {
-			if self.derivable_in(HONEST_NODE, value, last)
-				|| chosen.iter().any(|&n| self.derivable_in(n, value, last))
-			{
+		for (slot, value, targets) in signature {
+			let phase = targets
+				.iter()
+				.filter_map(|&run| {
+					let program = &self.cx.program.runs[run];
+					let step = *program.step_of_slot.get(slot)?;
+					Some(program.steps[step].phase)
+				})
+				.min()
+				.unwrap_or(self.cx.km.max_phase);
+			if chosen.iter().any(|&n| self.derivable_in(n, value, phase)) {
+				continue;
+			}
+			if trusted && self.derivable_in(HONEST_NODE, value, phase) {
 				continue;
 			}
 			let Some(used) = inputs.of_value(value) else {
@@ -64,7 +74,7 @@ impl<'a, 'b> Search<'a, 'b> {
 				return None;
 			};
 			let used: Vec<usize> = used.iter().map(|idx| idx.get()).collect();
-			match self.cheapest_source(value, &used) {
+			match self.cheapest_source(value, &used, phase) {
 				Some(best) => chosen.push(best),
 				None => {
 					for &idx in &used {
@@ -84,10 +94,10 @@ impl<'a, 'b> Search<'a, 'b> {
 		Some(chosen)
 	}
 
-	fn cheapest_source(&self, value: &Value, used: &[usize]) -> Option<NodeIdx> {
+	fn cheapest_source(&self, value: &Value, used: &[usize], phase: i32) -> Option<NodeIdx> {
 		let key = match value {
 			Value::Primitive(p) if crate::term::hashing::hashconsed(p) => {
-				Some(Arc::as_ptr(p) as usize)
+				Some((Arc::as_ptr(p) as usize, phase))
 			}
 			_ => None,
 		};
@@ -118,7 +128,7 @@ impl<'a, 'b> Search<'a, 'b> {
 				for &n in &bucket[start..] {
 					if n == HONEST_NODE
 						|| !used.iter().all(|&idx| self.supplies(idx, n))
-						|| !self.derivable_in(n, value, self.cx.km.max_phase)
+						|| !self.derivable_in(n, value, phase)
 					{
 						continue;
 					}
@@ -195,12 +205,12 @@ impl<'a, 'b> Search<'a, 'b> {
 					.then(|| (slot, crate::term::hashing::hashcons(&value), targets))
 			})
 			.collect();
-		let bases = self.bases(&signature, chained)?;
+		let bases = self.bases(&signature, chained, true)?;
 		let km = self.cx.km;
 		let bound = self.ctx.term_bound(km);
 		let mut installs: Installs = Vec::new();
 		let mut shared: Installs = Vec::new();
-		for (slot, value, targets) in signature {
+		for (slot, value, targets) in signature.iter().cloned() {
 			for run in targets {
 				let id = self.cx.program.runs[run].id;
 				if !bound.admits_at(id, slot, &value) {
@@ -241,17 +251,28 @@ impl<'a, 'b> Search<'a, 'b> {
 			everywhere.extend(shared);
 			everywhere
 		});
-		let merged = self.merged(&bases, installs);
+		let merged = self.merged(&bases, installs.clone());
 		let at = self.consider(merged);
+		if self.outcome(at).is_some_and(|outcome| !outcome.settled)
+			&& !self.done()
+			&& let Some(sourced) = self
+				.bases(&signature, chained, false)
+				.filter(|sourced| *sourced != bases)
+		{
+			let merged = self.merged(&sourced, installs);
+			self.consider(merged);
+		}
 		if let Some(everywhere) = everywhere
 			&& !self.done()
 		{
 			let merged = self.merged(&bases, everywhere);
 			self.probe(merged, &extra);
 		}
-		self.outcome(at)?
+		let outcome = self.outcome(at)?;
+		outcome
 			.halts
 			.iter()
+			.chain(&outcome.waits)
 			.find(|(run, _)| *run == r)
 			.map(|(_, slot)| *slot)
 	}
@@ -276,11 +297,20 @@ impl<'a, 'b> Search<'a, 'b> {
 		if self.done() {
 			return;
 		}
-		let blocked: Vec<RunIdx> = droppable
+		let halted: Vec<RunIdx> = droppable
 			.iter()
 			.copied()
-			.filter(|&r| ex.runs[r].halted.is_some() || ex.runs[r].frozen)
+			.filter(|&r| ex.runs[r].halted.is_some())
 			.collect();
+		let blocked: Vec<RunIdx> = if halted.is_empty() {
+			droppable
+				.iter()
+				.copied()
+				.filter(|&r| ex.runs[r].frozen)
+				.collect()
+		} else {
+			halted
+		};
 		if blocked.is_empty() {
 			return;
 		}

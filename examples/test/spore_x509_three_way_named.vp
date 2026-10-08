@@ -1,0 +1,71 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a0a0 at one session and at two.
+//
+// CCITT X.509 three-way authentication, timestamps and payloads elided:
+//   1. A -> B: A, {Na, B}SKa
+//   2. B -> A: B, {Nb, A, Na}SKb
+//   3. A -> B: A, {Nb}SKa
+// Alice's peer is the scenario axis: Bob, or Mallory, whose key leaks.
+// Counterweight to spore_x509_three_way.vp: message 3 names B, {Nb, B}SKa,
+// so Alice's signature in her run with Mallory is no message 3 for Bob.
+attacker[active]
+
+principal Alice[
+	knows private a
+	knows public gpeer
+	ga = PUBKEY(a)
+	generates na
+]
+
+principal Bob[
+	knows private b
+	gb = PUBKEY(b)
+	generates nb
+]
+
+principal Mallory[
+	knows private mk
+	gm = PUBKEY(mk)
+	leaks mk
+]
+
+Alice -> Bob: [ga]
+Bob -> Alice: [gb]
+Mallory -> Alice: [gm]
+
+principal Alice[
+	s1 = SIGN(a, CONCAT(na, gpeer))
+]
+
+Alice -> Bob: na, s1
+
+principal Bob[
+	_ = SIGNVERIF(ga, CONCAT(na, gb), s1)?
+	s2 = SIGN(b, CONCAT(nb, ga, na))
+]
+
+Bob -> Alice: nb, s2
+
+principal Alice[
+	_ = SIGNVERIF(gpeer, CONCAT(nb, ga, na), s2)?
+	s3 = SIGN(a, CONCAT(nb, gpeer))
+]
+
+Alice -> Bob: s3
+
+principal Bob[
+	_ = SIGNVERIF(ga, CONCAT(nb, gb), s3)?
+	done = HASH(s1, s3)
+]
+
+scenarios[
+	Alice[gpeer = gb]
+	Alice[gpeer = gm]
+]
+
+queries[
+	authentication? Alice -> Bob: s1
+	authentication? Alice -> Bob: s3
+]

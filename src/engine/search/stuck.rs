@@ -6,7 +6,7 @@ use super::{
 	runs_of, same_installs,
 };
 use crate::engine::exec::{Install, Installs, install_at};
-use crate::engine::program::{Event, RunIdx};
+use crate::engine::program::{Event, RunIdx, StepIdx};
 use crate::protocol::SlotIdx;
 use crate::term::Value;
 use crate::util::index::Idx;
@@ -73,7 +73,7 @@ impl<'a, 'b> Search<'a, 'b> {
 		added
 	}
 
-	fn fresh_sources(&self, v: &Value) -> Vec<Source> {
+	pub(super) fn fresh_sources(&self, v: &Value) -> Vec<Source> {
 		self.retries
 			.fresh
 			.get(&v.hash_value())
@@ -113,7 +113,7 @@ impl<'a, 'b> Search<'a, 'b> {
 	pub(super) fn stuck_sources<'v>(
 		&self,
 		at: usize,
-		values: impl Iterator<Item = (&'v Value, Option<(RunIdx, usize)>)>,
+		values: impl Iterator<Item = (&'v Value, Option<(RunIdx, StepIdx)>)>,
 	) -> Vec<Source> {
 		let stuck = &self.retries.stuck[at];
 		let mut sources: Vec<Source> = Vec::new();

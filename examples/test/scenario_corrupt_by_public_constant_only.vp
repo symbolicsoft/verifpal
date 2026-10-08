@@ -1,0 +1,32 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1 at one session and at two.
+//
+// scenario_corrupt_by_public_constant.vp with the honest scenario removed.
+// Every scenario is corrupt from phase 0, so nothing honest remains to
+// relativise against and the corrupt one is judged: m under the public key
+// kpub is disclosed.
+attacker[active]
+principal Bob[
+	knows private kb
+]
+principal Mallory[
+	knows public kpub
+]
+principal Alice[
+	knows private kb
+	knows private kpeer
+	generates m, n
+	e = AEAD_ENC(kpeer, n, m, nil)
+]
+Alice -> Bob: n, e
+principal Bob[
+	d = AEAD_DEC(kb, n, e, nil)
+]
+scenarios[
+	Alice[kpeer = kpub]
+]
+queries[
+	confidentiality? m
+]

@@ -1,0 +1,67 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a1 at one session and at two. Bob, Alice and Carol share k, and
+// every box carries the session's guarded identifier sid as associated data.
+// Alice accepts Bob's box1, then tells Carol to go; Carol's box2 lets Bob send
+// box3. Before Carol has sent anything, the attacker hands Bob his own box1 as
+// box2: it decrypts, so Bob sends box3 early, and the attacker hands box3 to
+// Alice as box1. It decrypts, but Bob never sent that value as box1: a
+// forgery, in one execution and in order. The reflection bypasses Carol's
+// delivery, not Alice's own, so the rerouted pass, which looked only at the
+// stuck run's own later sends, never tried it and reported a0 at both counts;
+// it now follows the delivery graph from the stuck receive; sid stops the two-session cross-session
+// substitution that would otherwise mask the miss. Counterweight:
+// search_reroute_third_run_directional.vp.
+
+attacker[active]
+
+principal Bob[
+	knows private k
+	knows private mb1, mb3
+	generates sid
+]
+
+Bob -> Alice: [sid]
+
+Bob -> Carol: [sid]
+
+principal Bob[
+	generates n1
+	box1 = AEAD_ENC(k, n1, mb1, sid)
+]
+
+Bob -> Alice: n1, box1
+
+principal Alice[
+	knows private k
+	d1 = AEAD_DEC(k, n1, box1, sid)?
+	generates go
+]
+
+Alice -> Carol: [go]
+
+principal Carol[
+	knows private k
+	knows private mc
+	generates n2
+	box2 = AEAD_ENC(k, n2, mc, sid)
+]
+
+Carol -> Bob: n2, box2
+
+principal Bob[
+	d2 = AEAD_DEC(k, n2, box2, sid)?
+	generates n3
+	box3 = AEAD_ENC(k, n3, mb3, sid)
+]
+
+Bob -> Alice: n3, box3
+
+principal Alice[
+	d3 = AEAD_DEC(k, n3, box3, sid)?
+]
+
+queries[
+	authentication? Bob -> Alice: box1
+]

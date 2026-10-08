@@ -1,0 +1,45 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a0a1 at one session and at two. h = HASH(c, sid) is computable by
+// anyone who has seen the guarded sid, so with Bob never started the attacker
+// hands Alice h and she accepts a value Bob never sent. The search once reported a0a0 at
+// both counts, and a1 for the h query when the two queries are swapped
+// (search_idle_senders_rotated.vp): the idle family keeps one entry per
+// candidate run, holding the relied-on slots of the first query that named
+// it, and the first query reaches Bob through the cone of Alice's t, with the
+// slot t, which Bob never sends.
+attacker[active]
+
+principal Alice[
+	knows public c
+	knows private k
+	generates sid
+]
+
+Alice -> Bob: [sid]
+
+principal Bob[
+	knows public c
+	h = HASH(c, sid)
+]
+
+Bob -> Alice: h
+
+principal Alice[
+	_ = ASSERT(HASH(c, sid), h)?
+	t = MAC(k, h)
+]
+
+Alice -> Carol: [sid], t
+
+principal Carol[
+	knows public c
+	knows private k
+	_ = ASSERT(MAC(k, HASH(c, sid)), t)?
+]
+
+queries[
+	authentication? Alice -> Carol: t
+	authentication? Bob -> Alice: h
+]

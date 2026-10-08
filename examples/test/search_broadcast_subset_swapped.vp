@@ -1,0 +1,54 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1 at one session and at two.
+//
+// search_broadcast_subset.vp with the independent blocks of Bob and Carol
+// swapped, so Carol proposes first. Her broadcast probe halts Dave, and Bob is
+// frozen only because he waits on Dave's ack; the retry once dropped every
+// run that halted or froze in one step, tried Carol alone, and never Carol
+// with Bob. It now drops the runs that halted, and frozen runs only when none
+// did. search_broadcast_subset_guarded_swapped.vp is the counterweight.
+attacker[active]
+
+principal Alice[
+	generates a
+	ga = PUBKEY(a)
+	hga = HASH(ga)
+]
+
+Alice -> Bob: ga
+Alice -> Carol: ga
+Alice -> Dave: ga, [hga]
+
+principal Carol[
+	hc = HASH(ga)
+]
+
+principal Bob[
+	generates b, sb
+	gb = PUBKEY(b)
+	hb = HASH(ga)
+]
+
+principal Dave[
+	_ = ASSERT(HASH(ga), hga)?
+	generates ackd
+]
+
+Bob -> Carol: [hb]
+Carol -> Bob: [hc]
+Dave -> Bob: [ackd]
+
+principal Bob[
+	_ = ASSERT(hb, hc)?
+	kb = DH_KEX(ga, b)
+	generates n
+	e = AEAD_ENC(kb, n, sb, ackd)
+]
+
+Bob -> Alice: gb, n, e
+
+queries[
+	confidentiality? sb
+]

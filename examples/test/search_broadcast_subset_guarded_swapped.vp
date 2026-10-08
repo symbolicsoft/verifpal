@@ -1,0 +1,53 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0 at one session and at two.
+//
+// search_broadcast_subset_guarded.vp with the blocks of Bob and Carol
+// swapped. Carol's copy of the share is guarded, so the subset the attacker
+// needs still does not exist. Counterweight to
+// search_broadcast_subset_swapped.vp.
+
+attacker[active]
+
+principal Alice[
+	generates a
+	ga = PUBKEY(a)
+	hga = HASH(ga)
+]
+
+Alice -> Bob: ga
+Alice -> Carol: [ga]
+Alice -> Dave: ga, [hga]
+
+principal Carol[
+	hc = HASH(ga)
+]
+
+principal Bob[
+	generates b, sb
+	gb = PUBKEY(b)
+	hb = HASH(ga)
+]
+
+principal Dave[
+	_ = ASSERT(HASH(ga), hga)?
+	generates ackd
+]
+
+Bob -> Carol: [hb]
+Carol -> Bob: [hc]
+Dave -> Bob: [ackd]
+
+principal Bob[
+	_ = ASSERT(hb, hc)?
+	kb = DH_KEX(ga, b)
+	generates n
+	e = AEAD_ENC(kb, n, sb, ackd)
+]
+
+Bob -> Alice: gb, n, e
+
+queries[
+	confidentiality? sb
+]

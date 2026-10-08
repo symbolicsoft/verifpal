@@ -1,0 +1,42 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: f0 at one session, f1 at two. Bob encrypts the s he receives
+// unguarded and sends it guarded to Alice, beside his signature over s. Fed
+// nil, Bob's e is ENC(kab, nil), which has no fresh leaf, but his signature
+// over nil then fails Alice's check before she uses e. Bob#2, fed Alice's s,
+// signs it; the attacker hands that signature to Alice, her check passes, and
+// she uses the stale e. Three installs on three runs, none of which teaches
+// the attacker anything on its own. The search once reported f0 at two sessions.
+// Counterweight: search_fill_from_sources_guarded.vp.
+attacker[active]
+
+principal Bob[
+	knows private skb, kab
+	pkb = PUBKEY(skb)
+]
+
+Bob -> Alice: [pkb]
+
+principal Alice[
+	knows private kab
+	generates s
+]
+
+Alice -> Bob: s
+
+principal Bob[
+	sg = SIGN(skb, s)
+	e = ENC(kab, s)
+]
+
+Bob -> Alice: sg, [e]
+
+principal Alice[
+	_ = SIGNVERIF(pkb, s, sg)?
+	d = DEC(kab, e)
+]
+
+queries[
+	freshness? e
+]

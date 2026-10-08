@@ -251,6 +251,9 @@ impl<'a, 'b> Search<'a, 'b> {
 							})
 						}
 						Install::Idle { .. } => Some(Install::Idle { run: r }),
+						Install::Drop { slot, .. } => self
+							.sibling_slot(*slot, r)
+							.map(|slot| Install::Drop { run: r, slot }),
 					};
 					match moved {
 						Some(moved) => plan.push(moved),

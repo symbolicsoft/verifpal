@@ -24,6 +24,12 @@ pub(super) fn keyed_free(
 	})
 }
 
+fn held(honest: &Value, attacker: &AttackerState, capabilities: &CapabilityIndex) -> bool {
+	!honest.equivalent(&crate::term::value_nil(), true)
+		&& (attacker.knows(honest).is_some()
+			|| crate::theory::obtainable(honest, capabilities, attacker))
+}
+
 pub(super) fn preserved_free(
 	honest: &[Value],
 	sym: &SymbolicState,
@@ -32,14 +38,26 @@ pub(super) fn preserved_free(
 	capabilities: &CapabilityIndex,
 ) -> Option<Substitution> {
 	fill_aligned_with(honest, sym, proposal, &|honest| {
-		let held = !honest.equivalent(&crate::term::value_nil(), true)
-			&& (attacker.knows(honest).is_some()
-				|| crate::theory::obtainable(honest, capabilities, attacker));
-		if held {
+		if held(honest, attacker, capabilities) {
 			return Some(honest.clone());
 		}
 		crate::primitive::value_is_key_derivation(honest)
 			.then(crate::primitive::attacker_public_key)
+	})
+}
+
+pub(super) fn rekeyed_free(
+	honest: &[Value],
+	sym: &SymbolicState,
+	proposal: &Substitution,
+	attacker: &AttackerState,
+	capabilities: &CapabilityIndex,
+) -> Option<Substitution> {
+	fill_aligned_with(honest, sym, proposal, &|honest| {
+		if crate::primitive::value_is_key_derivation(honest) {
+			return Some(crate::primitive::attacker_public_key());
+		}
+		held(honest, attacker, capabilities).then(|| honest.clone())
 	})
 }
 

@@ -1,0 +1,55 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1 at one session and at two.
+//
+// solver_threshold_key_alignment.vp with Alice's two exponents sent as one
+// tuple that Bob splits. The attacker hands Bob CONCAT(b, a): his requested
+// key HASH(root, DH_KEX(PUBKEY(b), a)) is the dealer's key by commutativity,
+// his message is b, so the two disclosed partial signatures combine into
+// wrapping and open sealed.
+//
+// The key Bob requests mentions both projections of one received tuple, and
+// unification bound a variable only congruently, so matching that key against
+// the dealer's secret failed and the tuple encoding hid the attack.
+// Unification now opens a projected variable into a tuple of fresh fields.
+// solver_threshold_key_alignment_tuple_guarded.vp is the counterweight.
+attacker[active]
+
+principal Dealer[
+	knows private root
+	knows public a, b
+	key = HASH(root, DH_KEX(PUBKEY(a), b))
+	s1, s2 = THRESHOLD_SPLIT[2](key)
+	generates n1, n2
+	cl = CONCAT(PUBKEY(n1), PUBKEY(n2))
+	p1 = THRESHOLD_SIGN(s1, n1, cl, b)
+	p2 = THRESHOLD_SIGN(s2, n2, cl, b)
+]
+
+Dealer -> Carol: p1, p2
+
+principal Alice[
+	generates x, y
+	xy = CONCAT(x, y)
+]
+
+Alice -> Bob: xy
+
+principal Bob[
+	x_b, y_b = SPLIT(xy)
+	knows private root
+	generates secret
+	requested = HASH(root, DH_KEX(PUBKEY(x_b), y_b))
+	wrapping = SIGN(requested, x_b)
+	sealed = ENC(wrapping, secret)
+]
+
+Bob -> Carol: sealed
+
+principal Carol[
+]
+
+queries[
+	confidentiality? secret
+]

@@ -2,9 +2,10 @@
  * SPDX-License-Identifier: GPL-3.0-only */
 
 use std::borrow::Cow;
+use std::sync::Arc;
 
 use super::vars::{Substitution, as_var, bind, contains_var, occurs};
-use crate::term::{Primitive, Value};
+use crate::term::{Primitive, Value, VariableId};
 
 pub(crate) fn unifiers(
 	a: &Value,
@@ -80,6 +81,86 @@ fn clash<const UNIFY: bool>(a: &Value, b: &Value, s: &Substitution) -> bool {
 	}
 }
 
+fn projected_variable(p: &Primitive, s: &Substitution) -> Option<(VariableId, usize)> {
+	match head(p.arguments.first()?, s) {
+		Value::Variable(id) => Some((id.clone(), p.output)),
+		Value::Primitive(inner) if crate::primitive::is_projection(inner.id) => {
+			projected_variable(inner, s)
+		}
+		_ => None,
+	}
+}
+
+fn field_var(id: &VariableId, field: usize) -> Value {
+	let name = match id {
+		VariableId::Slot(slot) => format!("slot/{slot}/{field}"),
+		VariableId::Free(name) => format!("{name}/{field}"),
+	};
+	Value::Variable(VariableId::Free(Arc::from(name)))
+}
+
+fn projection_width(id: &VariableId, output: usize, terms: &[&Value], s: &Substitution) -> usize {
+	let mut width = output + 1;
+	for term in terms {
+		if !contains_var(term) {
+			continue;
+		}
+		for sub in crate::term::subterms(term) {
+			if let Value::Primitive(p) = sub
+				&& crate::primitive::is_projection(p.id)
+				&& let Some(Value::Variable(inner)) = p.arguments.first().map(|a| head(a, s))
+				&& inner == id
+			{
+				width = width.max(p.output + 1);
+			}
+		}
+	}
+	width
+}
+
+fn reopened_side(
+	side: &Value,
+	other: &Value,
+	s: &mut Substitution,
+	pending: &[(Value, Value)],
+) -> Option<Value> {
+	let Value::Primitive(p) = head(side, s) else {
+		return None;
+	};
+	let tuple = crate::primitive::projects(p.id)?;
+	let applied = super::vars::apply(side, s);
+	if !applied.equivalent(side, true) {
+		return Some(applied);
+	}
+	let (id, output) = projected_variable(p, s)?;
+	let mut terms: Vec<&Value> = vec![side, other];
+	terms.extend(pending.iter().flat_map(|(a, b)| [a, b]));
+	let needed = projection_width(&id, output, &terms, s);
+	let width = crate::primitive::definition(tuple)
+		.ok()?
+		.arity()
+		.iter()
+		.map(|&arity| arity as usize)
+		.find(|&arity| arity >= needed)?;
+	let fields = (0..width).map(|field| field_var(&id, field)).collect();
+	bind(s, id, Value::primitive(tuple, fields, 0)).then(|| super::vars::apply(side, s))
+}
+
+fn reopened<const UNIFY: bool>(
+	a: &Value,
+	b: &Value,
+	s: &mut Substitution,
+	pending: &[(Value, Value)],
+) -> Option<(Value, Value)> {
+	if let Some(a) = reopened_side(a, b, s, pending) {
+		return Some((a, b.clone()));
+	}
+	if UNIFY && let Some(b) = reopened_side(b, a, s, pending) {
+		return Some((a.clone(), b));
+	}
+	None
+}
+
 fn solve_equations<const UNIFY: bool>(
 	pending: Vec<(Value, Value)>,
 	s: Substitution,
@@ -92,6 +173,10 @@ fn solve_equations<const UNIFY: bool>(
 				return Some(s);
 			};
 			if clash::<UNIFY>(&a, &b, &s) {
+				if let Some(retry) = reopened::<UNIFY>(&a, &b, &mut s, &pending) {
+					pending.push(retry);
+					continue;
+				}
 				let (retry, bindings) = alternatives.pop()?;
 				pending = retry;
 				s = bindings;
@@ -133,6 +218,9 @@ fn solve_equations<const UNIFY: bool>(
 						.rev()
 						.map(|(a, b)| (a.clone(), b.clone())),
 				);
+				continue;
+			} else if let Some(retry) = reopened::<UNIFY>(&a, &b, &mut s, &pending) {
+				pending.push(retry);
 				continue;
 			}
 			let (retry, bindings) = alternatives.pop()?;
@@ -507,6 +595,101 @@ mod tests {
 			.next()
 			.expect("unifies modulo commutativity");
 		assert!(crate::solve::vars::apply(&var, &s).equivalent(&x, true));
+	}
+
+	fn split(tuple: Value, output: usize) -> Value {
+		make_primitive(crate::primitive::PRIM_SPLIT, vec![tuple], output)
+	}
+
+	fn concat(fields: Vec<Value>) -> Value {
+		make_primitive(crate::primitive::PRIM_CONCAT, fields, 0)
+	}
+
+	#[test]
+	fn two_fields_of_one_split_tuple_match_through_its_projections() {
+		let t = crate::solve::vars::attacker_var(SlotIdx::new(0));
+		let a = make_private("open_tuple_a");
+		let b = make_private("open_tuple_b");
+		let pattern = dh_kex(pubkey(split(t.clone(), 0)), split(t.clone(), 1));
+		let target = dh_kex(pubkey(a.clone()), b.clone());
+		let empty = Substitution::default();
+		let tuples: Vec<Value> = match_values(&pattern, &target, &empty)
+			.map(|found| crate::solve::vars::apply(&t, &found))
+			.collect();
+		assert_eq!(tuples.len(), 2);
+		for (tuple, expected) in tuples.iter().zip([
+			concat(vec![a.clone(), b.clone()]),
+			concat(vec![b.clone(), a.clone()]),
+		]) {
+			assert!(tuple.equivalent(&expected, true), "got {tuple}");
+		}
+		let unified: Vec<_> = unifiers(&target, &pattern, &empty).collect();
+		assert_eq!(unified.len(), 2);
+	}
+
+	#[test]
+	fn an_opened_tuple_is_as_wide_as_its_widest_projection() {
+		let t = crate::solve::vars::attacker_var(SlotIdx::new(0));
+		let a = make_private("wide_tuple_a");
+		let c = make_private("wide_tuple_c");
+		let pattern = make_primitive(
+			crate::primitive::PRIM_HASH,
+			vec![split(t.clone(), 0), split(t.clone(), 2)],
+			0,
+		);
+		let target = make_primitive(crate::primitive::PRIM_HASH, vec![a.clone(), c.clone()], 0);
+		let found = match_value(&pattern, &target, &Substitution::default())
+			.expect("a three-field tuple carries both values");
+		let Value::Primitive(tuple) = crate::solve::vars::apply(&t, &found) else {
+			panic!("the slot is bound to a tuple");
+		};
+		assert_eq!(tuple.arguments.len(), 3);
+		assert!(tuple.arguments[0].equivalent(&a, true));
+		assert!(as_var(&tuple.arguments[1]).is_some());
+		assert!(tuple.arguments[2].equivalent(&c, true));
+	}
+
+	#[test]
+	fn a_field_defined_by_its_sibling_is_bound_without_an_occurs_cycle() {
+		let t = crate::solve::vars::attacker_var(SlotIdx::new(0));
+		let k = make_private("sibling_field_key");
+		let tag = make_primitive(crate::primitive::PRIM_HASH, vec![k, split(t.clone(), 0)], 0);
+		let found = unifiers(&split(t.clone(), 1), &tag, &Substitution::default())
+			.next()
+			.expect("the tag field is a function of the other field");
+		let tuple = crate::solve::vars::apply(&t, &found);
+		let Value::Primitive(p) = &tuple else {
+			panic!("the slot is bound to a tuple");
+		};
+		assert!(
+			crate::solve::vars::apply(&split(t.clone(), 1), &found)
+				.equivalent(&crate::solve::vars::apply(&tag, &found), true)
+		);
+		assert_eq!(p.arguments.len(), 2);
+	}
+
+	#[test]
+	fn a_projection_of_a_projection_opens_the_inner_tuple_first() {
+		let t = crate::solve::vars::attacker_var(SlotIdx::new(0));
+		let a = make_private("nested_tuple_a");
+		let pattern = split(split(t.clone(), 1), 0);
+		let found = match_value(&pattern, &a, &Substitution::default())
+			.expect("the inner field becomes a tuple");
+		assert!(crate::solve::vars::apply(&pattern, &found).equivalent(&a, true));
+	}
+
+	#[test]
+	fn projections_of_one_tuple_still_unify_congruently() {
+		let t = crate::solve::vars::attacker_var(SlotIdx::new(0));
+		let u = crate::solve::vars::attacker_var(SlotIdx::new(1));
+		let found: Vec<_> = unifiers(
+			&split(t.clone(), 0),
+			&split(u.clone(), 0),
+			&Substitution::default(),
+		)
+		.collect();
+		assert_eq!(found.len(), 1);
+		assert!(crate::solve::vars::apply(&t, &found[0]).equivalent(&u, true));
 	}
 
 	#[test]

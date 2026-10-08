@@ -1,0 +1,76 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a1 at one session and at two.
+//
+// history_own_later_emission.vp with Bob's first flight written as two
+// messages, n1 and then box1. Nothing the attacker knows or can order changes,
+// so neither does the attack: Bob's own box reflected back to him.
+//
+// When the run the search delayed was blocked on n1, the executor classified
+// installs only at that receive, so the one waiting at box1 was never recorded
+// as stuck and its only source, the reflection, was never tried for it. A
+// frozen run is now stuck at every remaining receive of the phase whose
+// install it cannot deliver. history_own_later_emission_directional_split.vp
+// is the counterweight.
+
+attacker[active]
+
+principal Alice[
+	generates ea
+	gea = PUBKEY(ea)
+]
+
+principal Bob[
+	knows private lb
+	glb = PUBKEY(lb)
+	generates eb
+	geb = PUBKEY(eb)
+]
+
+Bob -> Alice: [glb]
+
+Alice -> Bob: gea
+
+Bob -> Alice: geb
+
+principal Alice[
+	k_a = HASH(DH_KEX(geb, ea), DH_KEX(glb, ea))
+]
+
+principal Bob[
+	k_b = HASH(DH_KEX(gea, eb), DH_KEX(gea, lb))
+	sig = SIGN(lb, HASH(gea, geb))
+	generates n1
+	box1 = AEAD_ENC(k_b, n1, sig, nil)
+]
+
+Bob -> Alice: n1
+Bob -> Alice: box1
+
+principal Alice[
+	s = AEAD_DEC(k_a, n1, box1, nil)?
+	_ = SIGNVERIF(glb, HASH(gea, geb), s)?
+	knows private m1
+	generates n2
+	box2 = AEAD_ENC(k_a, n2, m1, nil)
+]
+
+Alice -> Bob: n2, box2
+
+principal Bob[
+	m1b = AEAD_DEC(k_b, n2, box2, nil)?
+	knows private m2
+	generates n3
+	box3 = AEAD_ENC(k_b, n3, m2, nil)
+]
+
+Bob -> Alice: n3, box3
+
+principal Alice[
+	m2a = AEAD_DEC(k_a, n3, box3, nil)?
+]
+
+queries[
+	authentication? Bob -> Alice: box1
+]

@@ -1,0 +1,91 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0 at one session and at two.
+//
+// eac_bac_unbound_tuple.vp with the chip's challenge pair guarded: the
+// terminal only accepts the challenge the chip sealed under its own channel
+// key, so an attacker that re-keyed either side never gets a matching MAC past
+// the terminal and the chip never releases DG3.
+attacker[active]
+
+principal Hotel[
+	knows public docnumber
+	knows private mrz
+	leaks mrz
+]
+
+principal Terminal[
+	knows private termkey
+	termpub = PUBKEY(termkey)
+]
+
+Terminal -> Cvca: [termpub]
+
+principal Cvca[
+	knows private cvcakey
+	cvcapub = PUBKEY(cvcakey)
+	termcert = SIGN(cvcakey, termpub)
+]
+
+Cvca -> Terminal: [termcert]
+
+Cvca -> Passport: [cvcapub]
+
+principal Passport[
+	knows private cakey, dg3
+	knows public docnumber, sscr, sscta, sscdg3
+	dg14 = PUBKEY(cakey)
+]
+
+Passport -> Terminal: dg14
+
+principal Terminal[
+	knows public docnumber, sscr, sscta, sscdg3
+	generates caskt
+	capkt = PUBKEY(caskt)
+	caenc_t, camac_t = HKDF(nil, DH_KEX(dg14, caskt), nil)
+]
+
+Terminal -> Passport: capkt
+
+principal Passport[
+	caenc, camac = HKDF(nil, DH_KEX(capkt, cakey), nil)
+	generates rpicc
+	smr = ENC(caenc, rpicc)
+	tagr = MAC(camac, CONCAT(sscr, smr))
+	smr_tagr = CONCAT(smr, tagr)
+]
+
+Passport -> Terminal: [smr_tagr]
+
+principal Terminal[
+	smr_t, tagr_t = SPLIT(smr_tagr)
+	_ = ASSERT(MAC(camac_t, CONCAT(sscr, smr_t)), tagr_t)?
+	rpicc_t = DEC(caenc_t, smr_t)
+	tasig = SIGN(termkey, CONCAT(docnumber, rpicc_t))
+	smta = ENC(caenc_t, CONCAT(termpub, termcert, tasig))
+	tagta = MAC(camac_t, CONCAT(sscta, smta))
+]
+
+Terminal -> Passport: smta, tagta
+
+principal Passport[
+	_ = ASSERT(MAC(camac, CONCAT(sscta, smta)), tagta)?
+	termpub_p, termcert_p, tasig_p = SPLIT(DEC(caenc, smta))
+	_ = SIGNVERIF(cvcapub, termpub_p, termcert_p)?
+	_ = SIGNVERIF(termpub_p, CONCAT(docnumber, rpicc), tasig_p)?
+	smdg3 = ENC(caenc, dg3)
+	tagdg3 = MAC(camac, CONCAT(sscdg3, smdg3))
+]
+
+Passport -> Terminal: smdg3, tagdg3
+
+principal Terminal[
+	_ = ASSERT(MAC(camac_t, CONCAT(sscdg3, smdg3)), tagdg3)?
+	dg3_t = DEC(caenc_t, smdg3)
+]
+
+queries[
+	confidentiality? dg3
+]

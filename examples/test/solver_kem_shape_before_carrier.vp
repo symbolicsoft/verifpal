@@ -1,0 +1,50 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1 at one session and at two.
+//
+// The server signs its KEM ciphertext, but the client's signature check takes
+// the attacker's key as easily as the server's: the attacker substitutes
+// server_pk, encapsulates to the client's own kem_ek with its own seed, signs
+// that ciphertext itself, and knows both inputs of key_c = HASH(kem_ct,
+// kem_ss_c).
+//
+// The deducer solved a constructed goal's arguments left to right, so kem_ct,
+// first and only carried by HASH, was bound to nil before KEM_DECAP(kem_sk,
+// kem_ct) could give it the shape of a ciphertext, and the attack held only
+// with the arguments in the other order. Arguments in which a variable sits
+// under a primitive that constrains its shape are now solved first.
+// solver_kem_shape_before_carrier_guarded.vp is the counterweight.
+attacker[active]
+
+principal Server[
+	knows private server_sk
+	server_pk = PUBKEY(server_sk)
+]
+
+principal Client[
+	generates kem_sk
+	kem_ek = PUBKEY(kem_sk)
+]
+
+Server -> Client: server_pk
+
+Client -> Server: [kem_ek]
+
+principal Server[
+	generates kem_r
+	kem_ss, kem_ct = KEM_ENCAP(kem_ek, kem_r)
+	sig = SIGN(server_sk, kem_ct)
+]
+
+Server -> Client: kem_ct, sig
+
+principal Client[
+	kem_ss_c = KEM_DECAP(kem_sk, kem_ct)
+	_ = SIGNVERIF(server_pk, kem_ct, sig)?
+	key_c = HASH(kem_ct, kem_ss_c)
+]
+
+queries[
+	confidentiality? key_c
+]

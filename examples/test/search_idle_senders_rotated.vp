@@ -1,0 +1,40 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a1a0 at one session and at two: search_idle_senders.vp with its
+// two queries swapped. The search already found this; the verdicts must agree
+// with the unswapped model.
+attacker[active]
+
+principal Alice[
+	knows public c
+	knows private k
+	generates sid
+]
+
+Alice -> Bob: [sid]
+
+principal Bob[
+	knows public c
+	h = HASH(c, sid)
+]
+
+Bob -> Alice: h
+
+principal Alice[
+	_ = ASSERT(HASH(c, sid), h)?
+	t = MAC(k, h)
+]
+
+Alice -> Carol: [sid], t
+
+principal Carol[
+	knows public c
+	knows private k
+	_ = ASSERT(MAC(k, HASH(c, sid)), t)?
+]
+
+queries[
+	authentication? Bob -> Alice: h
+	authentication? Alice -> Carol: t
+]

@@ -1,0 +1,35 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1 at one session and at two.
+//
+// scenario_corrupt_by_bound_key_on_wire.vp with kd first sent in phase 1,
+// after Alice used it. The kpeer = kd scenario is honest in phase 0 and
+// corrupt from phase 1, so at phase 1 it answers for what it held at the
+// end of phase 0, m included, against what the attacker then knows, kd
+// included: m is disclosed, as in scenario_forward_secrecy_with_honest_peer.vp.
+attacker[active]
+principal Bob[
+	knows private kb
+]
+principal Alice[
+	knows private s
+	kd = HKDF(s, nil, nil)
+	knows private kb
+	knows private kpeer
+	generates m, n
+	e = AEAD_ENC(kpeer, n, m, nil)
+]
+Alice -> Bob: n, e
+principal Bob[
+	d = AEAD_DEC(kb, n, e, nil)
+]
+phase[1]
+Alice -> Bob: kd
+scenarios[
+	Alice[kpeer = kb]
+	Alice[kpeer = kd]
+]
+queries[
+	confidentiality? m
+]

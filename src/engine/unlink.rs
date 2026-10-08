@@ -4,6 +4,7 @@
 use std::sync::Arc;
 
 use super::exec::{Context, Execution, Held, Taken};
+use super::knowledge::{Knowledge, Origin};
 use super::program::Event;
 use crate::primitive::{CapabilityIndex, PrimitiveSpec, Reveal, RewriteRule};
 use crate::protocol::ProtocolTrace;
@@ -51,7 +52,7 @@ pub(crate) struct Linker<'a> {
 	cx: &'a Context<'a>,
 	ex: &'a Execution,
 	observed: std::cell::OnceCell<TermSet>,
-	supplied: std::cell::OnceCell<TermSet>,
+	supplied: std::cell::OnceCell<Knowledge>,
 }
 
 impl<'a> Linker<'a> {
@@ -75,7 +76,12 @@ impl<'a> Linker<'a> {
 				self.observed
 					.get_or_init(|| observed(&scope, self.cx, self.ex))
 			},
-			|| self.supplied.get_or_init(|| supplied(self.ex)),
+			|| {
+				&self
+					.supplied
+					.get_or_init(|| supplied(self.cx, self.ex))
+					.state
+			},
 			pair,
 		)
 	}
@@ -91,7 +97,7 @@ pub(crate) fn honest_reduct(km: &ProtocolTrace, slot: SlotIdx) -> Value {
 fn link<'s>(
 	scope: &Scope,
 	observed: impl FnOnce() -> &'s TermSet,
-	supplied: impl FnOnce() -> &'s TermSet,
+	supplied: impl FnOnce() -> &'s AttackerState,
 	[(a, ha), (b, hb)]: [(SlotIdx, &Held); 2],
 ) -> Option<Link> {
 	if ha.authored || hb.authored {
@@ -111,7 +117,7 @@ fn link<'s>(
 	let supplied = supplied();
 	let valid = |w: &Value, kind: LinkKind| {
 		scope.secret(w)
-			&& !supplied.contains(w)
+			&& !obtainable(w, &km.capabilities, supplied)
 			&& (matches!(kind, LinkKind::ObservedEquality)
 				|| w.constant_leaves().any(|c| shared.contains(&c.id)))
 	};
@@ -407,13 +413,20 @@ fn shared_secret_leaves(scope: &Scope, a: SlotIdx, b: SlotIdx) -> IdSet<ValueId>
 		.collect()
 }
 
-fn supplied(ex: &Execution) -> TermSet {
-	ex.runs
+fn supplied(cx: &Context, ex: &Execution) -> Knowledge {
+	let mut supplied = cx.initial.clone();
+	supplied.set_phase(ex.knowledge.state.current_phase);
+	for components in ex
+		.runs
 		.iter()
 		.flat_map(|run| run.env.iter().flatten())
 		.filter_map(|held| held.installed.as_ref())
-		.flat_map(|components| components.iter().cloned())
-		.collect()
+	{
+		for component in components.iter() {
+			supplied.learn(component, Origin::Initial);
+		}
+	}
+	supplied
 }
 
 fn parts(scope: &Scope, v: &Value) -> Vec<Value> {
@@ -699,11 +712,12 @@ mod tests {
 			);
 			assert!(ex.runs[bob].held(slot("x")).unwrap().installed.is_some());
 			assert!(ex.knowledge.state.knows(&s).is_some());
-			let supplied = supplied(&ex);
-			assert!(supplied.contains(&value));
-			assert!(supplied.contains(&y));
-			assert!(!supplied.contains(&s));
-			assert_eq!(supplied.contains(&inner), !value.equivalent(&y, true));
+			let supplied = supplied(&cx, &ex);
+			let supplied = |v: &Value| supplied.knows(v).is_some();
+			assert!(supplied(&value));
+			assert!(supplied(&y));
+			assert!(!supplied(&s));
+			assert_eq!(supplied(&inner), !value.equivalent(&y, true));
 			let known = ex
 				.order
 				.iter()
@@ -722,6 +736,49 @@ mod tests {
 					.all(|v| !v.equivalent(&s, true) && !v.equivalent(&inner, true))
 			);
 		}
+	}
+
+	fn linked(src: &str, forced: bool) -> bool {
+		let _generation = crate::util::generation::GenerationGuard::enter();
+		let m = crate::syntax::parser::parse_string("forced.vp", src).expect("parses");
+		let km = crate::protocol::sanity::sanity(&m).expect("sane");
+		let program = Program::of(&m, &km);
+		let cx = Context::new(&program, &km);
+		let bob = program.runs.position(|r| r.name == "Bob").unwrap();
+		let slot = |name: &str| {
+			km.slots
+				.position(|s| s.constant.name.as_ref() == name)
+				.unwrap()
+		};
+		let gb = execute(&cx, &vec![]).runs[bob]
+			.held(slot("gb"))
+			.unwrap()
+			.value
+			.clone();
+		let installs: Installs = forced
+			.then(|| Install::Value {
+				run: bob,
+				slot: slot("c"),
+				value: Value::primitive(crate::primitive::PRIM_PKE_ENC, vec![gb.clone(), gb], 0),
+			})
+			.into_iter()
+			.collect();
+		let ex = execute(&cx, &installs);
+		assert!(ex.stuck.is_empty());
+		let claims = |_| Some(0);
+		crate::engine::judgment::Judge::at(&cx, &ex, 0, &claims)
+			.evaluate(&m.queries[0])
+			.is_some()
+	}
+
+	#[test]
+	fn a_key_the_attacker_builds_from_what_it_supplied_links_nothing() {
+		let source = include_str!("../../examples/test/unlink_forced_key_carries_no_secret.vp");
+		assert!(!linked(source, true));
+		assert!(linked(
+			&source.replace("k = HASH(seed_b)", "k = HASH(gb)"),
+			false
+		));
 	}
 
 	fn observed_in(src: &str, install: Option<(&str, &str)>, phase: i32, target: &str) -> bool {

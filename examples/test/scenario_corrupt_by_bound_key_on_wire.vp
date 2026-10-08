@@ -1,0 +1,40 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0 at one session and at two.
+//
+// Alice's symmetric key with her peer is bound to kd = HKDF(s, nil, nil),
+// which Mallory sends her in the clear: the attacker holds kd from phase 0,
+// so the kpeer = kd scenario is a corrupt peer and m in it is no claim. The
+// corruption inference once counted only declared secrets and public-key
+// seeds as compromisable, so a derived symmetric key on the wire left the
+// scenario labelled honest and its m was reported disclosed.
+// scenario_corrupt_by_bound_key_late.vp is the counterweight: the same key
+// first crosses the wire in phase 1, so the scenario answers at phase 1 for
+// its phase-0 state and m fails for want of forward secrecy.
+attacker[active]
+principal Bob[
+	knows private kb
+]
+principal Mallory[
+	knows private s
+	kd = HKDF(s, nil, nil)
+]
+Mallory -> Alice: kd
+principal Alice[
+	knows private kb
+	knows private kpeer
+	generates m, n
+	e = AEAD_ENC(kpeer, n, m, nil)
+]
+Alice -> Bob: n, e
+principal Bob[
+	d = AEAD_DEC(kb, n, e, nil)
+]
+scenarios[
+	Alice[kpeer = kb]
+	Alice[kpeer = kd]
+]
+queries[
+	confidentiality? m
+]

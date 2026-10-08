@@ -1,0 +1,72 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a0 at one session and at two.
+//
+// history_own_later_emission_directional.vp with Bob's first flight written
+// as two messages. The associated data names the direction, so Bob's own box
+// does not open as Alice's reply however the flight is cut. Counterweight to
+// history_own_later_emission_split.vp.
+
+attacker[active]
+
+principal Alice[
+	knows public to_alice, to_bob
+	generates ea
+	gea = PUBKEY(ea)
+]
+
+principal Bob[
+	knows public to_alice, to_bob
+	knows private lb
+	glb = PUBKEY(lb)
+	generates eb
+	geb = PUBKEY(eb)
+]
+
+Bob -> Alice: [glb]
+
+Alice -> Bob: gea
+
+Bob -> Alice: geb
+
+principal Alice[
+	k_a = HASH(DH_KEX(geb, ea), DH_KEX(glb, ea))
+]
+
+principal Bob[
+	k_b = HASH(DH_KEX(gea, eb), DH_KEX(gea, lb))
+	sig = SIGN(lb, HASH(gea, geb))
+	generates n1
+	box1 = AEAD_ENC(k_b, n1, sig, to_alice)
+]
+
+Bob -> Alice: n1
+Bob -> Alice: box1
+
+principal Alice[
+	s = AEAD_DEC(k_a, n1, box1, to_alice)?
+	_ = SIGNVERIF(glb, HASH(gea, geb), s)?
+	knows private m1
+	generates n2
+	box2 = AEAD_ENC(k_a, n2, m1, to_bob)
+]
+
+Alice -> Bob: n2, box2
+
+principal Bob[
+	m1b = AEAD_DEC(k_b, n2, box2, to_bob)?
+	knows private m2
+	generates n3
+	box3 = AEAD_ENC(k_b, n3, m2, to_alice)
+]
+
+Bob -> Alice: n3, box3
+
+principal Alice[
+	m2a = AEAD_DEC(k_a, n3, box3, to_alice)?
+]
+
+queries[
+	authentication? Bob -> Alice: box1
+]

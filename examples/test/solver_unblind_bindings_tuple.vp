@@ -1,0 +1,46 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1 at one session and at two.
+//
+// solver_unblind_bindings.vp with Alice's message and blind signature sent as
+// one tuple that Bob splits. The attacker hands Bob CONCAT(other, alt), so he
+// unblinds Alice's signature over the public value and sends Carol
+// SIGN(sk, other).
+//
+// The goal's rewrite shape mentioned both projections of one open tuple
+// variable, which unification could not bind through a projection, so the
+// tuple encoding hid the attack. Unification now opens a projected variable
+// into a tuple of fresh fields.
+// solver_unblind_bindings_tuple_guarded.vp is the counterweight.
+attacker[active]
+
+principal Alice[
+	knows private sk, r
+	knows public other
+	generates m
+	sig = SIGN(sk, BLIND(r, m))
+	alt = SIGN(sk, BLIND(r, other))
+	tq_3 = CONCAT(m, sig)
+]
+
+Alice -> Carol: alt
+
+principal Carol[
+]
+
+Alice -> Bob: tq_3
+
+principal Bob[
+	m_tq, sig_tq = SPLIT(tq_3)
+	knows private r, sk
+	knows public other
+	unblinded = UNBLIND(r, m_tq, sig_tq)
+	secret = SIGN(sk, other)
+]
+
+Bob -> Carol: unblinded
+
+queries[
+	confidentiality? secret
+]

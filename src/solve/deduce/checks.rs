@@ -7,7 +7,7 @@ use crate::protocol::ProtocolTrace;
 use crate::protocol::SlotIdx;
 use crate::solve::symbolic::SymbolicState;
 use crate::solve::vars::{Distinct, Substitution, apply, as_var, contains_var, dedupe};
-use crate::syntax::{PrincipalId, Query};
+use crate::syntax::{PrincipalId, Query, QueryKind};
 use crate::term::equivalence::equivalent_primitives;
 use crate::term::{Primitive, Value};
 use crate::util::{IdMap, IdSet};
@@ -59,6 +59,29 @@ pub(super) fn constraint_sets(
 					(km.slots[slot].declared_at, Some(slot)),
 					Some(slot),
 				));
+				if !matches!(query.kind, QueryKind::Authentication | QueryKind::Freshness) {
+					continue;
+				}
+				for (&owner, owned) in &checks {
+					if owner == km.slots[slot].creator {
+						continue;
+					}
+					for &check in owned {
+						if crate::engine::judgment::mentions(
+							km,
+							&km.slots[check].initial_value,
+							constant.id,
+							owner,
+							&mut Vec::new(),
+						) {
+							endpoints.push((
+								owner,
+								(km.slots[check].declared_at, Some(check)),
+								Some(check),
+							));
+						}
+					}
+				}
 			}
 		}
 	}

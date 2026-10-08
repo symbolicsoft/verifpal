@@ -6,14 +6,9 @@ use crate::engine::exec::{Install, Installs};
 use crate::engine::program::{DeliveryIdx, Event, RunIdx, StepIdx};
 use crate::term::Value;
 use crate::util::IdMap;
+use crate::util::index::{Idx, IndexVec};
 
 type Registration = (Vec<(Value, Source)>, Vec<RunIdx>);
-
-fn reaches(bypassed: &[(RunIdx, usize)], run: RunIdx, receive: usize) -> bool {
-	bypassed
-		.iter()
-		.any(|&(sender, sent)| sender == run && sent > receive)
-}
 
 impl<'a, 'b> Search<'a, 'b> {
 	fn send_step(&self, d: DeliveryIdx) -> Option<StepIdx> {
@@ -52,9 +47,46 @@ impl<'a, 'b> Search<'a, 'b> {
 		self.replaced(node, d)
 			.filter_map(|replaced| {
 				let sender = self.cx.program.deliveries[replaced].sender;
-				Some((sender, self.honest_sent_at(replaced)?))
+				Some((sender, self.send_step(replaced)?))
 			})
 			.collect()
+	}
+
+	fn after(&self, run: RunIdx, receive: StepIdx) -> IndexVec<RunIdx, Option<StepIdx>> {
+		let program = self.cx.program;
+		let mut first: IndexVec<RunIdx, Option<StepIdx>> =
+			IndexVec::from_elem(None, program.runs.len());
+		first[run] = Some(receive.next());
+		let mut changed = true;
+		while changed {
+			changed = false;
+			for (d, delivery) in program.deliveries.iter_enumerated() {
+				let Some(from) = first[delivery.sender] else {
+					continue;
+				};
+				if self.send_step(d).is_none_or(|send| send < from) {
+					continue;
+				}
+				let Some(at) = program.runs[delivery.recipient]
+					.steps
+					.position(|step| step.event == Event::Recv(d))
+				else {
+					continue;
+				};
+				if first[delivery.recipient].is_none_or(|held| at < held) {
+					first[delivery.recipient] = Some(at);
+					changed = true;
+				}
+			}
+		}
+		first
+	}
+
+	fn reaches(&self, bypassed: &[(RunIdx, StepIdx)], run: RunIdx, receive: StepIdx) -> bool {
+		let after = self.after(run, receive);
+		bypassed
+			.iter()
+			.any(|&(sender, send)| after[sender].is_some_and(|first| send >= first))
 	}
 
 	pub(super) fn rerouted_sends(
@@ -83,7 +115,7 @@ impl<'a, 'b> Search<'a, 'b> {
 		out
 	}
 
-	fn waiting(&self, stuck: &Stuck) -> Vec<(Value, RunIdx, usize)> {
+	fn waiting(&self, stuck: &Stuck) -> Vec<(Value, RunIdx, StepIdx)> {
 		let program = self.cx.program;
 		stuck
 			.installs
@@ -94,21 +126,45 @@ impl<'a, 'b> Search<'a, 'b> {
 				}
 				_ => None,
 			})
-			.filter_map(|(run, slot, value)| {
-				let step = *program.runs[*run].step_of_slot.get(slot)?;
-				let receive = *self.facts.honest_at.get(&(*run, step))?;
-				let early = program.deliveries.indices().any(|d| {
-					self.nodes[HONEST_NODE].sent[d]
-						.as_ref()
-						.is_some_and(|sent| sent.iter().any(|v| v.equivalent(value, true)))
-						&& self.honest_sent_at(d).is_some_and(|sent| sent < receive)
-				});
-				(!early).then(|| (value.clone(), *run, receive))
+			.flat_map(|(run, slot, value)| {
+				let mut out = Vec::new();
+				let Some(&step) = program.runs[*run].step_of_slot.get(slot) else {
+					return out;
+				};
+				let Some(&receive) = self.facts.honest_at.get(&(*run, step)) else {
+					return out;
+				};
+				let sends = |w: &Value| -> Vec<usize> {
+					program
+						.deliveries
+						.indices()
+						.filter(|&d| {
+							self.nodes[HONEST_NODE].sent[d]
+								.as_ref()
+								.is_some_and(|sent| sent.iter().any(|v| v.equivalent(w, true)))
+						})
+						.filter_map(|d| self.honest_sent_at(d))
+						.collect()
+				};
+				if sends(value).iter().all(|&sent| sent >= receive) {
+					out.push((value.clone(), *run, step));
+				}
+				for w in crate::term::subterms(value) {
+					if w.same_term(value) || out.iter().any(|(held, _, _)| held.equivalent(w, true))
+					{
+						continue;
+					}
+					let sent = sends(w);
+					if !sent.is_empty() && sent.iter().all(|&at| at >= receive) {
+						out.push((w.clone(), *run, step));
+					}
+				}
+				out
 			})
 			.collect()
 	}
 
-	pub(super) fn bypasses(&self, source: Source, run: RunIdx, receive: usize) -> bool {
+	pub(super) fn bypasses(&self, source: Source, run: RunIdx, receive: StepIdx) -> bool {
 		let node = &self.nodes[source.node];
 		self.cx
 			.program
@@ -118,7 +174,7 @@ impl<'a, 'b> Search<'a, 'b> {
 				delivery.sender == source.run
 					&& node.sent[d].is_some()
 					&& delivery.slots.iter().any(|&(slot, _)| slot == source.slot)
-					&& reaches(&self.bypassed(node, d), run, receive)
+					&& self.reaches(&self.bypassed(node, d), run, receive)
 			})
 	}
 
@@ -127,29 +183,27 @@ impl<'a, 'b> Search<'a, 'b> {
 			return;
 		}
 		self.retries.rerouting = true;
-		let waiting: Vec<Vec<(Value, RunIdx, usize)>> = self
+		let waiting: Vec<Vec<(Value, RunIdx, StepIdx)>> = self
 			.retries
 			.stuck
 			.iter()
 			.map(|stuck| self.waiting(stuck))
 			.collect();
-		let mut earliest: IdMap<(u64, RunIdx), Vec<(&Value, usize)>> = IdMap::default();
+		let mut earliest: IdMap<u64, Vec<(&Value, RunIdx, StepIdx)>> = IdMap::default();
 		for (value, run, receive) in waiting.iter().flatten() {
-			let bucket = earliest.entry((value.hash_value(), *run)).or_default();
+			let bucket = earliest.entry(value.hash_value()).or_default();
 			match bucket
 				.iter_mut()
-				.find(|(held, _)| held.equivalent(value, true))
+				.find(|(held, r, _)| r == run && held.equivalent(value, true))
 			{
-				Some((_, at)) => *at = (*at).min(*receive),
-				None => bucket.push((value, *receive)),
+				Some((_, _, at)) => *at = (*at).min(*receive),
+				None => bucket.push((value, *run, *receive)),
 			}
 		}
-		let wanted = |v: &Value, bypassed: &[(RunIdx, usize)]| {
-			bypassed.iter().any(|&(run, sent)| {
-				earliest.get(&(v.hash_value(), run)).is_some_and(|bucket| {
-					bucket
-						.iter()
-						.any(|(w, receive)| *receive < sent && w.equivalent(v, true))
+		let wanted = |v: &Value, bypassed: &[(RunIdx, StepIdx)]| {
+			earliest.get(&v.hash_value()).is_some_and(|bucket| {
+				bucket.iter().any(|&(w, run, receive)| {
+					w.equivalent(v, true) && self.reaches(bypassed, run, receive)
 				})
 			})
 		};

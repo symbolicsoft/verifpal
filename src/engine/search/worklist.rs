@@ -9,7 +9,8 @@ use super::{
 };
 use crate::engine::exec::{Execution, Install, Installs, execute};
 use crate::engine::program::{Event, RunIdx};
-use crate::protocol::SlotIdx;
+use crate::protocol::{ProtocolTrace, SlotIdx};
+use crate::syntax::PrincipalId;
 use crate::term::Value;
 use crate::theory::obtainable;
 use crate::util::IdSet;
@@ -54,6 +55,29 @@ fn rebuilt(honest: &Value, obtains: &impl Fn(&Value) -> bool) -> Value {
 		}
 		Value::Constant(_) | Value::Variable(_) => crate::term::value_nil(),
 	}
+}
+
+fn feeds(
+	km: &ProtocolTrace,
+	owner: PrincipalId,
+	slot: SlotIdx,
+	from: &[SlotIdx],
+	seen: &mut Vec<SlotIdx>,
+) -> bool {
+	if from.contains(&slot) {
+		return true;
+	}
+	if seen.contains(&slot) || km.slots[slot].creator != owner {
+		return false;
+	}
+	seen.push(slot);
+	let Value::Primitive(_) = &km.slots[slot].initial_value else {
+		return false;
+	};
+	km.slots[slot].initial_value.constant_leaves().any(|c| {
+		km.index_of(c)
+			.is_some_and(|at| feeds(km, owner, at, from, seen))
+	})
 }
 
 fn halts_of(ex: &Execution) -> Vec<(RunIdx, SlotIdx)> {
@@ -175,13 +199,24 @@ impl<'a, 'b> Search<'a, 'b> {
 			let stuck = !ex.stuck.is_empty();
 			search.attempts.tried.entries[at].1.outcome = Some(Outcome {
 				halts: halts_of(&ex),
+				waits: search.waits_of(&ex),
 				settled: !stuck,
 			});
 			if stuck && family.derived() {
 				return;
 			}
-			let fills = search.fills(&ex);
+			let (fills, wanted, plain) = search.fills(&ex);
 			let accepted = search.accept(installs.clone(), ex);
+			if !wanted.is_empty() && !search.done() {
+				let slots = wanted
+					.iter()
+					.filter_map(|install| Some((install.run(), install.slot()?)))
+					.collect();
+				let mut plan = installs.clone();
+				plan.extend(wanted);
+				plan.extend(plain);
+				search.retries.wants.push((normalize(plan), slots));
+			}
 			search.tally(family, accepted);
 			for fill in fills {
 				if search.done() {
@@ -194,20 +229,71 @@ impl<'a, 'b> Search<'a, 'b> {
 		});
 	}
 
-	fn fills(&self, ex: &Execution) -> Vec<Installs> {
+	fn waits_of(&self, ex: &Execution) -> Vec<(RunIdx, SlotIdx)> {
+		let km = self.cx.km;
+		let mut waits: Vec<(RunIdx, SlotIdx)> = Vec::new();
+		let starved: Vec<(RunIdx, SlotIdx)> = ex
+			.withheld
+			.iter()
+			.filter(|at| self.honest.withheld.contains(at))
+			.copied()
+			.collect();
+		for &(run, _) in &starved {
+			if waits.iter().any(|(r, _)| *r == run) {
+				continue;
+			}
+			let withheld: Vec<SlotIdx> = starved
+				.iter()
+				.filter(|(r, _)| *r == run)
+				.map(|(_, slot)| *slot)
+				.collect();
+			let program = &self.cx.program.runs[run];
+			let next =
+				program
+					.steps
+					.iter()
+					.skip(ex.runs[run].pc.index())
+					.find_map(|step| match step.event {
+						Event::Assign(slot) => match &km.slots[slot].initial_value {
+							Value::Primitive(p)
+								if p.instance_check
+									&& feeds(km, program.id, slot, &withheld, &mut Vec::new()) =>
+							{
+								Some(slot)
+							}
+							_ => None,
+						},
+						_ => None,
+					});
+			if let Some(slot) = next {
+				waits.push((run, slot));
+			}
+		}
+		waits
+	}
+
+	fn fills(&self, ex: &Execution) -> (Vec<Installs>, Installs, Installs) {
 		let km = self.cx.km;
 		let honest = &self.honest;
 		let state = &ex.knowledge.state;
 		let _memo = crate::theory::DeductionMemo::scoped(&km.capabilities, state);
-		let obtains = |v: &Value| obtainable(v, &km.capabilities, state);
+		let obtains = |run: RunIdx, slot: SlotIdx, v: &Value| {
+			let program = &self.cx.program.runs[run];
+			let phase = program
+				.step_of_slot
+				.get(&slot)
+				.map_or(km.max_phase, |&step| program.steps[step].phase);
+			obtainable(v, &km.capabilities, &ex.at(phase).knowledge.state)
+		};
 		let honest_value =
 			|run: RunIdx, slot: SlotIdx| honest.runs[run].held(slot).map(|h| &h.value);
+		let mut wanted: Installs = Vec::new();
 		let mut fills: Installs = ex
 			.withheld
 			.iter()
 			.map(|&(run, slot)| {
 				let value = honest_value(run, slot)
-					.filter(|v| obtains(v))
+					.filter(|v| obtains(run, slot, v))
 					.cloned()
 					.unwrap_or_else(crate::term::value_nil);
 				Install::Value { run, slot, value }
@@ -231,39 +317,87 @@ impl<'a, 'b> Search<'a, 'b> {
 					let Some(value) = honest_value(b, slot) else {
 						continue;
 					};
-					if value.equivalent(&held.value, true) || !obtains(value) {
+					if value.equivalent(&held.value, true) {
 						continue;
 					}
-					fills.push(Install::Value {
+					let install = Install::Value {
 						run: b,
 						slot,
 						value: value.clone(),
-					});
+					};
+					if obtains(b, slot, value) {
+						fills.push(install);
+					} else if run.halted.is_some_and(|halt| {
+						crate::engine::judgment::mentions(
+							km,
+							&km.slots[halt].initial_value,
+							km.slots[slot].constant.id,
+							self.cx.program.runs[b].id,
+							&mut Vec::new(),
+						)
+					}) {
+						wanted.push(install);
+					}
 				}
 			}
 		}
 		if fills.is_empty() {
-			return Vec::new();
+			return (Vec::new(), wanted, Vec::new());
 		}
 		let replayed = varied(&fills, |run, slot, value| {
-			if honest_value(run, slot).is_some_and(obtains) {
+			if honest_value(run, slot).is_some_and(|h| obtains(run, slot, h)) {
 				return None;
 			}
 			km.session_sibling_values(&km.slots[slot].constant)
 				.into_iter()
-				.find(|v| !v.equivalent(value, true) && obtains(v))
+				.find(|v| !v.equivalent(value, true) && obtains(run, slot, v))
 		});
 		let built = varied(&fills, |run, slot, value| {
 			honest_value(run, slot)
-				.filter(|h| !obtains(h))
-				.map(|h| rebuilt(h, &obtains))
-				.filter(|v| !v.equivalent(value, true) && obtains(v))
+				.filter(|h| !obtains(run, slot, h))
+				.map(|h| rebuilt(h, &|v: &Value| obtains(run, slot, v)))
+				.filter(|v| !v.equivalent(value, true) && obtains(run, slot, v))
 		});
-		[built, replayed]
+		let plain = fills.clone();
+		let variants = [built, replayed]
 			.into_iter()
 			.flatten()
 			.chain(std::iter::once(fills))
-			.collect()
+			.collect();
+		(variants, wanted, plain)
+	}
+
+	pub(super) fn supply_wants(&mut self) {
+		let wants = std::mem::take(&mut self.retries.wants);
+		for (plan, slots) in wants {
+			if self.done() {
+				return;
+			}
+			let mut sources: Vec<super::Source> = Vec::new();
+			for install in &plan {
+				let Install::Value { run, slot, value } = install else {
+					continue;
+				};
+				if !slots.contains(&(*run, *slot)) {
+					continue;
+				}
+				for source in self.fresh_sources(value) {
+					if source.node != HONEST_NODE
+						&& !sources.iter().any(|s| s.node == source.node)
+						&& super::compatible_with(&plan, &self.nodes[source.node].installs)
+					{
+						sources.push(source);
+					}
+				}
+			}
+			for source in sources {
+				if self.done() {
+					return;
+				}
+				let merged = self.merged(&[source.node], plan.clone());
+				self.as_family(Family::Stuck, |search| search.consider(merged));
+			}
+		}
 	}
 
 	pub(super) fn accept(&mut self, installs: Installs, ex: Execution) -> bool {

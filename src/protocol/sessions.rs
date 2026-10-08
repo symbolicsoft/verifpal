@@ -243,7 +243,7 @@ impl<'a> ModelCopy<'a> {
 		copy_value_id(root, copy + self.offset)
 	}
 
-	fn constant(&self, c: &Constant) -> Constant {
+	pub(crate) fn constant(&self, c: &Constant) -> Constant {
 		if self.offset == 0 || !self.freshen.contains(&c.id) {
 			return c.clone();
 		}

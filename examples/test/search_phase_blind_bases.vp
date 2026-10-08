@@ -1,0 +1,51 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a1 at one session and at two. In phase 0, Carol encrypts the
+// long-term secret s to whatever public key reaches her unguarded, so the
+// attacker who hands her PUBKEY(nil) learns s in phase 0 and forges Alice's c
+// for Bob, also in phase 0 (nn and gv are guarded but sent in clear). In the
+// honest execution s is only disclosed by Carol's phase-1 leak. The search once reported
+// a0 at both counts: when it places Bob's install it asks whether the honest
+// execution derives the forged c by the last phase, which it does (after the
+// leak), so it never merges Carol's execution into the plan, and the install
+// is stuck in phase 0 with no other install to anchor a stuck retry.
+// Counterweight: search_phase_blind_bases_guarded.vp.
+attacker[active]
+
+principal Alice[
+	knows private s, ska
+	pka = PUBKEY(ska)
+	generates m, gv, nn
+	c = AEAD_ENC(s, nn, m, gv)
+]
+
+Alice -> Carol: pka
+
+principal Carol[
+	knows private s
+	e = PKE_ENC(pka, s)
+]
+
+Carol -> Alice: e
+
+principal Alice[
+	ds = PKE_DEC(ska, e)
+]
+
+Alice -> Bob: [gv], [nn], c
+
+principal Bob[
+	knows private s
+	d = AEAD_DEC(s, nn, c, gv)?
+]
+
+phase[1]
+
+principal Carol[
+	leaks s
+]
+
+queries[
+	authentication? Alice -> Bob: c
+]

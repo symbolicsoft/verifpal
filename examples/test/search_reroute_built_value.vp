@@ -1,0 +1,59 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a1 at one session and at two. history_own_later_emission.vp with
+// Bob's first flight packed as one value: pkt = CONCAT(n1, box1). The attacker
+// splits pkt, hands Bob his own n1 and box1 as Alice's reply, Bob answers with
+// n3 and box3 before Alice has replied, and the attacker hands Alice
+// CONCAT(n3, box3) as pkt. Alice's split and decryption pass and every later
+// mention of pkt is reached, so she accepts a pkt Bob never sent. The value
+// Alice needs is built from Bob's early sends, not equal to any of them, so
+// the rerouted pass, which matched stuck values against sends exactly, never
+// found its source and reported a0 at both counts; it now also waits for the
+// late ingredients of a stuck value. The trailing HASH(pkt)
+// rules out the accept-then-halt forgery of auth_accept_then_halt.vp.
+attacker[active]
+
+principal Bob[
+	knows private k
+	knows private mb1, mb3
+	generates sid
+]
+
+Bob -> Alice: [sid]
+
+principal Bob[
+	generates n1
+	box1 = AEAD_ENC(k, n1, mb1, sid)
+	pkt = CONCAT(n1, box1)
+]
+
+Bob -> Alice: pkt
+
+principal Alice[
+	knows private k
+	knows private ma
+	an1, abox1 = SPLIT(pkt)?
+	d1 = AEAD_DEC(k, an1, abox1, sid)?
+	generates n2
+	box2 = AEAD_ENC(k, n2, ma, sid)
+]
+
+Alice -> Bob: n2, box2
+
+principal Bob[
+	d2 = AEAD_DEC(k, n2, box2, sid)?
+	generates n3
+	box3 = AEAD_ENC(k, n3, mb3, sid)
+]
+
+Bob -> Alice: n3, box3
+
+principal Alice[
+	d3 = AEAD_DEC(k, n3, box3, sid)?
+	hp = HASH(pkt)
+]
+
+queries[
+	authentication? Bob -> Alice: pkt
+]

@@ -112,6 +112,7 @@ pub(crate) struct Knowledge {
 	origins: Arc<Vec<Origin>>,
 	pub(crate) protocol: Arc<Vec<(Value, Value, bool)>>,
 	pub(crate) built: Arc<TermSet>,
+	annotated: Arc<CapabilityIndex>,
 	candidates: Arc<Candidates>,
 	pools: Arc<IdMap<(usize, usize), usize>>,
 	settled: Arc<Vec<u8>>,
@@ -134,6 +135,7 @@ impl Knowledge {
 			origins: Arc::new(Vec::new()),
 			protocol: Arc::new(Vec::new()),
 			built: Arc::new(TermSet::default()),
+			annotated: Arc::new(CapabilityIndex::default()),
 			candidates: Arc::new(Candidates::default()),
 			pools: Arc::new(IdMap::default()),
 			settled: Arc::new(Vec::new()),
@@ -164,12 +166,12 @@ impl Knowledge {
 
 	pub(crate) fn learn(&mut self, v: &Value, origin: Origin) -> bool {
 		if let Some(at) = self.state.knows(v) {
-			if !matches!(origin, Origin::Derived(_))
-				&& self.state.derivations[at.get()]
-					.ingredients()
-					.next()
-					.is_some()
-			{
+			let current = &self.state.derivations[at.get()];
+			let replaces = match &origin {
+				Origin::Derived(record) => current.forged() && !record.forged(),
+				_ => current.ingredients().next().is_some(),
+			};
+			if replaces {
 				let state = Arc::make_mut(&mut self.state);
 				Arc::make_mut(&mut state.derivations)[at.get()] = origin.record();
 				state.chain = next_chain();
@@ -225,6 +227,12 @@ impl Knowledge {
 		for term in &built {
 			self.note_built(term);
 		}
+		if crate::term::subterms(pre)
+			.any(|term| matches!(term, Value::Primitive(p) if !p.capabilities.is_empty()))
+		{
+			Arc::make_mut(&mut self.annotated).insert(pre);
+			self.closed = false;
+		}
 	}
 
 	pub(crate) fn note_built(&mut self, term: &Value) {
@@ -254,6 +262,7 @@ impl Knowledge {
 				let _memo = crate::theory::DeductionMemo::scoped(capabilities, &snapshot);
 				Pass {
 					capabilities,
+					annotated: &self.annotated,
 					attacker: &snapshot,
 					built: &self.built,
 					pools: &self.pools,
@@ -272,13 +281,13 @@ impl Knowledge {
 					flags[at] |= bits;
 				}
 			}
-			let mut progress = false;
+			let chain = self.state.chain;
 			for (v, record) in learned {
-				progress |= self.learn(&v, Origin::Derived(record));
+				self.learn(&v, Origin::Derived(record));
 			}
 			let pairs = reuse_pairs(capabilities, &self.state, &self.built);
 			for pair in pairs {
-				progress |= self.note_reused(&pair);
+				self.note_reused(&pair);
 				let Value::Primitive(p) = &pair[0] else {
 					continue;
 				};
@@ -286,7 +295,7 @@ impl Knowledge {
 					continue;
 				};
 				for revealed in revealed(p, &rule.reveals) {
-					progress |= self.learn(
+					self.learn(
 						&revealed,
 						Origin::Derived(DerivationRecord::Reused {
 							of: pair[0].clone(),
@@ -295,7 +304,7 @@ impl Knowledge {
 					);
 				}
 			}
-			if !progress {
+			if self.state.chain == chain {
 				break;
 			}
 		}
@@ -307,6 +316,7 @@ type Pools = Vec<((usize, usize), usize)>;
 
 struct Pass<'s> {
 	capabilities: &'s CapabilityIndex,
+	annotated: &'s CapabilityIndex,
 	attacker: &'s AttackerState,
 	built: &'s TermSet,
 	pools: &'s IdMap<(usize, usize), usize>,
@@ -322,14 +332,64 @@ struct Found {
 
 impl Found {
 	fn push(&mut self, attacker: &AttackerState, v: Value, d: DerivationRecord) {
-		if attacker.knows(&v).is_none() && self.seen.insert(v.clone()) {
+		let fresh = attacker.knows(&v).is_none_or(|at| {
+			attacker.derivations[at.get()].forged()
+				&& !d.forged()
+				&& d.ingredients().all(|ingredient| {
+					avoids(ingredient, at.get(), attacker, &mut Provenance::default())
+				})
+		});
+		if fresh && self.seen.insert(v.clone()) {
 			self.learned.push((v, d));
 		}
 	}
 }
 
+#[derive(Default)]
+struct Provenance {
+	held: IdMap<usize, bool>,
+	built: IdMap<usize, bool>,
+}
+
+fn avoids(v: &Value, target: usize, attacker: &AttackerState, memo: &mut Provenance) -> bool {
+	let Some(at) = attacker.knows(v) else {
+		let Value::Primitive(p) = v else {
+			return true;
+		};
+		let key = Arc::as_ptr(p) as usize;
+		if let Some(&known) = memo.built.get(&key) {
+			return known;
+		}
+		memo.built.insert(key, false);
+		let found = p
+			.arguments
+			.iter()
+			.all(|argument| avoids(argument, target, attacker, memo));
+		memo.built.insert(key, found);
+		return found;
+	};
+	if at.get() == target {
+		return false;
+	}
+	if let Some(&known) = memo.held.get(&at.get()) {
+		return known;
+	}
+	memo.held.insert(at.get(), false);
+	let found = attacker.derivations[at.get()]
+		.ingredients()
+		.all(|ingredient| avoids(ingredient, target, attacker, memo));
+	memo.held.insert(at.get(), found);
+	found
+}
+
 fn settled_now(p: &Primitive, attacker: &AttackerState) -> u8 {
-	let held = |values: &[Value]| values.iter().all(|v| attacker.knows(v).is_some());
+	let held = |values: &[Value]| {
+		values.iter().all(|v| {
+			attacker
+				.knows(v)
+				.is_some_and(|at| !attacker.derivations[at.get()].forged())
+		})
+	};
 	let mut now = 0;
 	let reveals = crate::theory::decomposition_reveals(p);
 	if reveals.as_deref().is_none_or(held) {
@@ -393,6 +453,7 @@ impl Pass<'_> {
 		if flags & BROKEN == 0
 			&& now & BROKEN == 0
 			&& let Some(revealed) = can_break_weak(p, capabilities, attacker)
+				.or_else(|| can_break_weak(p, self.annotated, attacker))
 		{
 			for r in revealed {
 				found.push(
@@ -770,6 +831,87 @@ mod tests {
 		assert!(!share_disclosed(&model(""), false));
 		assert!(!share_disclosed(&model(""), true));
 		assert!(share_disclosed(&model("leaks kmf_na\n"), false));
+	}
+
+	#[test]
+	fn an_install_is_delivered_as_its_reduct() {
+		let source = "attacker[active]\n\
+			principal Alice[\n\
+			knows private nrd_k, nrd_m\n\
+			knows public nrd_a\n\
+			generates nrd_n\n\
+			nrd_e = AEAD_ENC(nrd_k, nrd_n, nrd_m, nrd_a)\n\
+			nrd_p = CONCAT(nrd_n, nrd_e)\n\
+			]\n\
+			Alice -> Bob: nrd_p\n\
+			principal Bob[\n\
+			knows private nrd_z\n\
+			]\n\
+			Bob -> Carol: nrd_p\n\
+			principal Carol[\n\
+			nrd_h = HASH(nrd_p)\n\
+			]\n\
+			queries[\n\
+			confidentiality? nrd_m\n\
+			]\n";
+		let _generation = crate::util::generation::GenerationGuard::enter();
+		let m = crate::syntax::parser::parse_string("nrd.vp", source).expect("parses");
+		let km = crate::protocol::sanity::sanity(&m).expect("sane");
+		let program = Program::of(&m, &km);
+		let cx = Context::new(&program, &km);
+		let slot = |name: &str| {
+			km.slots
+				.position(|s| s.constant.name.as_ref() == name)
+				.expect("declared")
+		};
+		let honest = |name: &str| {
+			crate::theory::reduce_once(&crate::protocol::trace::resolve_trace_constant(
+				&km.slots[slot(name)].constant,
+				&km,
+			))
+		};
+		let ad = Value::Primitive(Arc::new(
+			Primitive::new(
+				crate::primitive::PRIM_SPLIT,
+				vec![Value::primitive(
+					crate::primitive::PRIM_CONCAT,
+					vec![honest("nrd_a"), crate::term::value_nil()],
+					0,
+				)],
+				0,
+			)
+			.with(|application| application.instance_check = true),
+		));
+		let unreduced = Value::primitive(
+			crate::primitive::PRIM_CONCAT,
+			vec![
+				honest("nrd_n"),
+				Value::primitive(
+					crate::primitive::PRIM_AEAD_ENC,
+					vec![honest("nrd_k"), honest("nrd_n"), honest("nrd_m"), ad],
+					0,
+				),
+			],
+			0,
+		);
+		let bob = program.runs.position(|r| r.name == "Bob").expect("run");
+		let ex = execute(
+			&cx,
+			&vec![Install::Value {
+				run: bob,
+				slot: slot("nrd_p"),
+				value: unreduced,
+			}],
+		);
+		assert!(ex.stuck.is_empty());
+		let held = ex.runs[bob].held(slot("nrd_p")).expect("received");
+		assert!(held.installed.is_none() && !held.authored);
+		assert!(held.value.equivalent(&honest("nrd_p"), true));
+		assert!(!obtainable(
+			&honest("nrd_m"),
+			&km.capabilities,
+			&ex.knowledge.state
+		));
 	}
 
 	#[test]

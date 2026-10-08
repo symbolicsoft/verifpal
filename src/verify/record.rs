@@ -240,9 +240,11 @@ mod tcb_tests {
 			vec![
 				("engine/mod.rs".to_string(), 2),
 				("engine/search/worklist.rs".to_string(), 1),
+				("protocol/scenario.rs".to_string(), 1),
 			],
-			"executions come only from the executor, called by the root run, the minimizer \
-			 and the search"
+			"executions come only from the executor, called by the root run, the minimizer, \
+			 the search, and scenario corruption dating, which reads the honest execution's \
+			 knowledge and judges nothing"
 		);
 	}
 
@@ -251,7 +253,7 @@ mod tcb_tests {
 		let exec = engine_source("engine/exec.rs");
 		let body = block_lines(&exec, |header| header.starts_with("fn step_run"));
 		let receive = body_hits(&body, "Event::Recv(d) =>");
-		let gate = body_hits(&body, ".derivable(t, &cx.km.capabilities)");
+		let gate = body_hits(&body, ".derivable(&t, &cx.km.capabilities)");
 		assert!(
 			!receive.is_empty() && !gate.is_empty(),
 			"the receive arm must gate installs"

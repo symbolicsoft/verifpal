@@ -5,7 +5,7 @@ use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 use crate::protocol::SlotIdx;
-use crate::term::{Value, VariableId, value_nil};
+use crate::term::{Primitive, Value, VariableId, value_nil};
 use crate::util::index::Idx;
 use crate::util::{IdHasher, IdMap, IdSet};
 
@@ -187,14 +187,25 @@ fn apply_shared(v: &Value, s: &Substitution, shared: &mut PointerMemo<Value>) ->
 			}
 			let out = match args {
 				None => v.clone(),
-				Some(args) => {
-					let args = crate::primitive::normalise_arguments(p.id, args);
-					Value::Primitive(Arc::new(p.with_arguments(args)))
-				}
+				Some(args) => match projected_field(p, &args) {
+					Some(field) => field,
+					None => {
+						let args = crate::primitive::normalise_arguments(p.id, args);
+						Value::Primitive(Arc::new(p.with_arguments(args)))
+					}
+				},
 			};
 			shared.insert(key, out.clone());
 			out
 		}
+	}
+}
+
+pub(crate) fn projected_field(p: &Primitive, arguments: &[Value]) -> Option<Value> {
+	let tuple = crate::primitive::projects(p.id)?;
+	match arguments.first()? {
+		Value::Primitive(inner) if inner.id == tuple => inner.arguments.get(p.output).cloned(),
+		_ => None,
 	}
 }
 
@@ -514,6 +525,23 @@ mod tests {
 				.count(),
 			40
 		);
+	}
+
+	#[test]
+	fn applying_a_tuple_binding_projects_its_fields() {
+		let t = attacker_var(SlotIdx::new(0));
+		let a = crate::testing::make_private("applied_field_a");
+		let b = crate::testing::make_private("applied_field_b");
+		let split =
+			|output| Value::primitive(crate::primitive::PRIM_SPLIT, vec![t.clone()], output);
+		let s = Substitution::from_iter([(
+			attacker_var_id(SlotIdx::new(0)),
+			Value::primitive(crate::primitive::PRIM_CONCAT, vec![a.clone(), b.clone()], 0),
+		)]);
+		assert!(apply(&split(0), &s).equivalent(&a, true));
+		assert!(apply(&split(1), &s).equivalent(&b, true));
+		let beyond = apply(&split(2), &s);
+		assert!(matches!(&beyond, Value::Primitive(p) if p.id == crate::primitive::PRIM_SPLIT));
 	}
 
 	#[test]

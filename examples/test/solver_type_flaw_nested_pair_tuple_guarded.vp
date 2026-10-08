@@ -1,0 +1,50 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0 at one session and at two.
+//
+// solver_type_flaw_nested_pair_tuple.vp with the server's pair guarded: Bob
+// opens only the server's own ticket, whose key kab the attacker never learns.
+attacker[active]
+
+principal Alice[
+	generates na
+]
+
+Alice -> Bob: na
+
+principal Bob[
+	knows private k_bs
+	knows public a_name
+	generates nb, n2
+	t2 = AEAD_ENC(k_bs, n2, CONCAT(a_name, na), nil)
+]
+
+Bob -> Server: nb, n2, t2
+
+principal Server[
+	knows private k_bs
+	knows public a_name
+	_ = AEAD_DEC(k_bs, n2, t2, nil)?
+	generates kab, n3
+	t3 = AEAD_ENC(k_bs, n3, CONCAT(a_name, CONCAT(kab, nb)), nil)
+	ticket = CONCAT(n3, t3)
+]
+
+Server -> Bob: [ticket]
+
+principal Bob[
+	n3_b, t3_b = SPLIT(ticket)
+	d = AEAD_DEC(k_bs, n3_b, t3_b, nil)?
+	a_b, rest = SPLIT(d)?
+	kab_b, nb_b = SPLIT(rest)?
+	_ = ASSERT(nb_b, nb)?
+	generates secret_b, n_e
+	e = AEAD_ENC(kab_b, n_e, secret_b, nil)
+]
+
+Bob -> Alice: n_e, e
+
+queries[
+	confidentiality? secret_b
+]

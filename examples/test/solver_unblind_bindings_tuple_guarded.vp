@@ -1,0 +1,38 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0 at one session and at two.
+//
+// solver_unblind_bindings_tuple.vp with the tuple guarded: Bob unblinds only
+// Alice's own message, so SIGN(sk, other) stays secret.
+attacker[active]
+
+principal Alice[
+	knows private sk, r
+	knows public other
+	generates m
+	sig = SIGN(sk, BLIND(r, m))
+	alt = SIGN(sk, BLIND(r, other))
+	tq_3 = CONCAT(m, sig)
+]
+
+Alice -> Carol: alt
+
+principal Carol[
+]
+
+Alice -> Bob: [tq_3]
+
+principal Bob[
+	m_tq, sig_tq = SPLIT(tq_3)
+	knows private r, sk
+	knows public other
+	unblinded = UNBLIND(r, m_tq, sig_tq)
+	secret = SIGN(sk, other)
+]
+
+Bob -> Carol: unblinded
+
+queries[
+	confidentiality? secret
+]

@@ -1,0 +1,40 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0 at one session and at two.
+//
+// solver_kem_shape_before_carrier.vp with the ciphertext guarded: the client
+// decapsulates the server's own ciphertext, so key_c stays secret.
+attacker[active]
+
+principal Server[
+	knows private server_sk
+	server_pk = PUBKEY(server_sk)
+]
+
+principal Client[
+	generates kem_sk
+	kem_ek = PUBKEY(kem_sk)
+]
+
+Server -> Client: server_pk
+
+Client -> Server: [kem_ek]
+
+principal Server[
+	generates kem_r
+	kem_ss, kem_ct = KEM_ENCAP(kem_ek, kem_r)
+	sig = SIGN(server_sk, kem_ct)
+]
+
+Server -> Client: [kem_ct], sig
+
+principal Client[
+	kem_ss_c = KEM_DECAP(kem_sk, kem_ct)
+	_ = SIGNVERIF(server_pk, kem_ct, sig)?
+	key_c = HASH(kem_ct, kem_ss_c)
+]
+
+queries[
+	confidentiality? key_c
+]

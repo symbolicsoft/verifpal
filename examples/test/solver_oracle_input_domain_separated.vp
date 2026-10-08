@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
 //
-// Expected: c0a0 at one session and c0a1 at two.
+// Expected: c0a1 at one session and at two.
 //
 // solver_oracle_input_certifies_key.vp with names and keys signed under
 // distinct domain tags, so a certificate over a name never verifies as a
@@ -11,10 +11,11 @@
 // key, a type confusion the search does not propose because it offers a key
 // slot only public-key shaped values.
 //
-// The certificates reach Alice over a guarded leg. On an open leg the
-// attacker halts Alice by replacing her key certificate, then hands Carol
-// the genuine one it observed, and Carol accepts a certificate Alice never
-// relayed.
+// The certificates reach Alice over a guarded leg, but the attacker drops
+// her key certificate there, so Alice never relays it, and hands Carol the
+// genuine one it observed: Carol accepts a certificate Alice never relayed,
+// at one session too. On an open leg the attacker could instead halt Alice by
+// replacing the certificate.
 
 attacker[active]
 

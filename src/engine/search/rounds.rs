@@ -3,7 +3,7 @@
 
 use super::{Family, Mode, NodeIdx, Search, normalize};
 use crate::engine::exec::Install;
-use crate::engine::program::RunIdx;
+use crate::engine::program::{Event, RunIdx, StepIdx};
 use crate::protocol::{ProtocolTrace, SlotIdx};
 use crate::solve::deduce::Deducer;
 use crate::solve::symbolic::{self, SymbolicState};
@@ -12,7 +12,7 @@ use crate::solve::{Pass, propose};
 use crate::syntax::QueryKind;
 use crate::term::Value;
 use crate::theory::AttackerState;
-use crate::util::index::IndexVec;
+use crate::util::index::{Idx, IndexVec};
 use crate::verify::Truncation;
 
 impl<'a, 'b> Search<'a, 'b> {
@@ -21,15 +21,26 @@ impl<'a, 'b> Search<'a, 'b> {
 		let program = self.cx.program;
 		let mut senders: Vec<(RunIdx, Vec<SlotIdx>)> = Vec::new();
 		for q in self.ctx.open_queries() {
-			if q.kind != QueryKind::Authentication {
-				continue;
-			}
-			let Some(slot) = q.message.constant().ok().and_then(|c| km.index_of(c)) else {
+			let subject = match q.kind {
+				QueryKind::Authentication => q.message.constant().ok(),
+				QueryKind::Freshness => q.subject().ok(),
+				_ => continue,
+			};
+			let Some(slot) = subject.and_then(|c| km.index_of(c)) else {
 				continue;
 			};
 			let siblings = km.sibling_slots(slot);
 			for (r, run) in program.runs.iter_enumerated() {
-				if !km.interchangeable_for(run.id, q.message.sender, slot) {
+				let sends = match q.kind {
+					QueryKind::Authentication => {
+						km.interchangeable_for(run.id, q.message.sender, slot)
+					}
+					_ => program.deliveries.iter().any(|delivery| {
+						delivery.sender == r
+							&& delivery.slots.iter().any(|(s, _)| siblings.contains(s))
+					}),
+				};
+				if !sends {
 					continue;
 				}
 				let mut upstream = Vec::new();
@@ -37,8 +48,15 @@ impl<'a, 'b> Search<'a, 'b> {
 					self.cone(r, s, &mut upstream);
 				}
 				for candidate in std::iter::once(r).chain(upstream.into_iter().map(|(u, _)| u)) {
-					if !senders.iter().any(|(s, _)| *s == candidate) {
-						senders.push((candidate, siblings.clone()));
+					match senders.iter_mut().find(|(s, _)| *s == candidate) {
+						Some((_, held)) => {
+							for &s in &siblings {
+								if !held.contains(&s) {
+									held.push(s);
+								}
+							}
+						}
+						None => senders.push((candidate, siblings.clone())),
 					}
 				}
 			}
@@ -48,28 +66,59 @@ impl<'a, 'b> Search<'a, 'b> {
 				if self.done() {
 					return;
 				}
-				if self.nodes[node]
-					.installs
-					.iter()
-					.any(|install| install.run() == *r)
-					|| !self.relied_on(node, *r, siblings)
-				{
+				let Some(send) = self.relied_on(node, *r, siblings) else {
 					continue;
+				};
+				let installs = &self.nodes[node].installs;
+				let mut candidates: Vec<Install> = Vec::new();
+				if !installs.iter().any(|install| install.run() == *r) {
+					candidates.push(Install::Idle { run: *r });
 				}
-				let mut installs = self.nodes[node].installs.clone();
-				installs.push(Install::Idle { run: *r });
-				self.as_family(Family::Idle, |search| search.consider(normalize(installs)));
+				let steps = &program.runs[*r].steps;
+				let latest = program.runs[*r]
+					.step_of_slot
+					.iter()
+					.filter(|&(_, &at)| matches!(steps[at].event, Event::Recv(_)))
+					.filter(|&(&slot, _)| {
+						!installs
+							.iter()
+							.any(|install| install.run() == *r && install.slot() == Some(slot))
+					})
+					.filter_map(|(&slot, &received)| {
+						let stop = (received.index() + 1..=send.index())
+							.map(StepIdx::new)
+							.find(|&at| needs(km, steps[at].event, program, slot))?;
+						Some((stop, slot))
+					})
+					.max();
+				if let Some((stop, slot)) = latest
+					&& (candidates.is_empty()
+						|| steps
+							.iter()
+							.take(stop.index())
+							.any(|step| matches!(step.event, Event::Send(_) | Event::Leak(_))))
+				{
+					candidates.push(Install::Drop { run: *r, slot });
+				}
+				for candidate in candidates {
+					if self.done() {
+						return;
+					}
+					let mut installs = self.nodes[node].installs.clone();
+					installs.push(candidate);
+					self.as_family(Family::Idle, |search| search.consider(normalize(installs)));
+				}
 			}
 		}
 	}
 
-	fn relied_on(&self, node: NodeIdx, r: RunIdx, siblings: &[SlotIdx]) -> bool {
+	fn relied_on(&self, node: NodeIdx, r: RunIdx, siblings: &[SlotIdx]) -> Option<StepIdx> {
 		let node = &self.nodes[node];
 		let program = self.cx.program;
 		program
 			.sends(&node.sent)
 			.filter(|(_, delivery, slot, _)| delivery.sender == r && siblings.contains(slot))
-			.any(|(_, _, _, v)| {
+			.filter(|(_, _, _, v)| {
 				node.held.indices().any(|b| {
 					b != r
 						&& siblings.iter().any(|&s| {
@@ -78,6 +127,14 @@ impl<'a, 'b> Search<'a, 'b> {
 						})
 				})
 			})
+			.filter_map(|(d, _, _, _)| {
+				program.runs[r]
+					.steps
+					.iter_enumerated()
+					.find(|(_, step)| step.event == Event::Send(d))
+					.map(|(at, _)| at)
+			})
+			.min()
 	}
 
 	pub(super) fn fixpoint(&mut self, mode: Mode) {
@@ -357,4 +414,21 @@ fn flights(km: &ProtocolTrace, sym: &SymbolicState, proposals: Vec<Substitution>
 		}
 	}
 	flights
+}
+
+fn needs(
+	km: &ProtocolTrace,
+	event: Event,
+	program: &crate::engine::program::Program,
+	slot: SlotIdx,
+) -> bool {
+	match event {
+		Event::Assign(at) => km.slots[at]
+			.initial_value
+			.constant_leaves()
+			.any(|c| km.index_of(c) == Some(slot)),
+		Event::Send(d) => program.deliveries[d].slots.iter().any(|&(s, _)| s == slot),
+		Event::Leak(at) => at == slot,
+		Event::Hold(_) | Event::Recv(_) => false,
+	}
 }

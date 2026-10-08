@@ -1,0 +1,45 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a0 at one session, a1 at two. Bob's challenge nb binds Alice's
+// first message, but her second message, e2 = ENC(k, x) and t = MAC(k, x),
+// carries nothing of the session. The attacker replays Alice#2's second
+// message to Bob, whose first message stays honest: Bob decrypts x#2, the MAC
+// matches, and Bob and Bob#2 both accept t#2, which Alice sent once. The search
+// once reported a0 at two sessions: its sibling flights replayed every slot a
+// run receives from one sibling session at once (which breaks the challenge)
+// or a single slot (which breaks the MAC), never one whole message, and the
+// constraint goal for the MAC check cannot invert the DEC that sits between
+// e2 and the MAC. A flight now also replays each message on its own. Counterweight: search_message_replay_bound.vp.
+attacker[active]
+
+principal Bob[
+	generates nb
+]
+
+Bob -> Alice: nb
+
+principal Alice[
+	knows private k
+	generates n1, m
+	e1 = AEAD_ENC(k, n1, nb, nil)
+	x = ENC(k, m)
+	e2 = ENC(k, x)
+	t = MAC(k, x)
+]
+
+Alice -> Bob: n1, e1
+
+Alice -> Bob: e2, t
+
+principal Bob[
+	knows private k
+	d1 = AEAD_DEC(k, n1, e1, nil)?
+	_ = ASSERT(d1, nb)?
+	dx = DEC(k, e2)
+	_ = ASSERT(MAC(k, dx), t)?
+]
+
+queries[
+	authentication? Alice -> Bob: t
+]

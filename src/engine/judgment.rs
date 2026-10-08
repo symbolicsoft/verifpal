@@ -9,7 +9,7 @@ use crate::protocol::SlotIdx;
 use crate::protocol::trace::mentions_across_principals;
 use crate::syntax::{PrincipalId, Query, QueryKind};
 use crate::term::{Constant, Value, ValueId};
-use crate::theory::{can_rewrite, obtainable, reduce_once};
+use crate::theory::{can_rewrite, obtainable};
 
 #[derive(Clone, Debug)]
 pub(crate) enum Violation {
@@ -209,9 +209,8 @@ impl<'a, 'b> Judge<'a, 'b> {
 		if !h.authored && program.runs[sender].id == q.message.sender {
 			return None;
 		}
-		let reduct = reduce_once(&h.value);
 		let siblings = self.km().sibling_slots(slot);
-		let emissions = self.emissions(q, &siblings, &reduct);
+		let emissions = self.emissions(q, &siblings, &h.value);
 		if !h.authored {
 			return (emissions == 0).then_some(Violation::Substituted {
 				run: b,
@@ -229,7 +228,7 @@ impl<'a, 'b> Judge<'a, 'b> {
 			});
 		}
 		let acceptances = self
-			.accepting(q.message.recipient, &siblings, &reduct)
+			.accepting(q.message.recipient, &siblings, &h.value)
 			.count();
 		(acceptances > emissions).then(|| Violation::Replayed {
 			run: b,
@@ -241,15 +240,13 @@ impl<'a, 'b> Judge<'a, 'b> {
 		})
 	}
 
-	fn emissions(&self, q: &Query, siblings: &[SlotIdx], reduct: &Value) -> usize {
+	fn emissions(&self, q: &Query, siblings: &[SlotIdx], value: &Value) -> usize {
 		let km = self.km();
 		let program = self.cx.program;
 		let sends = program
 			.sends(&self.ex.sent)
 			.map(|(d, delivery, s, v)| (d, delivery.sender, s, v))
-			.filter(|&(_, _, s, v)| {
-				siblings.contains(&s) && reduce_once(v).equivalent(reduct, true)
-			});
+			.filter(|&(_, _, s, v)| siblings.contains(&s) && v.equivalent(value, true));
 		let genuine = sends
 			.clone()
 			.any(|(_, from, s, _)| !self.ex.runs[from].held(s).is_some_and(|h| h.authored));
@@ -294,7 +291,7 @@ impl<'a, 'b> Judge<'a, 'b> {
 		&'s self,
 		actor: PrincipalId,
 		siblings: &'s [SlotIdx],
-		reduct: &'s Value,
+		value: &'s Value,
 	) -> impl Iterator<Item = RunIdx> + 's {
 		let km = self.km();
 		self.ex
@@ -303,11 +300,12 @@ impl<'a, 'b> Judge<'a, 'b> {
 			.filter(move |&r| km.same_actor(self.cx.program.runs[r].id, actor))
 			.flat_map(move |r| siblings.iter().map(move |&s| (r, s)))
 			.filter(move |&(r, s)| {
-				self.ex.runs[r].held(s).is_some_and(|held| {
-					held.sender.is_some() && reduce_once(&held.value).equivalent(reduct, true)
-				}) && self
-					.first_use(&self.ex.runs[r], r, km.slots[s].constant.id)
-					.is_some()
+				self.ex.runs[r]
+					.held(s)
+					.is_some_and(|held| held.value.equivalent(value, true))
+					&& self
+						.first_use(&self.ex.runs[r], r, km.slots[s].constant.id)
+						.is_some()
 			})
 			.map(|(r, _)| r)
 	}
@@ -324,12 +322,11 @@ impl<'a, 'b> Judge<'a, 'b> {
 				km.index_of(leaf)
 					.is_some_and(|i| km.slots[i].constant.fresh)
 			});
-			let reduct = reduce_once(&h.value);
 			let repeated = match fresh {
 				false => None,
-				true if !h.authored => return None,
+				true if !self.replayed_into(state, r, slot) => return None,
 				true => Some(
-					self.accepting(self.cx.program.runs[r].id, &siblings, &reduct)
+					self.accepting(self.cx.program.runs[r].id, &siblings, &h.value)
 						.find(|&other| other != r)?,
 				),
 			};
@@ -341,6 +338,31 @@ impl<'a, 'b> Judge<'a, 'b> {
 				used,
 				repeated,
 			})
+		})
+	}
+
+	fn replayed_into(&self, state: &RunState, r: RunIdx, slot: SlotIdx) -> bool {
+		let km = self.km();
+		let program = &self.cx.program.runs[r];
+		if state.held(slot).is_some_and(|h| h.authored) {
+			return true;
+		}
+		if km.slots[slot].creator != program.id {
+			return false;
+		}
+		let value = &km.slots[slot].initial_value;
+		program.steps.iter().any(|step| match step.event {
+			Event::Recv(d) => self.cx.program.deliveries[d].slots.iter().any(|&(t, _)| {
+				state.held(t).is_some_and(|h| h.authored)
+					&& mentions(
+						km,
+						value,
+						km.slots[t].constant.id,
+						program.id,
+						&mut Vec::new(),
+					)
+			}),
+			_ => false,
 		})
 	}
 
@@ -410,7 +432,7 @@ fn check_failed(v: &Value) -> bool {
 	}
 }
 
-fn mentions(
+pub(crate) fn mentions(
 	km: &ProtocolTrace,
 	v: &Value,
 	target: ValueId,
