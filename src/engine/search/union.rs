@@ -3,21 +3,72 @@
 
 use std::sync::Arc;
 
-use super::{NodeIdx, Search};
+use super::{NodeIdx, Search, Union};
 use crate::engine::exec::Execution;
 use crate::engine::knowledge::{Knowledge, Origin};
+use crate::protocol::ProtocolTrace;
+use crate::solve::control::Controllable;
+use crate::syntax::PrincipalId;
 use crate::term::Value;
-use crate::theory::obtainable;
+use crate::theory::{AttackerState, obtainable};
 use crate::util::IdMap;
+
+impl Union {
+	pub(super) fn size(&self) -> usize {
+		self.knowledge.len() + self.earlier.iter().map(Knowledge::len).sum::<usize>()
+	}
+
+	pub(super) fn at_last_receive(
+		&self,
+		km: &ProtocolTrace,
+		principal: PrincipalId,
+	) -> Option<AttackerState> {
+		let last = &self.knowledge.state;
+		let controllable = Controllable::of(km, principal, last);
+		let phase = km
+			.slots
+			.iter_enumerated()
+			.filter(|&(slot, _)| controllable.admits(principal, last, slot))
+			.map(|(_, slot)| {
+				let phases = slot.substitution_phases(principal);
+				phases.into_iter().max().unwrap_or(km.max_phase)
+			})
+			.max()?;
+		let union = usize::try_from(phase)
+			.ok()
+			.and_then(|phase| self.earlier.get(phase))
+			.unwrap_or(&self.knowledge);
+		Some((*union.state).clone())
+	}
+}
 
 impl<'a, 'b> Search<'a, 'b> {
 	pub(super) fn novel_terms(&self, ex: &Execution) -> Vec<Value> {
+		self.novel_in(&ex.knowledge, &self.union.knowledge.state)
+	}
+
+	pub(super) fn absorb_earlier(&mut self, ex: &Execution) {
+		for phase in 0..self.union.earlier.len() {
+			let knowledge = &ex
+				.at(self.union.earlier[phase].state.current_phase)
+				.knowledge;
+			let novel = self.novel_in(knowledge, &self.union.earlier[phase].state);
+			let union = &mut self.union.earlier[phase];
+			for v in &novel {
+				union.learn(v, Origin::Initial);
+			}
+			for pair in knowledge.state.reused.iter() {
+				union.note_reused(pair);
+			}
+		}
+	}
+
+	fn novel_in(&self, knowledge: &Knowledge, union: &AttackerState) -> Vec<Value> {
 		let capabilities = &self.cx.km.capabilities;
-		let union = &self.union.knowledge.state;
 		let _memo = crate::theory::DeductionMemo::scoped(capabilities, union);
 		let depth = self.ctx.term_bound(self.cx.km).depth();
 		let mut own: IdMap<u64, Vec<&Value>> = IdMap::default();
-		for (value, _, produced) in ex.knowledge.protocol.iter() {
+		for (value, _, produced) in knowledge.protocol.iter() {
 			if *produced {
 				own.entry(value.hash_value()).or_default().push(value);
 			}
@@ -26,7 +77,6 @@ impl<'a, 'b> Search<'a, 'b> {
 			own.get(&v.hash_value())
 				.is_some_and(|bucket| bucket.iter().any(|held| held.equivalent(v, true)))
 		};
-		let knowledge = &ex.knowledge;
 		knowledge
 			.state
 			.known

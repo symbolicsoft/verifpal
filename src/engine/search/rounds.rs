@@ -85,7 +85,7 @@ impl<'a, 'b> Search<'a, 'b> {
 		let mut deferred: IndexVec<RunIdx, Vec<Substitution>> =
 			IndexVec::from_elem(Vec::new(), runs);
 		loop {
-			let known = self.union.knowledge.len();
+			let known = self.union.size();
 			for pass in [Pass::Targeted, Pass::Constructed] {
 				for (r, pending) in deferred.iter_enumerated_mut() {
 					if self.done() {
@@ -115,7 +115,7 @@ impl<'a, 'b> Search<'a, 'b> {
 					self.retries.fresh.values().map(Vec::len).sum::<usize>()
 				);
 			}
-			if self.union.knowledge.len() == known {
+			if self.union.size() == known {
 				break;
 			}
 		}
@@ -131,15 +131,10 @@ impl<'a, 'b> Search<'a, 'b> {
 		self.log.proposer = r;
 		let km = self.cx.km;
 		let principal = self.cx.program.runs[r].id;
-		let attacker: AttackerState = (*self.union.knowledge.state).clone();
-		let controllable = crate::solve::control::Controllable::of(km, principal, &attacker);
-		if !km
-			.slots
-			.indices()
-			.any(|slot| controllable.admits(principal, &attacker, slot))
-		{
+		let Some(attacker) = self.union.at_last_receive(km, principal) else {
 			return Vec::new();
-		}
+		};
+		let controllable = crate::solve::control::Controllable::of(km, principal, &attacker);
 		let sym = match mode {
 			Mode::Unshaped => symbolic::build_unshaped(&controllable, km, principal, &attacker),
 			Mode::Plain | Mode::Refined => symbolic::build(&controllable, km, principal, &attacker),
@@ -223,7 +218,7 @@ impl<'a, 'b> Search<'a, 'b> {
 			if self.done() {
 				break;
 			}
-			let halted = self.try_flight(r, attacker, signature, addressed, &chained);
+			let halted = self.try_flight(r, signature, addressed, &chained);
 			if let Some(check) = halted.filter(|_| pass == Pass::Targeted) {
 				self.repair(r, attacker, sym, addressed, (check, variant), &mut repairer);
 			}
@@ -291,7 +286,7 @@ impl<'a, 'b> Search<'a, 'b> {
 				}
 				let emitted = crate::solve::emissions_under(km, sym, &solution);
 				let halt = self.as_family(Family::Repair, |search| {
-					search.try_flight(r, attacker, signature, addressed, &emitted)
+					search.try_flight(r, signature, addressed, &emitted)
 				});
 				if let Some(later) = halt
 					&& later > check

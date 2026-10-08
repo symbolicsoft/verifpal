@@ -142,6 +142,7 @@ struct Facts {
 
 struct Union {
 	knowledge: Knowledge,
+	earlier: Vec<Knowledge>,
 	honest_known: usize,
 	by_cost: Vec<Vec<Vec<NodeIdx>>>,
 	closed: Knowledge,
@@ -373,6 +374,19 @@ impl<'a, 'b> Search<'a, 'b> {
 				by_cost.push(vec![vec![HONEST_NODE]]);
 			}
 		}
+		let earlier = (0..cx.km.max_phase)
+			.map(|phase| {
+				let mut earlier = Knowledge::new(phase);
+				let at = &root.at(phase).knowledge.state;
+				for v in at.known.iter() {
+					earlier.learn(v, Origin::Initial);
+				}
+				for pair in at.reused.iter() {
+					earlier.note_reused(pair);
+				}
+				earlier
+			})
+			.collect();
 		let honest_at = root
 			.order
 			.iter()
@@ -412,6 +426,7 @@ impl<'a, 'b> Search<'a, 'b> {
 			union: Union {
 				honest_known: knowledge.len(),
 				knowledge,
+				earlier,
 				by_cost,
 				closed: Knowledge::new(cx.km.max_phase),
 				closed_at: (0, NodeIdx::new(0)),
@@ -487,9 +502,9 @@ impl<'a, 'b> Search<'a, 'b> {
 		if self.done() {
 			return;
 		}
-		let before = self.union.knowledge.len();
+		let before = self.union.size();
 		self.fixpoint(Mode::Refined);
-		if self.union.knowledge.len() != before && !self.done() {
+		if self.union.size() != before && !self.done() {
 			self.fixpoint(Mode::Plain);
 		}
 		self.idle();

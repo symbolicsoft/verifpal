@@ -312,6 +312,7 @@ impl<'a, 'b> Search<'a, 'b> {
 			return false;
 		}
 		crate::engine::judge(self.ctx, self.cx, &ex, &installs, &self.honest);
+		self.absorb_earlier(&ex);
 		let novel = self.novel_terms(&ex);
 		let kept = !novel.is_empty()
 			|| ex

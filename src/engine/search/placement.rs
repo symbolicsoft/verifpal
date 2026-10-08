@@ -9,7 +9,7 @@ use crate::engine::knowledge::{Knowledge, Origin};
 use crate::engine::program::RunIdx;
 use crate::protocol::SlotIdx;
 use crate::term::Value;
-use crate::theory::{AttackerState, obtainable};
+use crate::theory::obtainable;
 use crate::verify::Truncation;
 
 impl<'a, 'b> Search<'a, 'b> {
@@ -30,12 +30,12 @@ impl<'a, 'b> Search<'a, 'b> {
 
 	fn bases(
 		&self,
-		attacker: &AttackerState,
 		signature: &[(SlotIdx, Value, Vec<RunIdx>)],
 		chained: &[Value],
 	) -> Option<Vec<NodeIdx>> {
 		let capabilities = &self.cx.km.capabilities;
-		let mut inputs = crate::theory::KnowledgeInputs::new(capabilities, attacker);
+		let mut inputs =
+			crate::theory::KnowledgeInputs::new(capabilities, &self.union.knowledge.state);
 		let mut chosen: Vec<NodeIdx> = Vec::new();
 		let mut emitted: Option<Knowledge> = None;
 		for (_, value, _) in signature {
@@ -180,7 +180,6 @@ impl<'a, 'b> Search<'a, 'b> {
 	pub(super) fn try_flight(
 		&mut self,
 		r: RunIdx,
-		attacker: &AttackerState,
 		signature: Vec<(SlotIdx, Value)>,
 		addressed: bool,
 		chained: &[Value],
@@ -195,7 +194,7 @@ impl<'a, 'b> Search<'a, 'b> {
 					.then(|| (slot, crate::term::hashing::hashcons(&value), targets))
 			})
 			.collect();
-		let bases = self.bases(attacker, &signature, chained)?;
+		let bases = self.bases(&signature, chained)?;
 		let km = self.cx.km;
 		let bound = self.ctx.term_bound(km);
 		let mut installs: Installs = Vec::new();

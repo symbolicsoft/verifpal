@@ -68,32 +68,37 @@ impl TraceSlot {
 	}
 
 	pub(crate) fn substitution_phase(&self, recipient: PrincipalId) -> Option<i32> {
-		self.substitution_phase_from(recipient, &mut Vec::new())
+		self.substitution_phases(recipient).into_iter().min()
 	}
 
-	fn substitution_phase_from(
+	pub(crate) fn substitution_phases(&self, recipient: PrincipalId) -> Vec<i32> {
+		let mut phases = Vec::new();
+		self.substitution_phases_from(recipient, &mut Vec::new(), &mut phases);
+		phases
+	}
+
+	fn substitution_phases_from(
 		&self,
 		recipient: PrincipalId,
 		visiting: &mut Vec<PrincipalId>,
-	) -> Option<i32> {
+		phases: &mut Vec<i32>,
+	) {
 		if visiting.contains(&recipient) {
-			return None;
+			return;
 		}
 		visiting.push(recipient);
-		let earliest = self
+		for event in self
 			.sent_by
 			.iter()
 			.filter(|event| event.recipient == recipient)
-			.filter_map(|event| {
-				if event.guarded {
-					self.substitution_phase_from(event.sender, visiting)
-				} else {
-					Some(event.phase)
-				}
-			})
-			.min();
+		{
+			if event.guarded {
+				self.substitution_phases_from(event.sender, visiting, phases);
+			} else {
+				phases.push(event.phase);
+			}
+		}
 		visiting.pop();
-		earliest
 	}
 }
 
