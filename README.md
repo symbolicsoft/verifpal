@@ -7,64 +7,36 @@
 
 [![CI](https://github.com/symbolicsoft/verifpal/actions/workflows/main.yml/badge.svg)](https://github.com/symbolicsoft/verifpal/actions/workflows/main.yml)
 
-<img src="https://verifpal.com/res/img/webp/pose1.webp" alt="" align="left" height="265" style="margin:10px" />
+Verifpal verifies the security of cryptographic protocols. It is written for practitioners and students. A passing query means the search found no attack within its stated bounds. It is not a proof.
 
-Verifpal is software for verifying the security of cryptographic protocols. It comes out of the same symbolic verification tradition as [ProVerif](https://proverif.inria.fr) and [Tamarin](https://tamarin-prover.github.io), but is written for practitioners and students rather than for specialists.
+## Get Verifpal
 
-You describe a protocol roughly the way you would describe it out loud, and the description is still precise enough to analyze. Primitives are built in rather than user-defined, which removes a common source of modeling error. The attacker is active: it reads the network and tampers with anything you have not explicitly guarded. Queries cover forward secrecy, key compromise impersonation and other properties that depend on fresh values.
+- [Workbench](https://verifpal.com/workbench): run Verifpal in your browser
+- [Install](https://verifpal.com/software): [macOS](https://verifpal.com/software#macos), [Windows](https://verifpal.com/software#windows), [Linux](https://verifpal.com/software#linux), or from source with `cargo build --release`
+- [Editor extensions](https://verifpal.com/software#editors): Visual Studio Code, Neovim, Zed
+- [Analysis reports](https://verifpal.com/software#reports): HTML, JSON and LaTeX output
 
-Every principal runs two concurrent sessions by default, so you get cross-session attacks (a nonce swapped between two instances of a role, a message replayed from one session into another) without duplicating principals by hand. Set the count with `verifpal verify model.vp --sessions k`.
+## Documentation
 
-When a query is contradicted, Verifpal minimizes the attack and then narrates what remains as numbered causal steps, using the names your model gave the values. If the analysis ran under declared weakening assumptions, or the search declined a branch, the output says so.
+- [Quickstart](https://verifpal.com/docs)
+- [Introduction](https://verifpal.com/docs/introduction)
+- [Modeling a protocol](https://verifpal.com/docs/modeling)
+- [Writing security queries](https://verifpal.com/docs/queries)
+- [How analysis works](https://verifpal.com/docs/analysis) and its [search limits](https://verifpal.com/docs/analysis#search-limits)
+- [Command line](https://verifpal.com/docs/cli)
+- [Language reference](https://verifpal.com/docs/reference)
+- [Protocol studies](https://verifpal.com/docs/examples): [Signal](https://verifpal.com/docs/examples/signal), [Scuttlebutt](https://verifpal.com/docs/examples/scuttlebutt), [post-quantum](https://verifpal.com/docs/examples/post-quantum)
+- [Comparison with ProVerif and Tamarin](https://verifpal.com/docs/comparison)
 
-`verifpal verify model.vp --format html > report.html` renders the whole analysis as a single self-contained HTML page — verdicts, attack traces each drawn as a sequence diagram with the attacker's lane, an annotated protocol diagram, and the syntax-highlighted model source with each query marked by its verdict — with no external resources, so it opens identically offline and can be attached to a review or mailed to a colleague. `--format json` emits the same report as machine-readable JSON, including the structured attack steps. `--format tex` emits it as a LaTeX document that compiles with tectonic as it stands, typesetting terms as mathematics and every attack as a keyed message-sequence chart beside its numbered trace — each figure delimited by comment markers and built from one preamble block, so a diagram can be lifted straight into a paper.
+## Research and Community
 
-Verifpal has been used to verify security properties for Signal, Scuttlebutt, TLS 1.3, Telegram and other protocols.
-
-## Scientific Paper
-
-[*From Toy to Instrument: Seven Years of Verifpal*](https://eprint.iacr.org/2026/1654) documents the semantics, the deduction rules, the search, the witness-transfer theorem, the termination bound and the session model, along with what each of them does not cover.
-
-## Validation and Search Bounds
-
-The search proposes attacker substitutions and nothing else. Each candidate is run as one joint execution of every principal and session, in which a substituted value is delivered only if the attacker can derive it from what that same execution has disclosed by then; a query fails only when the evaluator finds its violation in such an execution, and the reported trace narrates that execution. Since September 2026 this replaces the validation, grounding and witness-transfer machinery the paper describes: an attack is a single protocol history by construction.
-
-A passing query means "this search found no attack", which is weaker than a proof. Verifpal supports neither observational equivalence nor user-defined equational theories, and it always terminates instead of offering unbounded session replication. If you are designing a protocol for production, cross-check it with ProVerif and Tamarin.
-
-## Getting Started
-
-Read the [Verifpal Documentation](https://verifpal.com/docs/) first.
-
-On Windows, install through [Scoop](https://scoop.sh):
-
-```
-scoop bucket add verifpal https://github.com/symbolicsoft/verifpal.git
-scoop install verifpal
-```
-
-On Linux and macOS, install through [Homebrew](https://brew.sh):
-
-```
-brew tap verifpal.com/source https://github.com/symbolicsoft/verifpal
-brew install verifpal
-```
-
-Both give you automatic updates. Otherwise, grab a [release](https://github.com/symbolicsoft/verifpal/releases) for Windows, Linux or macOS, or build from source.
-
-### Building from Source
-
-With [Rust](https://www.rust-lang.org/tools/install) installed, `cargo build --release` produces the binary under `target/release/`. `cargo test --release` runs the full test suite.
-
-### Editor Support
-
-Verifpal ships a language server (`verifpal lsp`), and the project maintains an extension for each of these editors on top of it:
-
-- [Visual Studio Code](https://marketplace.visualstudio.com/items?itemName=symbolicsoft.verifpal) ([source](https://github.com/symbolicsoft/verifpal-vscode)): syntax highlighting, automatic formatting, live query analysis and protocol diagrams as you write the model. Search for "Verifpal" from inside Visual Studio Code to install it.
-- [Neovim](https://github.com/symbolicsoft/verifpal-nvim): syntax highlighting, verification diagnostics on each query line, formatting and hover documentation.
-- [Zed](https://github.com/symbolicsoft/verifpal-zed): syntax highlighting, live error checking and attacker analysis.
+- [*From Toy to Instrument: Seven Years of Verifpal*](https://eprint.iacr.org/2026/1654) (paper)
+- [Citing Verifpal](https://verifpal.com/events#cite)
+- [Community](https://verifpal.com/community) and [events](https://verifpal.com/events)
+- [Contributing](CONTRIBUTING.md) and [security policy](SECURITY.md)
 
 ## License
 
-Verifpal and its editor extensions are published by Symbolic Software as free and open source software under the [GNU General Public License, version 3](https://www.gnu.org/licenses/gpl-3.0.en.html). The Verifpal User Manual is provided under the [Creative Commons Attribution-NonCommercial-NoDerivatives 4.0 International (CC BY-NC-ND 4.0)](https://creativecommons.org/licenses/by-nc-nd/4.0/) license.
+Verifpal is free software under the [GNU General Public License, version 3](https://www.gnu.org/licenses/gpl-3.0.en.html). The User Manual is under [CC BY-NC-ND 4.0](https://creativecommons.org/licenses/by-nc-nd/4.0/).
 
-© Copyright 2019-2026 Nadim Kobeissi. All Rights Reserved. “Verifpal” and the “Verifpal” logo/mascot are registered trademarks of Nadim Kobeissi.
+© Copyright 2019-2026 Nadim Kobeissi. “Verifpal” and the “Verifpal” logo/mascot are registered trademarks of Nadim Kobeissi.
