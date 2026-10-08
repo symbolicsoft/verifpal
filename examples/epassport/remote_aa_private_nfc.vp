@@ -1,0 +1,110 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-FileCopyrightText: © 2026 Mounir IDRASSI <mounir.idrassi@amcrypto.jp>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// remote_aa.vp with a private NFC exchange. The phone encrypts the AA
+// challenge and the chip encrypts its answer under nfcKey, known only to
+// Phone and Passport. Guards prevent replacement of those messages. This
+// represents a local link whose contents the attacker can't read; it
+// doesn't implement BAC or PACE Secure Messaging.
+//
+// The internet connection and the service scenarios are as in remote_aa.vp.
+// The phone still sends the signature to the service it connected to, so
+// a dishonest verifier can read the answer on its own connection.
+//
+// Expected: a1, at one session and at two. The dishonest verifier forwards
+// the bank's challenge to the phone, which asks the chip to sign it. The
+// phone returns the signature through its connection to that verifier.
+// The verifier decrypts the answer and submits the signature to the bank.
+// This relay doesn't need access to the plaintext NFC exchange.
+// remote_aa_bound_private_nfc.vp is the counterweight: the phone includes
+// the authenticated service key in the value it asks the chip to sign.
+
+attacker[active]
+
+principal Passport[
+	knows private aaKey
+	dg15 = PUBKEY(aaKey)
+]
+
+Passport -> Issuer: [dg15]
+
+principal Issuer[
+	knows private dsKey, persoKey, dg1
+	dsPub = PUBKEY(dsKey)
+	sodSig = SIGN(dsKey, HASH(dg1, dg15))
+	perso = ENC(persoKey, sodSig)
+]
+
+Issuer -> Bank: [dsPub]
+Issuer -> Passport: [perso]
+
+principal Evil[
+	knows private evilKey
+	evilPub = PUBKEY(evilKey)
+	leaks evilKey
+]
+
+principal Bank[
+	knows private bankKey
+	bankPub = PUBKEY(bankKey)
+]
+
+Bank -> Phone: [bankPub]
+Evil -> Phone: [evilPub]
+
+principal Phone[
+	knows private nfcKey
+	knows public rpPub, nChal, nResp
+	generates ck
+	ckMsg = PKE_ENC(rpPub, ck)
+]
+
+Phone -> Bank: ckMsg
+
+principal Bank[
+	knows public nChal, nResp
+	ck_b = PKE_DEC(bankKey, ckMsg)
+	generates chal
+	chalMsg = AEAD_ENC(ck_b, nChal, chal, nil)
+]
+
+Bank -> Phone: chalMsg
+
+principal Phone[
+	chal_p = AEAD_DEC(ck, nChal, chalMsg, nil)?
+	nfcRequest = ENC(nfcKey, chal_p)
+]
+
+Phone -> Passport: [nfcRequest]
+
+principal Passport[
+	knows private persoKey, dg1, nfcKey
+	sodSig_p = DEC(persoKey, perso)
+	challenge_p = DEC(nfcKey, nfcRequest)
+	aaSig = SIGN(aaKey, challenge_p)
+	nfcAnswer = ENC(nfcKey, CONCAT(dg1, dg15, sodSig_p, aaSig))
+]
+
+Passport -> Phone: [nfcAnswer]
+
+principal Phone[
+	dg1_phone, dg15_phone, sodSig_phone, aaSig_phone = SPLIT(DEC(nfcKey, nfcAnswer))
+	resp = AEAD_ENC(ck, nResp, aaSig_phone, nil)
+]
+
+Phone -> Bank: dg1_phone, dg15_phone, sodSig_phone, resp
+
+principal Bank[
+	_ = SIGNVERIF(dsPub, HASH(dg1_phone, dg15_phone), sodSig_phone)?
+	_ = SIGNVERIF(dg15_phone, chal, AEAD_DEC(ck_b, nResp, resp, nil))?
+]
+
+scenarios[
+	Phone[rpPub = bankPub]
+	Phone[rpPub = evilPub]
+]
+
+queries[
+	authentication? Phone -> Bank: resp
+]

@@ -1624,6 +1624,21 @@ fn test_cap_noop_annotated() {
 	run_model("cap_noop_annotated.vp", "c0a1");
 }
 #[test]
+fn test_epassport_remote_aa_nfc_visibility() {
+	for (model, codes) in [
+		("remote_aa.vp", ["a1", "a1"]),
+		("remote_aa_bound.vp", ["a0", "a1"]),
+		("remote_aa_private_nfc.vp", ["a1", "a1"]),
+		("remote_aa_bound_private_nfc.vp", ["a0", "a0"]),
+	] {
+		let path = format!("examples/epassport/{model}");
+		for (sessions, expected) in [(1, codes[0]), (2, codes[1])] {
+			run_model_sessions_at(&path, model, sessions, expected);
+		}
+	}
+}
+
+#[test]
 fn test_cen() {
 	run_model_at("examples/contact-tracing/cen.vp", "cen.vp", "c0c1c0");
 }
