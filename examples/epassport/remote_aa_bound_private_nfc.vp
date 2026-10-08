@@ -9,9 +9,12 @@
 // doesn't implement BAC or PACE Secure Messaging.
 //
 // Expected: a0, at one session and at two. No attack is found in these
-// bounded searches. The signature obtained by a dishonest verifier covers
-// that verifier's key, while the bank expects its own key. The relay in
-// remote_aa_private_nfc.vp no longer answers the bank's challenge.
+// searches, with the session count applying per principal, per scenario.
+// The search misses known attacks in related weakened or leaking variants,
+// so this is not a security proof even within those bounds. The signature
+// obtained by a dishonest verifier covers that verifier's key, while the
+// bank expects its own key. The relay in remote_aa_private_nfc.vp no longer
+// answers the bank's challenge.
 //
 // The reported attack at two sessions in remote_aa_bound.vp obtains aaSig
 // from NFC after exploiting nonce reuse on the internet connection. Here

@@ -1633,7 +1633,33 @@ fn test_epassport_remote_aa_nfc_visibility() {
 	] {
 		let path = format!("examples/epassport/{model}");
 		for (sessions, expected) in [(1, codes[0]), (2, codes[1])] {
-			run_model_sessions_at(&path, model, sessions, expected);
+			let (results, code) = crate::verify::verify_with_sessions(&path, sessions)
+				.unwrap_or_else(|e| panic!("{model} at {sessions} sessions: {e}"));
+			assert_code(model, Some(sessions), &results, &code, expected);
+			let derives = |prefix: &str, detail: &str| {
+				results[0].steps.iter().any(|step| {
+					step.kind == "derive"
+						&& step.text.starts_with(prefix)
+						&& step.text.contains(detail)
+				})
+			};
+			if model == "remote_aa_private_nfc.vp" {
+				assert!(
+					derives("Attacker opens resp@2", "obtaining aasig"),
+					"{model} at {sessions} sessions: the dishonest verifier must obtain \
+					 the signature from the phone's Internet response: {}",
+					results[0].summary
+				);
+			}
+			if model == "remote_aa_bound.vp" && sessions == 2 {
+				assert!(
+					derives("Attacker forges ", "under the key and nonce")
+						&& derives("Attacker observes aasig", "on the wire"),
+					"{model}: the nonce-reuse attack must obtain the signature from \
+					 the plaintext NFC exchange: {}",
+					results[0].summary
+				);
+			}
 		}
 	}
 }

@@ -17,6 +17,7 @@
 // phone returns the signature through its connection to that verifier.
 // The verifier decrypts the answer and submits the signature to the bank.
 // This relay doesn't need access to the plaintext NFC exchange.
+// The session count applies per principal, per scenario.
 // remote_aa_bound_private_nfc.vp is the counterweight: the phone includes
 // the authenticated service key in the value it asks the chip to sign.
 
