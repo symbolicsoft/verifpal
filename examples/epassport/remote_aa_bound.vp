@@ -22,11 +22,13 @@
 // nChal. That nonce reuse lets it forge a chalMsg on the phone's channel
 // carrying the challenge of a third bank run, one it opened with its own
 // channel key. The phone, which is connected to the bank, hashes bankPub
-// with that challenge, the chip signs, and the attacker presents the
-// signature in its own run, where the bank accepts it. A TLS server
-// contributes fresh values to the channel keys, so a replayed key message
-// would not give two server runs the same keys; this channel is weaker
-// than TLS.
+// with that challenge, and the chip signs. The attacker then reads aaSig
+// from the guarded NFC exchange and encrypts it for its own bank run,
+// where the bank accepts it. This trace requires the attacker to learn the
+// plaintext aaSig from the modeled NFC link, in addition to exploiting
+// nonce reuse on the phone-bank connection. A TLS server contributes fresh
+// values to the channel keys, so a replayed key message wouldn't give two
+// server runs the same keys; this channel is weaker than TLS.
 
 attacker[active]
 
