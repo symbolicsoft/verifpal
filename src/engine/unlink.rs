@@ -12,9 +12,7 @@ use crate::protocol::SlotIdx;
 use crate::syntax::Qualifier;
 use crate::term::hashing::TermSet;
 use crate::term::{Constant, Primitive, PrimitiveId, Value, ValueId};
-use crate::theory::{
-	AttackerState, KnownIdx, can_recompose, can_reconstruct_primitive, obtainable,
-};
+use crate::theory::{AttackerState, can_recompose, can_reconstruct_primitive, obtainable};
 use crate::util::IdSet;
 use crate::util::generation::{AnalysisKey, AnalysisLocal, Recent};
 
@@ -35,16 +33,20 @@ pub(crate) struct Link {
 
 struct Scope<'a> {
 	km: &'a ProtocolTrace,
-	attacker: &'a AttackerState,
+	knowledge: &'a Knowledge,
 }
 
 impl Scope<'_> {
+	fn attacker(&self) -> &AttackerState {
+		&self.knowledge.state
+	}
+
 	fn secret(&self, v: &Value) -> bool {
 		depends_on_secret(v, self.km)
 	}
 
 	fn obtainable(&self, v: &Value) -> bool {
-		obtainable(v, &self.km.capabilities, self.attacker)
+		obtainable(v, &self.km.capabilities, self.attacker())
 	}
 }
 
@@ -68,7 +70,7 @@ impl<'a> Linker<'a> {
 	pub(crate) fn link(&self, pair: [(SlotIdx, &Held); 2]) -> Option<Link> {
 		let scope = Scope {
 			km: self.cx.km,
-			attacker: &self.ex.knowledge.state,
+			knowledge: &self.ex.knowledge,
 		};
 		link(
 			&scope,
@@ -144,7 +146,7 @@ struct Tied {
 }
 
 fn ties(scope: &Scope, v: &Value, via: Option<&Value>) -> Vec<Tied> {
-	let known = scope.attacker.knows(v).is_some();
+	let known = scope.attacker().knows(v).is_some();
 	let mut out: Vec<Tied> = Vec::new();
 	let mut tie = |term: Value, tie: Tie| {
 		out.push(Tied {
@@ -334,7 +336,7 @@ fn observed(scope: &Scope, cx: &Context, ex: &Execution) -> TermSet {
 			pending.push(held.value.clone());
 		}
 	}
-	let attacker = scope.attacker;
+	let attacker = scope.attacker();
 	let mut seen = TermSet::default();
 	while let Some(value) = pending.pop() {
 		if !seen.insert(value.clone()) {
@@ -364,7 +366,7 @@ fn observed(scope: &Scope, cx: &Context, ex: &Execution) -> TermSet {
 }
 
 fn observable(scope: &Scope, observed: &TermSet, v: &Value) -> bool {
-	if scope.attacker.knows(v).is_none() {
+	if scope.attacker().knows(v).is_none() {
 		return false;
 	}
 	if observed.contains(v) || public(v, scope.km) {
@@ -447,29 +449,41 @@ fn parts(scope: &Scope, v: &Value) -> Vec<Value> {
 	out
 }
 
-fn withholding(attacker: &AttackerState, of: &Value) -> Vec<bool> {
-	let mut dropped = vec![false; attacker.known.len()];
-	if let Some(idx) = attacker.knows(of) {
-		dropped[idx.get()] = true;
+type Withheld = Recent<u64, u64, Vec<(Value, Arc<AttackerState>)>>;
+
+thread_local! {
+	static WITHHELD: AnalysisLocal<Withheld> = AnalysisLocal::default();
+}
+
+fn withholding(scope: &Scope, of: &Value) -> Arc<AttackerState> {
+	let key = of.hash_value();
+	let group = scope.attacker().chain;
+	let remembered = WITHHELD.with_current(|memo| {
+		memo.group(group).get(&key).and_then(|bucket| {
+			bucket
+				.iter()
+				.find(|(seen, _)| crate::term::equivalence::structurally_identical(seen, of))
+				.map(|(_, state)| Arc::clone(state))
+		})
+	});
+	if let Some(state) = remembered {
+		return state;
 	}
-	for i in 0..attacker.known.len() {
-		if !dropped[i] {
-			dropped[i] = attacker.derivation(KnownIdx(i)).is_some_and(|derivation| {
-				derivation.ingredients().any(|ingredient| {
-					attacker
-						.knows(ingredient)
-						.is_some_and(|at| dropped[at.get()])
-				})
-			});
-		}
-	}
-	dropped.iter().map(|d| !d).collect()
+	let state = scope
+		.knowledge
+		.withholding(of, &scope.km.capabilities)
+		.state;
+	WITHHELD.with_current(|memo| {
+		memo.group(group)
+			.entry(key)
+			.or_default()
+			.push((of.clone(), Arc::clone(&state)));
+	});
+	state
 }
 
 fn held_without(scope: &Scope, w: &Value, of: &Value) -> bool {
-	let attacker = scope.attacker;
-	let keep = withholding(attacker, of);
-	let restricted = attacker.retaining(&keep);
+	let restricted = withholding(scope, of);
 	let restricted: &AttackerState = &restricted;
 	restricted.knows(w).is_some()
 		|| obtainable(w, &scope.km.capabilities, restricted)
@@ -563,7 +577,7 @@ thread_local! {
 
 fn origin_leaves(scope: &Scope, v: &Value) -> Option<Vec<Value>> {
 	let key = v.hash_value();
-	let group = scope.attacker.chain;
+	let group = scope.attacker().chain;
 	let remembered = LEAVES.with_current(|memo| {
 		memo.group(group).get(&key).and_then(|bucket| {
 			bucket
@@ -576,19 +590,19 @@ fn origin_leaves(scope: &Scope, v: &Value) -> Option<Vec<Value>> {
 		return leaves;
 	}
 	let keep: Vec<bool> = scope
-		.attacker
+		.attacker()
 		.known
 		.iter()
 		.map(|known| known.hash_value() != key || !known.equivalent(v, true))
 		.collect();
-	let without = scope.attacker.retaining(&keep);
+	let without = scope.attacker().retaining(&keep);
 	let without: &AttackerState = &without;
 	let capabilities = &scope.km.capabilities;
 	let mut out = Vec::new();
 	let leaves = collect_leaves(v, capabilities, without, &mut Vec::new(), &mut out)
 		.then_some(out)
 		.map(|leaves| {
-			let sealed = scope.attacker.retaining(&withholding(scope.attacker, v));
+			let sealed = withholding(scope, v);
 			let sealed: &AttackerState = &sealed;
 			if collect_leaves(v, capabilities, sealed, &mut Vec::new(), &mut Vec::new()) {
 				return leaves;
@@ -807,7 +821,7 @@ mod tests {
 		let ex = ex.at(phase);
 		let scope = Scope {
 			km: &km,
-			attacker: &ex.knowledge.state,
+			knowledge: &ex.knowledge,
 		};
 		let value = crate::theory::reduce_once(&crate::protocol::trace::resolve_trace_constant(
 			&km.slots[slot(target)].constant,

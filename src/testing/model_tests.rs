@@ -2592,6 +2592,8 @@ fn test_unlink_opened_content() {
 	for sessions in [1, 2] {
 		run_model_sessions("unlink_opened_fresh_content.vp", sessions, "u0");
 		run_model_sessions("unlink_opened_known_content.vp", sessions, "u1");
+		run_model_sessions("unlink_opened_content_leaked_before.vp", sessions, "u1");
+		run_model_sessions("unlink_opened_content_leaked_after.vp", sessions, "u1");
 	}
 }
 #[test]

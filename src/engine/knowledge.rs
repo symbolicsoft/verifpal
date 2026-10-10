@@ -179,6 +179,12 @@ impl Knowledge {
 			}
 			return false;
 		}
+		let record = origin.record();
+		self.push(v, origin, record);
+		true
+	}
+
+	fn push(&mut self, v: &Value, origin: Origin, record: DerivationRecord) {
 		let state = Arc::make_mut(&mut self.state);
 		let at = state.known.len();
 		Arc::make_mut(&mut state.known).push(v.clone());
@@ -186,11 +192,37 @@ impl Knowledge {
 			.entry(v.hash_value())
 			.or_default()
 			.push(at);
-		Arc::make_mut(&mut state.derivations).push(origin.record());
+		Arc::make_mut(&mut state.derivations).push(record);
 		state.chain = next_chain();
 		Arc::make_mut(&mut self.origins).push(origin);
 		self.closed = false;
-		true
+	}
+
+	pub(crate) fn withholding(&self, v: &Value, capabilities: &CapabilityIndex) -> Knowledge {
+		let mut out = Knowledge {
+			protocol: Arc::clone(&self.protocol),
+			built: Arc::clone(&self.built),
+			annotated: Arc::clone(&self.annotated),
+			candidates: Arc::clone(&self.candidates),
+			..Knowledge::new(self.state.current_phase)
+		};
+		for ((known, record), origin) in self
+			.state
+			.known
+			.iter()
+			.zip(self.state.derivations.iter())
+			.zip(self.origins.iter())
+		{
+			if matches!(
+				record,
+				DerivationRecord::Initial | DerivationRecord::Leaked | DerivationRecord::Obtained
+			) && !known.equivalent(v, true)
+			{
+				out.push(known, origin.clone(), record.clone());
+			}
+		}
+		out.closing(capabilities, Some(v));
+		out
 	}
 
 	pub(crate) fn has_reused(&self, pair: &[Value; 2]) -> bool {
@@ -248,9 +280,14 @@ impl Knowledge {
 	}
 
 	pub(crate) fn close(&mut self, capabilities: &CapabilityIndex) {
+		self.closing(capabilities, None);
+	}
+
+	fn closing(&mut self, capabilities: &CapabilityIndex, withheld: Option<&Value>) {
 		if self.closed {
 			return;
 		}
+		let admitted = |v: &Value| withheld.is_none_or(|w| !w.equivalent(v, true));
 		loop {
 			let Found {
 				learned,
@@ -283,7 +320,9 @@ impl Knowledge {
 			}
 			let chain = self.state.chain;
 			for (v, record) in learned {
-				self.learn(&v, Origin::Derived(record));
+				if admitted(&v) {
+					self.learn(&v, Origin::Derived(record));
+				}
 			}
 			let pairs = reuse_pairs(capabilities, &self.state, &self.built);
 			for pair in pairs {
@@ -294,7 +333,10 @@ impl Knowledge {
 				let Some(rule) = reuse_rule(p.id) else {
 					continue;
 				};
-				for revealed in revealed(p, &rule.reveals) {
+				for revealed in revealed(p, &rule.reveals)
+					.into_iter()
+					.filter(|r| admitted(r))
+				{
 					self.learn(
 						&revealed,
 						Origin::Derived(DerivationRecord::Reused {

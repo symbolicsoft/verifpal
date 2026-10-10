@@ -61,6 +61,7 @@ The regression inventory is `src/testing/model_tests.rs` and `examples/test/`. R
 | Disclosing a bound signature brings back a nonce-reuse forgery | `remote_aa_bound_leaked_signature.vp`: `a0`@1, `a1`@2; `epassport/remote_aa_bound_private_nfc.vp`: `a0` |
 | A query-source merge may need a costlier source | `search_source_alternative.vp`: `c1`; `_guarded`: `c0`@1, `c1`@2 |
 | The attacker must reveal an existing link | `unlink_forced_equality.vp`: `u0`; `unlink_active_links.vp`: `u1`; `unlink_carrier_field_not_shared.vp`: `u0` |
+| Withholding keeps every other route | `unlink_opened_content_leaked_after.vp`, `_before`: `u1` at both counts; `unlink_opened_fresh_content.vp`: `u0` |
 | A split tuple is as open as its fields | `ffgg_tuple.vp`: `c0`@1, `c1`@2; `ffgg_tuple_guarded.vp`: `c0` |
 | Lowe's attack needs scenarios | `spore_ns_pk.vp`: `c1a1a0`; `spore_nsl_pk.vp`: `c0a1a0` |
 | A starved oracle run is repaired | `spore_x509_three_way.vp`: `a0a0`@1, `a1a0`@2; `_named`: `a0a0` |
@@ -219,7 +220,7 @@ A held value is *settled* for a rule once everything the rule could reveal from 
 `link` rejects authored values and requires both values observable: known, and extracted from what this configuration disclosed by projection, decomposition, weakening or a held reuse pair, or a tuple of such values, or public. It collects each value's **ties**, the secret-dependent terms the attacker can connect to it: the value itself, the ingredients it can rebuild it from (a value it can only open is tied to its contents, not to the opening key: `unlink_opened_fresh_content.vp`), and the key and confirmed arguments of a runnable check. Witnesses the attacker could build from public values and what it installed anywhere (with the components it could build each install from at that receive) are rejected: a key it forced Bob to derive from its own input links nothing (`unlink_forced_key_carries_no_secret.vp`). A shared pair of ties in `strongest`'s table is a link. These predicates are not two-world equivalence. Preserve every gate:
 
 - honest **unreduced** values must already share a secret subterm, read through projections only (`unlink_carrier_field_not_shared.vp`); equality also needs equal honest reducts;
-- a non-equality witness carries a secret leaf both values honestly share, still derivable after withholding **either** queried value;
+- a non-equality witness carries a secret leaf both values honestly share, still derivable after withholding **either** queried value; withholding a value closes the execution's disclosures without it (`Knowledge::withholding`), never following the one route the closure recorded, which depends on disclosure order (`unlink_opened_content_leaked_after.vp`);
 - observability needs knowledge **and** extraction, following actual reveals, never arbitrary arguments; reuse counts only while both members are held;
 - checks must be runnable with every input, distinct matching positions and a successful `can_rewrite`; public identifiers identify nobody;
 - every candidate passes every gate before it is ranked.

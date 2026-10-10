@@ -10,7 +10,7 @@ mod rewrite;
 #[cfg(test)]
 mod tests;
 
-pub(crate) use attacker::{AttackerState, DerivationRecord, KnownIdx};
+pub(crate) use attacker::{AttackerState, DerivationRecord};
 pub(crate) use decompose::{
 	can_break_weak, can_decompose, decompose_rule, decomposition_reveals, revealed,
 };

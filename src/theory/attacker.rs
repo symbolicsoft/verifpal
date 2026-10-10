@@ -183,10 +183,6 @@ impl AttackerState {
 		})
 	}
 
-	pub(crate) fn derivation(&self, idx: KnownIdx) -> Option<&DerivationRecord> {
-		self.derivations.get(idx.get())
-	}
-
 	pub(crate) fn knows(&self, v: &Value) -> Option<KnownIdx> {
 		self.knows_hashed(v, v.hash_value())
 	}
