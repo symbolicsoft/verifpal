@@ -46,6 +46,7 @@ pub(crate) struct ReuseRule {
 	pub fixed: Vec<usize>,
 	pub reveals: Vec<Reveal>,
 	pub forgeable: Vec<usize>,
+	pub masked: Option<usize>,
 }
 
 #[derive(Clone)]
@@ -559,6 +560,16 @@ pub(crate) fn reuse_fixed_names(v: &Value) -> String {
 		.filter_map(|&at| spec.arg_names.get(at).copied())
 		.collect();
 	crate::util::text::and_list(&names)
+}
+
+pub(crate) fn reuse_masked_name(v: &Value) -> &'static str {
+	let Value::Primitive(p) = v else {
+		return "";
+	};
+	reuse_rule(p.id)
+		.and_then(|rule| rule.masked)
+		.and_then(|at| spec_entry(p.id)?.arg_names.get(at).copied())
+		.unwrap_or("")
 }
 
 pub(crate) fn arity_help(id: PrimitiveId, given: i32) -> Option<&'static str> {

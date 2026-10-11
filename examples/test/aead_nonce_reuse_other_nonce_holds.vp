@@ -1,18 +1,21 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
 //
-// Expected: c1c1c0 — a reused nonce gives up the messages under that nonce
-// and nothing else. m1 and m2 share n1 and both fall; m3 is under n2, used
-// once, and stays confidential under the same key. Everything is declared,
-// not generated, so the second session repeats the first term for term and
-// adds no pairing of its own.
-
+// Expected: c1c0 at one session and at two.
+//
+// A reused nonce gives up the messages under that nonce and nothing else. m1
+// is public and m2 shares its key and nonce, so the attacker reads n1's
+// keystream off e1 and m2 falls; m3 is under n2, used once, and stays
+// confidential under the same key. Everything is declared, not generated, so
+// the second session repeats the first term for term and adds no pairing of
+// its own.
 attacker[passive]
 
 principal Alice[
 	knows private k
 	knows private n1, n2
-	knows private m1, m2, m3
+	knows public m1
+	knows private m2, m3
 	knows public ad
 	e1 = AEAD_ENC(k, n1, m1, ad)
 	e2 = AEAD_ENC(k, n1, m2, ad)
@@ -31,7 +34,6 @@ principal Bob[
 ]
 
 queries[
-	confidentiality? m1
 	confidentiality? m2
 	confidentiality? m3
 ]

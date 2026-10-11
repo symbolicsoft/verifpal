@@ -1,0 +1,35 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: a1 at one session and at two.
+//
+// aead_nonce_reuse_same_plaintext_different_ad.vp made active. Alice seals one
+// plaintext under one key and nonce with two associated-data values, and a
+// third message under the same key with a nonce she sends. The first two
+// differ only in their tags, which is enough to give up the authentication
+// key: the attacker replaces the nonce with n and re-tags e1 under ad3, and
+// Bob accepts m, which Alice never sealed for him.
+// aead_nonce_reuse_same_ciphertext_no_retag.vp seals the first two under one
+// associated-data value, so they are one ciphertext, and holds.
+attacker[active]
+
+principal Alice[
+	knows private k, m
+	knows public n, ad1, ad2, ad3
+	generates n3, m3
+	e1 = AEAD_ENC(k, n, m, ad1)
+	e2 = AEAD_ENC(k, n, m, ad2)
+	e3 = AEAD_ENC(k, n3, m3, ad3)
+]
+
+Alice -> Bob: e1, e2, n3, e3
+
+principal Bob[
+	knows private k
+	knows public ad3
+	d3 = AEAD_DEC(k, n3, e3, ad3)?
+	h = HASH(d3)
+]
+
+queries[
+	authentication? Alice -> Bob: e3
+]

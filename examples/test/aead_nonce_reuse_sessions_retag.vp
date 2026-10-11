@@ -1,0 +1,37 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: a0 at one session, a1 at two.
+//
+// A declared nonce is the same nonce in every session. Bob sends Alice a
+// guarded challenge, and Alice seals a fresh message under the long-term key
+// and nonce with that challenge as associated data. One session is one
+// ciphertext and nothing to pair it with. At two sessions e and e#2 share key
+// and nonce, which gives up the tag key though no plaintext, so the attacker
+// re-tags e#2 under Bob's first challenge and Bob accepts m#2, which Alice
+// sealed for his other run. Bob's challenge rules out the plain replay.
+// aead_nonce_fresh_sessions_retag.vp generates the nonce and holds.
+attacker[active]
+
+principal Bob[
+	generates t
+]
+
+Bob -> Alice: [t]
+
+principal Alice[
+	knows private k, n
+	generates m
+	e = AEAD_ENC(k, n, m, t)
+]
+
+Alice -> Bob: e
+
+principal Bob[
+	knows private k, n
+	d = AEAD_DEC(k, n, e, t)?
+	h = HASH(d)
+]
+
+queries[
+	authentication? Alice -> Bob: e
+]

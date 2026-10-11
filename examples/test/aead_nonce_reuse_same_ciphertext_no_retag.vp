@@ -1,0 +1,34 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: a0 at one session, a1 at two.
+//
+// aead_nonce_reuse_same_plaintext_retag.vp with e1 and e2 sealed under one
+// associated-data value. They are one ciphertext written twice, which gives up
+// nothing, so no tag can be recomputed under ad3, and Bob accepts only the e3
+// that Alice sealed. Every constant but n3 and m3 is declared, so the second
+// session repeats e1 and adds no pair either; it adds only the ordinary
+// replay of its own n3 and e3, which Bob, contributing nothing, accepts
+// twice.
+attacker[active]
+
+principal Alice[
+	knows private k, m
+	knows public n, ad1, ad3
+	generates n3, m3
+	e1 = AEAD_ENC(k, n, m, ad1)
+	e2 = AEAD_ENC(k, n, m, ad1)
+	e3 = AEAD_ENC(k, n3, m3, ad3)
+]
+
+Alice -> Bob: e1, e2, n3, e3
+
+principal Bob[
+	knows private k
+	knows public ad3
+	d3 = AEAD_DEC(k, n3, e3, ad3)?
+	h = HASH(d3)
+]
+
+queries[
+	authentication? Alice -> Bob: e3
+]

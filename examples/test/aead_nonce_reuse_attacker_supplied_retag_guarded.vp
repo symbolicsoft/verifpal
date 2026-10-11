@@ -1,0 +1,32 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: a0 at one session and at two.
+//
+// aead_nonce_reuse_attacker_supplied_retag.vp with Bob's nonce guarded. Each
+// run of Alice seals under the nonce its own Bob sent, so no two ciphertexts
+// share key and nonce and no tag key is given up.
+attacker[active]
+
+principal Bob[
+	generates nb, t
+]
+
+Bob -> Alice: [nb], [t]
+
+principal Alice[
+	knows private k
+	generates m
+	e = AEAD_ENC(k, nb, m, t)
+]
+
+Alice -> Bob: e
+
+principal Bob[
+	knows private k
+	d = AEAD_DEC(k, nb, e, t)?
+	h = HASH(d)
+]
+
+queries[
+	authentication? Alice -> Bob: e
+]

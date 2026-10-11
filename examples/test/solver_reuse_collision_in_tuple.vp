@@ -5,7 +5,7 @@
 //
 // Carol takes her nonce out of a tuple, so the attacker chooses it: handing her
 // the nonce Alice already used under the same key makes the two ciphertexts a
-// reuse pair, and both plaintexts follow.
+// reuse pair, and since Carol's plaintext is public, Alice's m1 follows.
 //
 // A slot whose honest value is a constant is offered every held constant, which
 // is how the same collision is found when the nonce is sent on its own. Inside
@@ -37,7 +37,7 @@ principal Carol[
 	knows private k
 	knows public tg
 	_, cn_c = SPLIT(hello)?
-	generates m2
+	knows public m2
 	e2 = AEAD_ENC(k, cn_c, m2, nil)
 	leaks e2
 ]

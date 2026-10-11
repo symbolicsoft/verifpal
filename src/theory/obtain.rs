@@ -6,11 +6,11 @@ use std::sync::Arc;
 use super::attacker::{AttackerState, DerivationRecord, KnownIdx, RecomposeResult};
 use super::decompose::can_decompose;
 use super::memo::{DeductionMemo, with_memo};
-use super::reuse::forging_pair;
+use super::reuse::{Forgery, forgery};
 use super::rewrite::{can_rewrite, combine_binding_values, combine_bindings_hold};
 use crate::primitive::{
 	Capability, CapabilityIndex, CombineRule, MAX_SHARES, Reveal, combines_into,
-	commutativity_swap, recompose_rule, reuse_rule,
+	commutativity_swap, recompose_rule,
 };
 use crate::term::equivalence::{equivalent_primitives, structurally_identical};
 use crate::term::{Primitive, Value};
@@ -259,21 +259,21 @@ fn can_reconstruct_primitive_directly(
 	};
 	let forgeable_secret =
 		capabilities.forgeable_secret_position(rewritten_prim, attacker.current_phase);
-	let reused = forging_pair(rewritten_prim, attacker);
-	let by_reuse: &[usize] = match reuse_rule(rewritten_prim.id) {
-		Some(rule) if reused.is_some() && !capabilities.forgery_denied(rewritten_prim) => {
-			&rule.forgeable
-		}
-		_ => &[],
-	};
-	let exempt = |i: usize| Some(i) == forgeable_secret || by_reuse.contains(&i);
+	let reused = (!capabilities.forgery_denied(rewritten_prim))
+		.then(|| forgery(rewritten_prim, attacker))
+		.flatten();
+	let by_reuse: &[usize] = reused.as_ref().map_or(&[], |f| &f.exempt);
 	let mut has = Vec::new();
 	let mut skipped = 0usize;
+	let mut reusing = false;
 	for (i, a) in rewritten_prim.arguments.iter().enumerate() {
 		if obtainable(a, capabilities, attacker) {
 			has.push(a.clone());
-		} else if exempt(i) {
+		} else if Some(i) == forgeable_secret {
 			skipped += 1;
+		} else if by_reuse.contains(&i) {
+			skipped += 1;
+			reusing = true;
 		}
 	}
 	if has.len() + skipped < rewritten_prim.arguments.len() {
@@ -283,9 +283,29 @@ fn can_reconstruct_primitive_directly(
 		let from = combinable(rewritten_prim, capabilities, attacker)?;
 		return Some(DerivationRecord::Combined { from });
 	}
-	Some(match (skipped, reused) {
+	Some(match (skipped, reused.filter(|_| reusing)) {
 		(0, _) => DerivationRecord::Reconstructed { from: has },
-		(_, Some(with)) => DerivationRecord::ReusedForge { with, using: has },
+		(
+			_,
+			Some(Forgery {
+				pair,
+				known: Some(known),
+				..
+			}),
+		) => DerivationRecord::ReusedForge {
+			with: pair,
+			using: std::iter::once(known).chain(has).collect(),
+		},
+		(
+			_,
+			Some(Forgery {
+				pair: [of, with], ..
+			}),
+		) => DerivationRecord::Retagged {
+			of,
+			with,
+			using: has,
+		},
 		(_, None) => DerivationRecord::Broken {
 			of: rewrite_value.clone(),
 			capability: Capability::Forgeable,

@@ -17,6 +17,13 @@
 // that holds an authentication or freshness subject but never uses it cannot
 // accept it, so only its sends and leaks are relevant. The counterweight is
 // search_inert_recipient_private_nfc.vp.
+//
+// Bank discloses each challenge as it makes it, as if challenges were
+// predictable. The attack needs that: two challenges sealed under ck#2 and
+// nChal give the attacker their XOR and the tag key, and only a known
+// plaintext under that key and nonce gives the keystream that forging a
+// chosen chalMsg takes. examples/epassport/remote_aa_bound.vp, whose
+// challenges stay secret, holds at both counts.
 
 attacker[active]
 
@@ -64,6 +71,7 @@ principal Bank[
 	knows public nChal, nResp
 	ck_b = PKE_DEC(bankKey, ckMsg)
 	generates chal
+	leaks chal
 	chalMsg = AEAD_ENC(ck_b, nChal, chal, nil)
 ]
 

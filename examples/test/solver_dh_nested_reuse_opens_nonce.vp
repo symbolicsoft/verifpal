@@ -1,7 +1,11 @@
 // SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
-// Expected: c0 at one session, c1 at two. Reusing the inner key and nonce
-// across sessions discloses the oracle's response without ordinary decryption.
+// Expected: c1 at one session and at two. Bob seals the answer of a keyed DH
+// oracle under an inner nonce only he and Carol hold, and Carol seals a public
+// label under the same inner key and nonce. The attacker replaces x and y so
+// that Bob's DH_KEX(PUBKEY(x), y) is DH_KEX(PUBKEY(a), b), which commutes, and
+// Bob seals the secret itself; the label gives it the keystream, and the pair
+// the secret.
 attacker[active]
 
 principal Alice[
@@ -31,7 +35,15 @@ principal Bob[
 
 Bob -> Carol: tag
 
-principal Carol[]
+principal Carol[
+	knows public label, inner_wrapping
+	knows private inner_nonce
+	probe = AEAD_ENC(inner_wrapping, inner_nonce, label, nil)
+]
+
+Carol -> Dave: probe
+
+principal Dave[]
 
 queries[
 	confidentiality? secret

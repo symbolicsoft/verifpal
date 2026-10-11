@@ -1,0 +1,53 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: u1 at one session and at two.
+//
+// A tag with no randomness of its own answers each reader's challenge with
+// MAC(k, challenge). The attacker replays Exit's challenge rb to the tag in
+// place of Entrance's, and both answers are MAC(k, rb). One tag answers the
+// same challenge identically and two tags would not, so the attacker can track
+// the tag: the classic RFID tracking attack. unlink_rfid_mac_tag_nonce.vp
+// mixes a fresh tag nonce into each answer and holds.
+attacker[active]
+
+principal Tag[
+	knows private k
+]
+
+principal Entrance[
+	generates ra
+]
+
+Entrance -> Tag: ra
+
+principal Tag[
+	ta = MAC(k, ra)
+]
+
+Tag -> Entrance: ta
+
+principal Exit[
+	generates rb
+]
+
+Exit -> Tag: rb
+
+principal Tag[
+	tb = MAC(k, rb)
+]
+
+Tag -> Exit: tb
+
+principal Entrance[
+	knows private k
+	_ = ASSERT(ta, MAC(k, ra))?
+]
+
+principal Exit[
+	knows private k
+	_ = ASSERT(tb, MAC(k, rb))?
+]
+
+queries[
+	unlinkability? ta, tb
+]

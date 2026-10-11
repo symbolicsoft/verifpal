@@ -1,14 +1,17 @@
 /* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
  * SPDX-License-Identifier: CC-BY-SA-4.0 */
 
-// Expected: u0 at one session and at two.
+// Expected: u1 at one session and at two.
 //
 // Bob tags two independently generated nonces under a key nobody else holds.
-// The attacker can replace both nonces with a value of its own and watch the
-// two tags come out equal, but that equality is its own construction: the
-// honest tags are different terms, and the attacker's view is the same
-// whether or not the honest nonces are linked. An observed equality links two
-// values only when the honest values are equal as well.
+// The attacker replaces both nonces with nil, and Bob's two tags come out
+// equal: MAC(ufe_k, nil) twice. The attacker built neither tag, and they are
+// equal only because one key made both: under two keys the same input gives
+// two different tags. That equality tells one key holder from two, which is
+// the RFID tracking attack (unlink_rfid_mac_tag.vp). The judge once required
+// an observed equality to be an equality of the honest values as well, and
+// reported u0. unlink_forced_equality_two_keys.vp tags under two keys and
+// holds.
 
 attacker[active]
 

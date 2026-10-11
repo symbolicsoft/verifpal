@@ -1,0 +1,38 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: c0 at one session and at two.
+//
+// aead_nonce_reuse_chosen_plaintext.vp with m1 fresh. The pair under n still
+// gives up the tag key, so the attacker can re-tag e1 or e2 under ad2 and
+// replace the third nonce with n, but the keystream needs a known plaintext,
+// so it cannot seal a two-field value of its choosing. Bob's checked split
+// refuses m1 and m2, and his secret is sealed under a hash of q, which the
+// attacker never learns. At two sessions the other run's third message opens
+// to p#2 and q#2, which it never learns either.
+attacker[active]
+
+principal Alice[
+	knows private k
+	knows public n, ad1, ad2
+	generates m1, m2, p, q, n3
+	e1 = AEAD_ENC(k, n, m1, ad1)
+	e2 = AEAD_ENC(k, n, m2, ad1)
+	e3 = AEAD_ENC(k, n3, CONCAT(p, q), ad2)
+]
+
+Alice -> Bob: e1, e2, n3, e3
+
+principal Bob[
+	knows private k
+	knows public ad2
+	generates sb
+	d = AEAD_DEC(k, n3, e3, ad2)?
+	x, y = SPLIT(d)?
+	out = ENC(HASH(y), sb)
+]
+
+Bob -> Alice: out
+
+queries[
+	confidentiality? sb
+]

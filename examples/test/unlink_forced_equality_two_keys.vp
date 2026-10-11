@@ -1,0 +1,37 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: u0 at one session and at two.
+//
+// unlink_forced_equality.vp with Bob tagging the two nonces under two
+// different keys. The attacker can still replace both nonces with nil, but
+// MAC(ufk_k1, nil) and MAC(ufk_k2, nil) differ, and the two tags share no
+// secret, so nothing links them.
+attacker[active]
+
+principal Alice[
+	generates ufk_na
+]
+
+principal Carol[
+	generates ufk_nc
+]
+
+Alice -> Bob: ufk_na
+Carol -> Bob: ufk_nc
+
+principal Bob[
+	knows private ufk_k1, ufk_k2
+	ufk_p = MAC(ufk_k1, ufk_na)
+	ufk_q = MAC(ufk_k2, ufk_nc)
+]
+
+Bob -> Dave: ufk_p, ufk_q
+
+principal Dave[
+	_ = HASH(ufk_p)
+	_ = HASH(ufk_q)
+]
+
+queries[
+	unlinkability? ufk_p, ufk_q
+]

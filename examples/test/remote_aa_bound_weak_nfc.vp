@@ -10,7 +10,15 @@
 // reuse forges Bank's challenge for Phone#2, whose disclosed signature the
 // attacker hands Bank under its own key.
 //
-// remote_aa_bound_private_nfc.vp, without the weakening, holds.
+// remote_aa_bound_private_nfc_known_challenge.vp, without the weakening,
+// holds.
+//
+// Bank discloses each challenge as it makes it, as if challenges were
+// predictable. The attack needs that: two challenges sealed under ck#2 and
+// nChal give the attacker their XOR and the tag key, and only a known
+// plaintext under that key and nonce gives the keystream that forging a
+// chosen chalMsg takes. examples/epassport/remote_aa_bound.vp, whose
+// challenges stay secret, holds at both counts.
 
 attacker[active]
 
@@ -58,6 +66,7 @@ principal Bank[
 	knows public nChal, nResp
 	ck_b = PKE_DEC(bankKey, ckMsg)
 	generates chal
+	leaks chal
 	chalMsg = AEAD_ENC(ck_b, nChal, chal, nil)
 ]
 

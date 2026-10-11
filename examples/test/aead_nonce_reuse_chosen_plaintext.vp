@@ -1,0 +1,39 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: c1 at one session and at two.
+//
+// Alice seals a public m1 and a fresh m2 under one key and nonce n, then a
+// two-field message under a nonce she sends. Bob opens the third, splits it
+// and seals his secret under a hash of its second field. m1 gives the attacker
+// the keystream for n and the pair gives it the tag key, so it seals
+// CONCAT(nil, nil) under n, replaces the third nonce with n, and opens Bob's
+// secret under HASH(nil). aead_nonce_reuse_chosen_plaintext_unknown.vp keeps
+// m1 secret: re-tagging then gives Bob only m1 or m2, which his checked split
+// refuses, and his secret holds.
+attacker[active]
+
+principal Alice[
+	knows private k
+	knows public n, ad1, ad2, m1
+	generates m2, p, q, n3
+	e1 = AEAD_ENC(k, n, m1, ad1)
+	e2 = AEAD_ENC(k, n, m2, ad1)
+	e3 = AEAD_ENC(k, n3, CONCAT(p, q), ad2)
+]
+
+Alice -> Bob: e1, e2, n3, e3
+
+principal Bob[
+	knows private k
+	knows public ad2
+	generates sb
+	d = AEAD_DEC(k, n3, e3, ad2)?
+	x, y = SPLIT(d)?
+	out = ENC(HASH(y), sb)
+]
+
+Bob -> Alice: out
+
+queries[
+	confidentiality? sb
+]

@@ -1,25 +1,27 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
 //
-// Expected: a1 at --sessions 1 and at 2 — Alice seals three messages under
-// one key and one nonce. The first two give the attacker the authentication
-// key for that pair, so it can tag a plaintext of its own choosing under
-// (k, n, ad) and Bob's checked decryption of the third accepts it: an origin
-// failure with no key ever leaked. The attacker learns m1, m2 and m3 as well,
-// but the query is about what Bob accepts. At two sessions the replay of the
+// Expected: a1 at --sessions 1 and at 2. Alice seals three fresh messages
+// under one key and one nonce, the third under its own associated data, so
+// neither of the first two passes Bob's check of the third as it stands. The
+// first two give the attacker the authentication key for that key and nonce,
+// though no plaintext, so it re-tags e1 under ad2, and Bob's checked
+// decryption of the third accepts m1: an origin failure with no key ever
+// leaked. Without a known plaintext it cannot choose what Bob decrypts
+// (aead_nonce_reuse_chosen_plaintext.vp). At two sessions the replay of the
 // other run's e3 is the same a1 by another route; one session pins the
-// forgery.
+// re-tagging. aead_nonce_distinct_forgery_holds.vp, with three nonces, holds.
 
 attacker[active]
 
 principal Alice[
 	knows private k
 	knows private n
-	knows public ad
+	knows public ad1, ad2
 	generates m1, m2, m3
-	e1 = AEAD_ENC(k, n, m1, ad)
-	e2 = AEAD_ENC(k, n, m2, ad)
-	e3 = AEAD_ENC(k, n, m3, ad)
+	e1 = AEAD_ENC(k, n, m1, ad1)
+	e2 = AEAD_ENC(k, n, m2, ad1)
+	e3 = AEAD_ENC(k, n, m3, ad2)
 ]
 
 Alice -> Bob: e1, e2, e3
@@ -27,8 +29,8 @@ Alice -> Bob: e1, e2, e3
 principal Bob[
 	knows private k
 	knows private n
-	knows public ad
-	d3 = AEAD_DEC(k, n, e3, ad)?
+	knows public ad2
+	d3 = AEAD_DEC(k, n, e3, ad2)?
 	h = HASH(d3)
 ]
 

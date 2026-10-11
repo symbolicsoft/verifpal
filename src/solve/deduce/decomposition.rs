@@ -234,7 +234,7 @@ impl<'a> Deducer<'a> {
 			.map(|(revealed, given)| (revealed, given, None))
 			.collect();
 		if let Some(rule) = reuse_rule(p.id)
-			&& crate::theory::reused(p, self.attacker).is_some()
+			&& crate::theory::opens(p, self.shared.capabilities, self.attacker)
 		{
 			routes.push((revealed_shapes(p, &rule.reveals), Vec::new(), None));
 		}

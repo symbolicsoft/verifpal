@@ -1,0 +1,53 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: u0 at one session and at two.
+//
+// unlink_rfid_mac_tag.vp with the tag mixing a fresh nonce of its own into
+// each answer and sending it alongside. Replaying rb to both sightings now
+// gives MAC(k, CONCAT(rb, nta)) and MAC(k, CONCAT(rb, ntb)), which differ, so
+// equal challenges no longer give equal answers.
+attacker[active]
+
+principal Tag[
+	knows private k
+]
+
+principal Entrance[
+	generates ra
+]
+
+Entrance -> Tag: ra
+
+principal Tag[
+	generates nta
+	ta = MAC(k, CONCAT(ra, nta))
+]
+
+Tag -> Entrance: nta, ta
+
+principal Exit[
+	generates rb
+]
+
+Exit -> Tag: rb
+
+principal Tag[
+	generates ntb
+	tb = MAC(k, CONCAT(rb, ntb))
+]
+
+Tag -> Exit: ntb, tb
+
+principal Entrance[
+	knows private k
+	_ = ASSERT(ta, MAC(k, CONCAT(ra, nta)))?
+]
+
+principal Exit[
+	knows private k
+	_ = ASSERT(tb, MAC(k, CONCAT(rb, ntb)))?
+]
+
+queries[
+	unlinkability? ta, tb
+]

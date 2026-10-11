@@ -780,13 +780,14 @@ fn nested_reuse_needs_a_held_matching_vetted_pair() {
 			0,
 		)
 	};
+	let first = make_private("nested_reuse_first");
 	let pair = [
-		seal(nonce.clone(), make_private("nested_reuse_first")),
+		seal(nonce.clone(), first.clone()),
 		seal(nonce.clone(), make_private("nested_reuse_second")),
 	];
 	let plaintext = Value::primitive(PRIM_MAC, vec![secret, variable.clone()], 0);
 	let km = make_trace(vec![]);
-	for case in 0..4 {
+	for case in 0..5 {
 		let inner_nonce = if case == 3 {
 			other_nonce.clone()
 		} else {
@@ -804,6 +805,9 @@ fn nested_reuse_needs_a_held_matching_vetted_pair() {
 		let mut held = vec![wrapping.clone(), message.clone(), pair[0].clone()];
 		if case != 2 {
 			held.push(pair[1].clone());
+		}
+		if case != 4 {
+			held.push(first.clone());
 		}
 		let mut attacker = make_attacker_state(held);
 		if case != 1 {

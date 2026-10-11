@@ -235,7 +235,7 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 			name: "AEAD_ENC",
 			doc: PrimitiveDoc {
 				example: "AEAD_ENC(key, nonce, plaintext, ad): ciphertext",
-				help: "Authenticated encryption with associated data, similar for example to AES-GCM or to ChaCha20-Poly1305. `nonce` must be unique per key: two encryptions under one key and nonce that differ in plaintext or in `ad` reveal both plaintexts to the attacker and let it forge any ciphertext under that key and nonce. `ad` represents an additional payload that is not encrypted, but that must be provided exactly in the decryption function for authenticated decryption to succeed. Decrypting needs the key and the nonce.",
+				help: "Authenticated encryption with associated data, similar for example to AES-GCM or to ChaCha20-Poly1305. `nonce` must be unique per key: two encryptions under one key and nonce that differ in plaintext or in `ad` let the attacker re-tag either ciphertext under any `ad`, as the tag key falls. If it also knows either plaintext, it learns the other and the keystream, and can forge any ciphertext under that key and nonce. `ad` represents an additional payload that is not encrypted, but that must be provided exactly in the decryption function for authenticated decryption to succeed. Decrypting needs the key and the nonce.",
 			},
 			arity: vec![4],
 			output: vec![1],
@@ -251,6 +251,7 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 				fixed: vec![0, 1],
 				reveals: vec![Reveal::Argument(2)],
 				forgeable: vec![0, 1],
+				masked: Some(2),
 			}),
 			arity_help: Some((3, AEAD_NONCE_HELP)),
 			..PrimitiveSpec::default()
@@ -545,6 +546,7 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 				fixed: vec![0, 1],
 				reveals: vec![Reveal::Argument(0)],
 				forgeable: vec![],
+				masked: None,
 			}),
 			..PrimitiveSpec::default()
 		},

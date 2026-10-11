@@ -4,7 +4,8 @@
 // Expected: c0 at one session and at two.
 //
 // cfu_c1 seals the forgeable partial cfu_x and sits inside cfu_outer under
-// HASH(cfu_x); cfu_c2 reuses its key and nonce. cfu_c1 is reachable only with
+// HASH(cfu_x); cfu_c2 reuses its key and nonce, and its plaintext cfu_m2
+// leaks, so the pair reads cfu_x off cfu_c1. cfu_c1 is reachable only with
 // the key built from a forged partial, so recovering cfu_x from the nonce reuse
 // is the forgery's own product. Reuse reveals skipped the provenance check
 // that decryption applied. closure_forged_reuse_genuine.vp is the
@@ -21,7 +22,7 @@ principal Alice[
 	cfu_c1 = AEAD_ENC(cfu_kae, cfu_n, cfu_x, cfu_ad)
 	cfu_c2 = AEAD_ENC(cfu_kae, cfu_n, cfu_m2, cfu_ad)
 	cfu_outer = ENC(cfu_hk, cfu_c1)
-	leaks cfu_na
+	leaks cfu_na, cfu_m2
 ]
 Alice -> Bob: cfu_ca, cfu_m, cfu_n, cfu_outer, cfu_c2
 principal Bob[

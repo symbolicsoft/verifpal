@@ -9,26 +9,27 @@
 // and its challenge. The chip is unchanged; Active Authentication signs
 // whatever bytes it is given, and these bytes now say to whom.
 //
-// Expected: a0 at one session, a1 at two. At one session the dishonest
-// verifier can still pass the bank's challenge to the holder's phone, but
-// the phone hashes it with the verifier's key, and the chip's signature over
-// that is useless at the bank. remote_aa.vp is the attack this closes.
+// Expected: a0 at one session and at two. At one session the dishonest
+// verifier can still pass the bank's challenge to the holder's phone, but the
+// phone hashes it with the verifier's key, and the chip's signature over that
+// is useless at the bank. remote_aa.vp is the attack this closes.
 //
-// The attack at two sessions is not that relay, and the binding cannot stop
-// it, because it goes through the phone's own channel to the bank. The bank
-// contributes nothing to the channel key and the record nonces are fixed
-// labels, so the attacker replays the phone's ckMsg into a second bank run,
-// and two bank runs encrypt different challenges under the same key and
-// nChal. That nonce reuse lets it forge a chalMsg on the phone's channel
-// carrying the challenge of a third bank run, one it opened with its own
-// channel key. The phone, which is connected to the bank, hashes bankPub
-// with that challenge, and the chip signs. The attacker then reads aaSig
-// from the guarded NFC exchange and encrypts it for its own bank run,
-// where the bank accepts it. This trace requires the attacker to learn the
-// plaintext aaSig from the modeled NFC link, in addition to exploiting
-// nonce reuse on the phone-bank connection. A TLS server contributes fresh
-// values to the channel keys, so a replayed key message wouldn't give two
-// server runs the same keys; this channel is weaker than TLS.
+// The channel to the bank is still weaker than TLS. The bank contributes
+// nothing to the channel key and the record nonces are fixed labels, so at
+// two sessions the attacker can replay the phone's ckMsg into a second bank
+// run, and two bank runs then encrypt different challenges under the same
+// key and nChal. Against AES-GCM or ChaCha20-Poly1305 that nonce reuse gives
+// the attacker the XOR of the two challenges and the tag key for that nonce,
+// but neither challenge, so it cannot seal a challenge of its choosing for
+// the phone: that takes a known plaintext under the key and nonce. Verifpal
+// once granted both plaintexts and that forgery to every reused pair, and
+// reported a1 at two sessions here. If the attacker can predict the bank's
+// challenges, the forgery is real: it seals the challenge of a bank run it
+// opened with its own channel key, reads the chip's signature over that
+// challenge from the readable NFC link, and hands it to that bank run
+// (examples/test/remote_aa_bound_leaked_signature.vp and its siblings). A TLS
+// server contributes fresh values to the channel keys, so a replayed key
+// message wouldn't give two server runs the same keys.
 
 attacker[active]
 

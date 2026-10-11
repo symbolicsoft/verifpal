@@ -4,8 +4,8 @@
 // Expected: c1 at one session and at two.
 //
 // closure_forged_reuse_bypass.vp with the outer key leaked. cfu_c1 is opened
-// genuinely, the nonce reuse with cfu_c2 recovers the genuine partial, and it
-// reveals cfu_s1.
+// genuinely, the nonce reuse with cfu_c2, whose plaintext cfu_m2 leaks,
+// recovers the genuine partial, and it reveals cfu_s1.
 attacker[passive]
 principal Alice[
 	generates cfu_k0, cfu_na, cfu_m, cfu_n, cfu_m2
@@ -18,7 +18,7 @@ principal Alice[
 	cfu_c1 = AEAD_ENC(cfu_kae, cfu_n, cfu_x, cfu_ad)
 	cfu_c2 = AEAD_ENC(cfu_kae, cfu_n, cfu_m2, cfu_ad)
 	cfu_outer = ENC(cfu_hk, cfu_c1)
-	leaks cfu_na, cfu_hk
+	leaks cfu_na, cfu_hk, cfu_m2
 ]
 Alice -> Bob: cfu_ca, cfu_m, cfu_n, cfu_outer, cfu_c2
 principal Bob[

@@ -14,7 +14,7 @@ use crate::solve::vars::{
 	Substitution, apply, as_var, contains_var, dedupe, remove_local_bindings,
 };
 use crate::term::{Primitive, Value, VariableId};
-use crate::theory::{forgeable_by_reuse, same_fixed};
+use crate::theory::{forgery, keystream, same_fixed};
 use crate::util::IdMap;
 
 fn shapes_a_variable(v: &Value) -> bool {
@@ -85,6 +85,7 @@ impl<'a> Deducer<'a> {
 			.filter(|i| !rule.forgeable.contains(i))
 			.collect();
 		let mut offered: Vec<&Value> = Vec::new();
+		let mut retagged: Vec<&Value> = Vec::new();
 		for pair in self.attacker.reused.iter() {
 			let Value::Primitive(held) = &pair[0] else {
 				continue;
@@ -95,11 +96,24 @@ impl<'a> Deducer<'a> {
 			if self.attacker.knows(&pair[0]).is_none() || self.attacker.knows(&pair[1]).is_none() {
 				continue;
 			}
-			if offered.iter().any(|seen| same_fixed(seen, &pair[0])) {
-				continue;
+			match rule.masked {
+				Some(at) if keystream(held, self.attacker).is_none() => {
+					if retagged.iter().any(|seen| seen.equivalent(&pair[0], true)) {
+						continue;
+					}
+					retagged.push(&pair[0]);
+					let kept: Vec<usize> = rule.fixed.iter().copied().chain([at]).collect();
+					let open: Vec<usize> = supplied.iter().copied().filter(|&i| i != at).collect();
+					out.extend(self.reshape(target, held, &kept, &open, s));
+				}
+				_ => {
+					if offered.iter().any(|seen| same_fixed(seen, &pair[0])) {
+						continue;
+					}
+					offered.push(&pair[0]);
+					out.extend(self.reshape(target, held, &rule.fixed, &supplied, s));
+				}
 			}
-			offered.push(&pair[0]);
-			out.extend(self.reshape(target, held, &rule.fixed, &supplied, s));
 		}
 	}
 
@@ -400,7 +414,7 @@ impl<'a> Deducer<'a> {
 		let secret_position = crate::primitive::spec(p.id)
 			.ok()
 			.and_then(|spec| spec.forgeable_secret);
-		let by_reuse = forgeable_by_reuse(p, self.attacker);
+		let by_reuse = forgery(p, self.attacker).map_or_else(Vec::new, |f| f.exempt);
 		let (shaping, carried): (Vec<usize>, Vec<usize>) =
 			(0..p.arguments.len()).partition(|&i| shapes_a_variable(&p.arguments[i]));
 		let mut frontier = vec![s.clone()];

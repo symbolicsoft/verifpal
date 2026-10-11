@@ -15,12 +15,11 @@
 // bank expects its own key. The relay in remote_aa_private_nfc.vp no longer
 // answers the bank's challenge.
 //
-// The reported attack at two sessions in remote_aa_bound.vp obtains aaSig
-// from NFC after exploiting nonce reuse on the internet connection. Here
-// that local exchange is private. The internet connection still uses the
-// original key transport and fixed record nonces, so these results don't
-// establish the security of that connection: disclosing aaSig any other
-// way brings the attack back (examples/test/remote_aa_bound_weak_nfc.vp,
+// The internet connection still uses the original key transport and fixed
+// record nonces, so these results don't establish the security of that
+// connection: with challenges the attacker can predict, disclosing aaSig any
+// other way brings back the nonce-reuse forgery that remote_aa_bound.vp
+// describes (examples/test/remote_aa_bound_weak_nfc.vp,
 // remote_aa_bound_leaked_nfc_key.vp, remote_aa_bound_leaked_signature.vp).
 //
 // Active Authentication accepts a challenge of eight bytes. The HASH used

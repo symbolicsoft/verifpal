@@ -50,9 +50,15 @@ pub(crate) enum DerivationRecord {
 	Reused {
 		of: Value,
 		with: Value,
+		using: Vec<Value>,
 	},
 	ReusedForge {
 		with: [Value; 2],
+		using: Vec<Value>,
+	},
+	Retagged {
+		of: Value,
+		with: Value,
 		using: Vec<Value>,
 	},
 }
@@ -70,9 +76,11 @@ impl DerivationRecord {
 				..
 			} => ([NONE, NONE], using),
 			DerivationRecord::Broken { of, using, .. } => ([std::slice::from_ref(of), NONE], using),
-			DerivationRecord::Reused { of, with } => {
-				([std::slice::from_ref(of), std::slice::from_ref(with)], NONE)
-			}
+			DerivationRecord::Reused { of, with, using }
+			| DerivationRecord::Retagged { of, with, using } => (
+				[std::slice::from_ref(of), std::slice::from_ref(with)],
+				using,
+			),
 			DerivationRecord::ReusedForge { with, using } => ([with, NONE], using),
 			DerivationRecord::Reconstructed { from } | DerivationRecord::Combined { from } => {
 				([NONE, NONE], from)
@@ -107,6 +115,7 @@ impl DerivationRecord {
 		matches!(
 			self,
 			DerivationRecord::ReusedForge { .. }
+				| DerivationRecord::Retagged { .. }
 				| DerivationRecord::Broken {
 					capability: Capability::Forgeable | Capability::Malleable,
 					..
@@ -225,6 +234,7 @@ mod tests {
 		let reuse = DerivationRecord::Reused {
 			of: e1.clone(),
 			with: e2.clone(),
+			using: Vec::new(),
 		};
 		assert_eq!(reuse.ingredients().count(), 2);
 		let forged = DerivationRecord::ReusedForge {

@@ -11,7 +11,7 @@ use crate::term::{Primitive, Value};
 use crate::theory::attacker::next_chain;
 use crate::theory::{
 	AttackerState, DerivationRecord, can_break_weak, can_decompose, can_recompose,
-	can_reconstruct_primitive, can_rewrite, obtainable, reused_pair, revealed,
+	can_reconstruct_primitive, can_rewrite, obtainable, reused_pair, revealed, unmasks,
 };
 use crate::util::{IdMap, IdSet};
 
@@ -382,12 +382,12 @@ impl Knowledge {
 					self.learn(&v, Origin::Derived(record));
 				}
 			}
-			for pair in pairs {
+			for (pair, unmasked) in pairs {
 				self.note_reused(&pair);
 				let Value::Primitive(p) = &pair[0] else {
 					continue;
 				};
-				let Some(rule) = reuse_rule(p.id) else {
+				let (Some(rule), Some(using)) = (reuse_rule(p.id), unmasked) else {
 					continue;
 				};
 				for revealed in revealed(p, &rule.reveals)
@@ -399,6 +399,7 @@ impl Knowledge {
 						Origin::Derived(DerivationRecord::Reused {
 							of: pair[0].clone(),
 							with: pair[1].clone(),
+							using: using.clone(),
 						}),
 					);
 				}
@@ -451,7 +452,7 @@ struct Found {
 	grown: Pools,
 	settling: Vec<(usize, u8)>,
 	unproven: Vec<usize>,
-	pairs: Vec<[Value; 2]>,
+	pairs: Vec<([Value; 2], Option<Vec<Value>>)>,
 	seen: TermSet,
 }
 
@@ -679,13 +680,26 @@ impl Pass<'_> {
 			}
 			for &i in members {
 				let of = &attacker.known[i];
-				let Some(&j) = members
+				let partners = members
 					.iter()
-					.find(|&&j| reused_pair(of, &attacker.known[j]))
-				else {
+					.map(|&j| &attacker.known[j])
+					.filter(|partner| reused_pair(of, partner));
+				let mut first = None;
+				let mut unmasking = None;
+				for partner in partners {
+					first.get_or_insert(partner);
+					if let Some(using) = unmasks(partner, capabilities, attacker) {
+						unmasking = Some((partner, using));
+						break;
+					}
+				}
+				let Some(partner) = unmasking.as_ref().map(|(p, _)| *p).or(first) else {
 					continue;
 				};
-				found.pairs.push([of.clone(), attacker.known[j].clone()]);
+				found.pairs.push((
+					[of.clone(), partner.clone()],
+					unmasking.map(|(_, using)| using),
+				));
 			}
 		}
 	}

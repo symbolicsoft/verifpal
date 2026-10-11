@@ -1,0 +1,39 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: a0 at one session, a1 at two.
+//
+// aead_nonce_reuse_attacker_supplied.vp asking about authentication. Bob
+// sends Alice a nonce over an unguarded wire and a guarded challenge, and
+// Alice seals a fresh message under the nonce with the challenge as
+// associated data. The attacker hands Alice's second run Bob's first nonce, so
+// her two ciphertexts share key and nonce, which gives up the tag key: it
+// re-tags the second under Bob's first challenge and Bob accepts m#2. The
+// pair exists only in the state the attacker arranges, so the solver has to
+// install one nonce into both runs.
+// aead_nonce_reuse_attacker_supplied_retag_guarded.vp guards the nonce and
+// holds.
+attacker[active]
+
+principal Bob[
+	generates nb, t
+]
+
+Bob -> Alice: nb, [t]
+
+principal Alice[
+	knows private k
+	generates m
+	e = AEAD_ENC(k, nb, m, t)
+]
+
+Alice -> Bob: e
+
+principal Bob[
+	knows private k
+	d = AEAD_DEC(k, nb, e, t)?
+	h = HASH(d)
+]
+
+queries[
+	authentication? Alice -> Bob: e
+]

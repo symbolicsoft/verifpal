@@ -489,19 +489,35 @@ impl<'a, 'b> Narrator<'a, 'b> {
 					self.subject(v)
 				),
 			},
-			DerivationRecord::Reused { of, with } => format!(
+			DerivationRecord::Reused { of, with, using } if using.is_empty() => format!(
 				"Attacker recovers {} from {}: {} shares its {}.",
 				self.term(v, &[]),
 				self.term(of, &[]),
 				self.term(with, &[]),
 				crate::primitive::reuse_fixed_names(of)
 			),
+			DerivationRecord::Reused { of, with, .. } => format!(
+				"Attacker recovers {} from {}: {} shares its {}, and Attacker knows its {}.",
+				self.term(v, &[]),
+				self.term(of, &[]),
+				self.term(with, &[]),
+				crate::primitive::reuse_fixed_names(of),
+				crate::primitive::reuse_masked_name(with)
+			),
 			DerivationRecord::ReusedForge { with, .. } => format!(
-				"Attacker forges {} under the {} shared by {} and {}.",
+				"Attacker forges {} under the {} shared by {} and {}, knowing the {} of one of them.",
 				self.subject(v),
 				crate::primitive::reuse_fixed_names(&with[0]),
 				self.term(&with[0], &[]),
-				self.term(&with[1], &[])
+				self.term(&with[1], &[]),
+				crate::primitive::reuse_masked_name(&with[0])
+			),
+			DerivationRecord::Retagged { of, with, .. } => format!(
+				"Attacker re-tags {} as {}: {} shares its {}.",
+				self.term(of, &[]),
+				self.subject(v),
+				self.term(with, &[]),
+				crate::primitive::reuse_fixed_names(of)
 			),
 			DerivationRecord::Initial | DerivationRecord::Leaked | DerivationRecord::Obtained => {
 				return;

@@ -5,9 +5,10 @@
 // Expected: a0 at one session and at two.
 //
 // search_inert_recipient.vp without the chip's leak of aaSig, that is
-// examples/epassport/remote_aa_bound_private_nfc.vp with the same inert
-// Auditor: the signature never leaves the private NFC link, so no resp that
-// Bank accepts can be built, at either session count.
+// remote_aa_bound_private_nfc_known_challenge.vp with the same inert Auditor:
+// the signature never leaves the private NFC link, so no resp that Bank
+// accepts can be built at either session count, although Bank discloses its
+// challenges.
 
 attacker[active]
 
@@ -55,6 +56,7 @@ principal Bank[
 	knows public nChal, nResp
 	ck_b = PKE_DEC(bankKey, ckMsg)
 	generates chal
+	leaks chal
 	chalMsg = AEAD_ENC(ck_b, nChal, chal, nil)
 ]
 

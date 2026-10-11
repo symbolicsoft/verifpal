@@ -114,15 +114,15 @@ fn link<'s>(
 	let valid = |w: &Value, kind: LinkKind| {
 		scope.secret(w)
 			&& !obtainable(w, supplied.capabilities(), &supplied.state)
-			&& (matches!(kind, LinkKind::ObservedEquality)
+			&& ((same && matches!(kind, LinkKind::ObservedEquality))
 				|| w.constant_leaves().any(|c| shared.contains(&c.id)))
 	};
 	let (ta, tb) = (ties(scope, av, None), ties(scope, bv, None));
-	if let Some(link) = strongest(scope, [av, bv], [&ta, &tb], same, &valid) {
+	if let Some(link) = strongest(scope, [av, bv], [&ta, &tb], &valid) {
 		return Some(link);
 	}
 	let (pa, pb) = (with_parts(scope, av, ta), with_parts(scope, bv, tb));
-	strongest(scope, [av, bv], [&pa, &pb], same, &valid)
+	strongest(scope, [av, bv], [&pa, &pb], &valid)
 }
 
 #[derive(Clone, Copy)]
@@ -211,7 +211,6 @@ fn strongest(
 	scope: &Scope,
 	[av, bv]: [&Value; 2],
 	[ta, tb]: [&[Tied]; 2],
-	same: bool,
 	valid: &dyn Fn(&Value, LinkKind) -> bool,
 ) -> Option<Link> {
 	let mut best: Option<(u8, Link)> = None;
@@ -225,7 +224,7 @@ fn strongest(
 			let fresh = !w.equivalent(sa, true) && !w.equivalent(sb, true);
 			let via = a.via.is_some() || b.via.is_some();
 			let joined = match (a.tie, b.tie) {
-				(Tie::Itself, Tie::Itself) if same => Some((0, LinkKind::ObservedEquality)),
+				(Tie::Itself, Tie::Itself) => Some((0, LinkKind::ObservedEquality)),
 				(Tie::Key(i), Tie::Key(j)) if i == j => Some((1, LinkKind::IdentifyingCheck(i))),
 				(Tie::Built, Tie::Built)
 					if !via && fresh && [av, bv].iter().any(|v| held_without(scope, w, v)) =>
@@ -366,7 +365,8 @@ fn observed(scope: &Scope, cx: &Context, ex: &Execution) -> TermSet {
 			&& attacker.reused.iter().any(|pair| {
 				pair.iter().any(|member| member.equivalent(&value, true))
 					&& pair.iter().all(|member| attacker.knows(member).is_some())
-			}) {
+			}) && crate::theory::opens(p, scope.knowledge.capabilities(), attacker)
+		{
 			pending.extend(crate::theory::revealed(p, &rule.reveals));
 		}
 	}

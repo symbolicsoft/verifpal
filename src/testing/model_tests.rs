@@ -1631,7 +1631,7 @@ fn test_cap_noop_annotated() {
 fn test_epassport_remote_aa_nfc_visibility() {
 	for (model, codes) in [
 		("remote_aa.vp", ["a1", "a1"]),
-		("remote_aa_bound.vp", ["a0", "a1"]),
+		("remote_aa_bound.vp", ["a0", "a0"]),
 		("remote_aa_private_nfc.vp", ["a1", "a1"]),
 		("remote_aa_bound_private_nfc.vp", ["a0", "a0"]),
 	] {
@@ -1652,15 +1652,6 @@ fn test_epassport_remote_aa_nfc_visibility() {
 					derives("Attacker opens resp@2", "obtaining aasig"),
 					"{model} at {sessions} sessions: expected the documented witness to obtain \
 					 the signature from the phone's Internet response: {}",
-					results[0].summary
-				);
-			}
-			if model == "remote_aa_bound.vp" && sessions == 2 {
-				assert!(
-					derives("Attacker forges ", "under the key and nonce")
-						&& derives("Attacker observes aasig", "on the wire"),
-					"{model}: expected the documented nonce-reuse witness to obtain the signature from \
-					 the plaintext NFC exchange: {}",
 					results[0].summary
 				);
 			}
@@ -3169,14 +3160,22 @@ fn a_replay_witness_is_minimized_rather_than_disclosed_as_unconfirmed() {
 #[test]
 fn aead_nonce_reuse_models() {
 	run_model_sessions("aead_nonce_reuse_sessions.vp", 1, "c0");
-	run_model_sessions("aead_nonce_reuse_sessions.vp", 2, "c1");
+	run_model_sessions("aead_nonce_reuse_sessions.vp", 2, "c0");
 	run_model_sessions("aead_nonce_fresh_sessions.vp", 1, "c0");
 	run_model_sessions("aead_nonce_fresh_sessions.vp", 2, "c0");
-	run_model("aead_nonce_reuse_counter.vp", "c1c1");
-	run_model("aead_nonce_reuse_same_plaintext_different_ad.vp", "c1");
+	run_model_sessions("aead_nonce_reuse_sessions_retag.vp", 1, "a0");
+	run_model_sessions("aead_nonce_reuse_sessions_retag.vp", 2, "a1");
+	run_model_sessions("aead_nonce_fresh_sessions_retag.vp", 1, "a0");
+	run_model_sessions("aead_nonce_fresh_sessions_retag.vp", 2, "a0");
+	run_model("aead_nonce_reuse_counter.vp", "c0c0");
+	run_model("aead_nonce_reuse_counter_known.vp", "c1");
+	run_model("aead_nonce_reuse_same_plaintext_different_ad.vp", "c0");
+	run_model_sessions("aead_nonce_reuse_same_plaintext_retag.vp", 1, "a1");
+	run_model_sessions("aead_nonce_reuse_same_ciphertext_no_retag.vp", 1, "a0");
+	run_model_sessions("aead_nonce_reuse_same_ciphertext_no_retag.vp", 2, "a1");
 	run_model_sessions("aead_nonce_reuse_same_message_twice.vp", 1, "c0");
 	run_model_sessions("aead_nonce_reuse_same_message_twice.vp", 2, "c0");
-	run_model("aead_nonce_reuse_other_nonce_holds.vp", "c1c1c0");
+	run_model("aead_nonce_reuse_other_nonce_holds.vp", "c1c0");
 	run_model("aead_nonce_needed_to_decrypt.vp", "c0");
 	run_model("aead_nonce_leaked_decrypts.vp", "c1");
 	run_model_err("err_aead_wrong_nonce.vp", "cannot succeed as written");
@@ -3187,8 +3186,24 @@ fn aead_nonce_reuse_models() {
 	run_model_sessions("aead_nonce_reuse_forgery.vp", 1, "a1");
 	run_model_sessions("aead_nonce_reuse_forgery.vp", 2, "a1");
 	run_model_sessions("aead_nonce_distinct_forgery_holds.vp", 1, "a0");
+	run_model("aead_nonce_reuse_chosen_plaintext.vp", "c1");
+	run_model_sessions("aead_nonce_reuse_chosen_plaintext.vp", 1, "c1");
+	run_model("aead_nonce_reuse_chosen_plaintext_unknown.vp", "c0");
+	run_model_sessions("aead_nonce_reuse_chosen_plaintext_unknown.vp", 1, "c0");
 	run_model_sessions("aead_nonce_reuse_attacker_supplied.vp", 1, "c0");
-	run_model_sessions("aead_nonce_reuse_attacker_supplied.vp", 2, "c1");
+	run_model_sessions("aead_nonce_reuse_attacker_supplied.vp", 2, "c0");
+	run_model_sessions("aead_nonce_reuse_attacker_supplied_retag.vp", 1, "a0");
+	run_model_sessions("aead_nonce_reuse_attacker_supplied_retag.vp", 2, "a1");
+	run_model_sessions(
+		"aead_nonce_reuse_attacker_supplied_retag_guarded.vp",
+		1,
+		"a0",
+	);
+	run_model_sessions(
+		"aead_nonce_reuse_attacker_supplied_retag_guarded.vp",
+		2,
+		"a0",
+	);
 	run_model_sessions("aead_nonce_two_executions_not_a_reuse.vp", 1, "c0");
 	run_model_sessions("aead_nonce_two_executions_not_a_reuse.vp", 2, "c0");
 }
@@ -4019,8 +4034,8 @@ fn test_relay_halt_before_forward_leaked_one_session() {
 }
 #[test]
 fn test_aead_nonce_reuse_partner_unreached() {
-	run_model("aead_nonce_reuse_partner_unreached.vp", "c1c1");
-	run_model_sessions("aead_nonce_reuse_partner_unreached.vp", 1, "c1c1");
+	run_model("aead_nonce_reuse_partner_unreached.vp", "c1");
+	run_model_sessions("aead_nonce_reuse_partner_unreached.vp", 1, "c1");
 }
 #[test]
 fn test_causal_late_leak() {
@@ -4070,8 +4085,17 @@ fn test_aead_failed_decryption_hides_ciphertext() {
 }
 #[test]
 fn test_unlink_forced_equality() {
-	run_model("unlink_forced_equality.vp", "u0");
-	run_model_sessions("unlink_forced_equality.vp", 1, "u0");
+	run_model("unlink_forced_equality.vp", "u1");
+	run_model_sessions("unlink_forced_equality.vp", 1, "u1");
+	run_model("unlink_forced_equality_two_keys.vp", "u0");
+	run_model_sessions("unlink_forced_equality_two_keys.vp", 1, "u0");
+}
+#[test]
+fn test_unlink_rfid_mac_tag() {
+	run_model("unlink_rfid_mac_tag.vp", "u1");
+	run_model_sessions("unlink_rfid_mac_tag.vp", 1, "u1");
+	run_model("unlink_rfid_mac_tag_nonce.vp", "u0");
+	run_model_sessions("unlink_rfid_mac_tag_nonce.vp", 1, "u0");
 }
 #[test]
 fn test_unlink_forced_origin() {
@@ -4610,7 +4634,7 @@ fn test_nested_nonce_reuse_disclosures() {
 				result.summary
 			);
 		}
-		run_model_sessions(model, 1, "c0");
+		run_model_sessions(model, 1, "c1");
 	}
 }
 
@@ -5359,8 +5383,19 @@ fn test_remote_aa_bound_disclosed_signature() {
 		"remote_aa_bound_leaked_nfc_key.vp",
 	] {
 		run_model_sessions(model, 1, "a0");
-		run_model(model, "a1");
+		let path = format!("examples/test/{model}");
+		let (results, code) = crate::verify::verify_with_sessions(&path, 2).unwrap();
+		assert_code(model, Some(2), &results, &code, "a1");
+		assert!(
+			results[0].steps.iter().any(|step| step.kind == "derive"
+				&& step.text.starts_with("Attacker forges ")
+				&& step.text.contains("under the key and nonce")),
+			"{model}: expected the documented nonce-reuse forgery under the disclosed challenge: {}",
+			results[0].summary
+		);
 	}
+	run_model_sessions("remote_aa_bound_private_nfc_known_challenge.vp", 1, "a0");
+	run_model("remote_aa_bound_private_nfc_known_challenge.vp", "a0");
 }
 
 #[test]

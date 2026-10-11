@@ -119,7 +119,11 @@ fn a_reused_nonce_needs_two_distinct_terms_under_one_key_and_nonce() {
 		vec![k.clone(), make_constant("rn_n2"), m2.clone(), ad.clone()],
 		0,
 	);
-	let other_key = make_primitive(PRIM_AEAD_ENC, vec![make_constant("rn_k2"), n, m2, ad], 0);
+	let other_key = make_primitive(
+		PRIM_AEAD_ENC,
+		vec![make_constant("rn_k2"), n, m2.clone(), ad],
+		0,
+	);
 	let Value::Primitive(p1) = &e1 else {
 		panic!("expected a primitive");
 	};
@@ -136,20 +140,23 @@ fn a_reused_nonce_needs_two_distinct_terms_under_one_key_and_nonce() {
 	assert!(!reused_pair(&e1, &other_nonce));
 	assert!(!reused_pair(&e1, &other_key));
 	let pair = [e1.clone(), e2.clone()];
-	assert!(reused(p1, &confirmed(vec![e1.clone(), e2.clone()], pair.clone())).is_some());
-	assert!(reused(p1, &confirmed(vec![e1.clone()], pair.clone())).is_none());
-	assert!(reused(p_other, &confirmed(vec![e1.clone(), e2.clone()], pair)).is_none());
-	assert!(reused(p1, &make_attacker_state(vec![e1.clone(), e2.clone()])).is_none());
+	let both = vec![e1.clone(), e2.clone(), m2.clone()];
+	assert!(keystream(p1, &confirmed(both.clone(), pair.clone())).is_some());
+	assert!(keystream(p1, &confirmed(vec![e1.clone(), m2.clone()], pair.clone())).is_none());
+	assert!(keystream(p_other, &confirmed(both.clone(), pair)).is_none());
+	assert!(keystream(p1, &make_attacker_state(both)).is_none());
 }
 
 #[test]
-fn a_reused_nonce_makes_a_ciphertext_buildable_without_its_key_or_nonce() {
+fn a_reused_nonce_re_tags_its_members_and_forges_only_with_a_known_plaintext() {
 	let k = make_constant("rf_k");
 	let n = make_constant("rf_n");
 	let ad = make_constant("rf_ad");
+	let ad2 = make_constant("rf_ad2");
+	let m1 = make_constant("rf_m1");
 	let e1 = make_primitive(
 		PRIM_AEAD_ENC,
-		vec![k.clone(), n.clone(), make_constant("rf_m1"), ad.clone()],
+		vec![k.clone(), n.clone(), m1.clone(), ad.clone()],
 		0,
 	);
 	let e2 = make_primitive(
@@ -158,18 +165,41 @@ fn a_reused_nonce_makes_a_ciphertext_buildable_without_its_key_or_nonce() {
 		0,
 	);
 	let m3 = make_constant("rf_m3");
-	let Value::Primitive(target) =
-		make_primitive(PRIM_AEAD_ENC, vec![k, n, m3.clone(), ad.clone()], 0)
+	let Value::Primitive(target) = make_primitive(
+		PRIM_AEAD_ENC,
+		vec![k.clone(), n.clone(), m3.clone(), ad.clone()],
+		0,
+	) else {
+		panic!("expected a primitive");
+	};
+	let Value::Primitive(retagged) =
+		make_primitive(PRIM_AEAD_ENC, vec![k, n, m1.clone(), ad2.clone()], 0)
 	else {
 		panic!("expected a primitive");
 	};
 	let capabilities = CapabilityIndex::default();
-	let mut with_pair = make_attacker_state(vec![e1.clone(), e2.clone(), m3.clone(), ad.clone()]);
-	with_pair.reused = Arc::new(vec![[e1.clone(), e2]]);
-	let result = can_reconstruct_primitive(&target, &capabilities, &with_pair)
-		.expect("forgeable under reuse");
+	let paired = |known: Vec<Value>| {
+		let mut attacker = make_attacker_state(known);
+		attacker.reused = Arc::new(vec![[e1.clone(), e2.clone()]]);
+		attacker
+	};
+	let unknown = paired(vec![
+		e1.clone(),
+		e2.clone(),
+		m3.clone(),
+		ad.clone(),
+		ad2.clone(),
+	]);
+	assert!(can_reconstruct_primitive(&target, &capabilities, &unknown).is_none());
+	let result = can_reconstruct_primitive(&retagged, &capabilities, &unknown)
+		.expect("a member re-tags under any held ad");
+	assert!(matches!(result, DerivationRecord::Retagged { .. }));
+	assert_eq!(result.supplied().len(), 1);
+	let known = paired(vec![e1.clone(), e2.clone(), m1, m3.clone(), ad.clone()]);
+	let result = can_reconstruct_primitive(&target, &capabilities, &known)
+		.expect("a known plaintext gives the keystream");
 	assert!(matches!(result, DerivationRecord::ReusedForge { .. }));
-	assert_eq!(result.supplied().len(), 2);
+	assert_eq!(result.supplied().len(), 3);
 	let without_pair = make_attacker_state(vec![e1, m3, ad]);
 	assert!(can_reconstruct_primitive(&target, &capabilities, &without_pair).is_none());
 }

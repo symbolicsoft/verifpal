@@ -1,10 +1,12 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
+// Expected: c0c0 at one session and at two.
 //
-// Expected: c1c1 — a counter that never advances. Two messages in one run
-// are sealed under the same key and the same public counter, so both
-// plaintexts fall to the pairing and the attacker needs no key.
-
+// A counter that never advances: two messages in one run are sealed under the
+// same key and the same public counter. Against AES-GCM or ChaCha20-Poly1305
+// the two ciphertexts give the attacker the XOR of m1 and m2 and the tag key,
+// but neither plaintext while the other is unknown, and both are fresh.
+// aead_nonce_reuse_counter_known.vp makes m1 public and m2 falls.
 attacker[passive]
 
 principal Alice[

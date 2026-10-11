@@ -1,12 +1,14 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
 //
-// Expected: c1 — one plaintext, one key, one nonce, two associated-data
-// values. The ciphertext bytes are identical, but GHASH runs over the
-// associated data too, so the two tags differ under one mask and the pair
-// still gives up the authentication key. The trigger needs the two
-// encryptions to differ somewhere; associated data is somewhere.
-
+// Expected: c0 at one session and at two.
+//
+// One plaintext, one key, one nonce, two associated-data values. The two
+// ciphertext bodies are identical, but GHASH runs over the associated data
+// too, so the two tags differ under one mask and the pair gives up the
+// authentication key. It gives up no plaintext: the XOR of two equal
+// plaintexts is zero. aead_nonce_reuse_same_plaintext_retag.vp uses the
+// authentication key this pair gives up.
 attacker[passive]
 
 principal Alice[
