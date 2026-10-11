@@ -1,0 +1,73 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a1 at one session and at two.
+//
+// Alice sends v to Dave confidentially, later sends c = ENC(kb, v) on the
+// wire, then msg and MAC(v, HASH(msg, nd)) to Dave, and leaks v only after
+// Dave's guarded ack. Bob decrypts whatever arrives as cc under kb and leaks
+// the plaintext. Replaying c as cc makes Bob leak v before Dave's receive,
+// so the attacker forges msg for Dave.
+//
+// Bob's leak was not a fresh emission, since only sends counted, and v is
+// honestly leaked by the end of the phase, so the execution replaying c was
+// neither kept nor a source for v. A leak of a value that differs from the
+// honest leak at that step now registers as a fresh emission, as a send
+// does. search_fresh_leak_source_guarded.vp is the counterweight.
+attacker[active]
+
+principal Alice[
+	knows private kad, kb
+	generates v
+	cv = ENC(kad, v)
+]
+
+Alice -> Dave: [cv]
+
+principal Dave[
+	knows private kad
+	dv = DEC(kad, cv)
+	generates nd
+]
+
+Dave -> Alice: [nd]
+
+principal Alice[
+	generates msg
+	c = ENC(kb, v)
+	tg = MAC(v, HASH(msg, nd))
+]
+
+Alice -> Carol: c
+
+principal Carol[
+	knows private kb
+	generates nc
+	cc = ENC(kb, nc)
+]
+
+Carol -> Bob: cc
+
+principal Bob[
+	knows private kb
+	d = DEC(kb, cc)
+	leaks d
+]
+
+Alice -> Dave: msg, tg
+
+principal Dave[
+	_ = ASSERT(MAC(dv, HASH(msg, nd)), tg)?
+	generates ack
+]
+
+Dave -> Alice: [ack]
+
+principal Alice[
+	_ = HASH(ack)
+	leaks v
+]
+
+queries[
+	authentication? Alice -> Dave: msg
+]

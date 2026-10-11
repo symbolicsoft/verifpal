@@ -1,0 +1,21 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0 at one session and at two.
+//
+// core_assert_value_public.vp with a private input: ASSERT(k, k) needs `k`,
+// which never leaves Alice, so `sec` stays confidential.
+attacker[passive]
+principal Alice[
+	knows private k
+	generates sec
+	h = ASSERT(k, k)
+	e = ENC(h, sec)
+]
+Alice -> Bob: e
+principal Bob[
+	_ = HASH(e)
+]
+queries[
+	confidentiality? sec
+]

@@ -1,0 +1,31 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: u0 at one session and at two.
+//
+// unlink_authored_cross_copies.vp with a and b guarded: neither PKE
+// encryption is under an attacker key, so s1 and s2 stay secret.
+attacker[active]
+principal Alice[
+	knows private s1, s2
+	generates n1
+	a = HASH(s1, s2, n1)
+]
+Alice -> Bob: n1, [a]
+principal Bob[
+	knows private s1, s2
+	generates n2
+	b = HASH(s1, s2, n2)
+	ob = PKE_ENC(a, s1)
+]
+Bob -> Alice: n2, [b], ob
+principal Alice[
+	oa = PKE_ENC(b, s2)
+]
+Alice -> Bob: oa
+principal Bob[
+	_ = HASH(oa)
+]
+queries[
+	unlinkability? a, b
+]

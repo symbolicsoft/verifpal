@@ -1,0 +1,45 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0 at one session and at two.
+//
+// search_holder_unsourced.vp with gc guarded: e is sealed to Carol's key, so
+// s1 never reaches the attacker, whatever Bob decrypts.
+attacker[active]
+
+principal Carol[
+	knows private c
+	gc = PUBKEY(c)
+]
+
+Carol -> Alice: [gc]
+
+principal Alice[
+	knows private kb
+	generates s1
+	c1 = ENC(kb, s1)
+	e = PKE_ENC(gc, s1)
+]
+
+Alice -> Carol: c1, e
+
+principal Carol[
+	x = PKE_DEC(c, e)
+]
+
+principal Dave[
+	knows private kb
+	generates sd
+	cd = ENC(kb, sd)
+]
+
+Dave -> Bob: cd
+
+principal Bob[
+	knows private kb
+	d = DEC(kb, cd)
+]
+
+queries[
+	confidentiality? d
+]

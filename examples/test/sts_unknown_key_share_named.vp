@@ -1,0 +1,63 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a0 at one session and at two.
+//
+// sts_unknown_key_share.vp where Alice's signature names her peer and Bob
+// checks his own key in it: her run with Mallory signs gm, which Bob rejects.
+attacker[active]
+
+principal Alice[
+	knows private a
+	knows public gpeer
+	ga = PUBKEY(a)
+	generates x
+	gx = PUBKEY(x)
+]
+
+principal Bob[
+	knows private b
+	gb = PUBKEY(b)
+	generates y
+	gy = PUBKEY(y)
+]
+
+principal Mallory[
+	knows private mk
+	gm = PUBKEY(mk)
+	leaks mk
+]
+
+Alice -> Bob: [ga]
+Bob -> Alice: [gb]
+Mallory -> Alice: [gm]
+
+Alice -> Bob: gx
+
+principal Bob[
+	sb = SIGN(b, CONCAT(gy, gx))
+]
+
+Bob -> Alice: gy, sb
+
+principal Alice[
+	_ = SIGNVERIF(gpeer, CONCAT(gy, gx), sb)?
+	sa = SIGN(a, CONCAT(gx, gy, gpeer))
+	ka = DH_KEX(gy, x)
+]
+
+Alice -> Bob: sa
+
+principal Bob[
+	_ = SIGNVERIF(ga, CONCAT(gx, gy, gb), sa)?
+	kb = DH_KEX(gx, y)
+]
+
+scenarios[
+	Alice[gpeer = gb]
+	Alice[gpeer = gm]
+]
+
+queries[
+	authentication? Alice -> Bob: sa
+]

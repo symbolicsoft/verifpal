@@ -41,7 +41,7 @@ pub(crate) struct Expansion {
 	pub(crate) siblings: IdMap<ValueId, Arc<Vec<ValueId>>>,
 	pub(crate) interchangeable: IdMap<PrincipalId, PrincipalId>,
 	pub(crate) actors: IdMap<PrincipalId, PrincipalId>,
-	pub(crate) bound: IdSet<ValueId>,
+	pub(crate) dependent: IdSet<ValueId>,
 }
 
 pub(crate) fn expand(m: &Model, sessions: u8) -> VResult<Expansion> {
@@ -70,7 +70,7 @@ pub(crate) fn analyze_sessions_cancellable(
 		siblings,
 		interchangeable,
 		actors,
-		bound,
+		dependent,
 	} = expand(m, sessions)?;
 	let m = &model;
 	let mut trace = sanity(m)?;
@@ -78,7 +78,7 @@ pub(crate) fn analyze_sessions_cancellable(
 	trace.copy_siblings = copy_sibling_groups(&trace.slots);
 	trace.interchangeable = interchangeable;
 	trace.actors = actors;
-	trace.scenario_bound = bound;
+	trace.scenario_dependent = dependent;
 	trace.equivalence_queried =
 		equivalence_queried(m.queries.iter().chain(variants.iter().flatten()));
 	capability_reach_notice(&trace);

@@ -1,0 +1,71 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a0 at one session, a1 at two.
+//
+// search_fresh_leak_source.vp with Bob's leak moved after Alice relays Dave's
+// guarded ack: at one session Bob leaks only after Dave's check, and Alice's
+// own leak comes later still. At two sessions Bob#2 is the oracle: the
+// attacker replays c as cc#2, Bob#2 leaks v once session 2 completes, and
+// Dave's session-1 receive takes the forged MAC.
+attacker[active]
+
+principal Alice[
+	knows private kad, kb
+	generates v
+	cv = ENC(kad, v)
+]
+
+Alice -> Dave: [cv]
+
+principal Dave[
+	knows private kad
+	dv = DEC(kad, cv)
+	generates nd
+]
+
+Dave -> Alice: [nd]
+
+principal Alice[
+	generates msg
+	c = ENC(kb, v)
+	tg = MAC(v, HASH(msg, nd))
+]
+
+Alice -> Carol: c
+
+principal Carol[
+	knows private kb
+	generates nc
+	cc = ENC(kb, nc)
+]
+
+Carol -> Bob: cc
+
+principal Bob[
+	knows private kb
+	d = DEC(kb, cc)
+]
+
+Alice -> Dave: msg, tg
+
+principal Dave[
+	_ = ASSERT(MAC(dv, HASH(msg, nd)), tg)?
+	generates ack
+]
+
+Dave -> Alice: [ack]
+Alice -> Bob: [ack]
+
+principal Alice[
+	_ = HASH(ack)
+	leaks v
+]
+
+principal Bob[
+	leaks d
+]
+
+queries[
+	authentication? Alice -> Dave: msg
+]

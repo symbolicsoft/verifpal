@@ -1,0 +1,56 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a1 at one session and at two.
+//
+// The Coordinator joins the two partial signatures it receives and checks the
+// result against the Client's message. Alice leaks s2 and s3, two shares of a
+// 2-of-3 sharing, so the attacker signs its own message: it replaces msg with
+// nil and the partials with THRESHOLD_SIGN(s1, nil, PUBKEY(nil), nil) and
+// THRESHOLD_SIGN(s2, nil, PUBKEY(nil), nil), which join into SIGN(k, nil).
+//
+// The check names SIGN(k, msg) as what the join must produce. A join was
+// inverted by no rule: it has a combine rule, not a rewrite, so the partials
+// it needs were never proposed. A join is now inverted against a whole its
+// combine rule yields, with one partial per argument over distinct shares of a
+// held sharing, each built with the attacker's nonce nil and commitment
+// PUBKEY(nil) and kept only if the attacker can build it.
+//
+// solver_threshold_join_inversion_one_share.vp leaks only s3 and holds.
+attacker[active]
+
+principal Client[
+	generates msg
+]
+
+Client -> Alice: [msg]
+
+Client -> Coordinator: msg
+
+principal Alice[
+	generates k, na, nb
+	s1, s2, s3 = THRESHOLD_SPLIT[2](k)
+	pk = PUBKEY(k)
+	ca = PUBKEY(na)
+	cb = PUBKEY(nb)
+	cl = CONCAT(ca, cb)
+	leaks s2, s3
+]
+
+Alice -> Coordinator: [pk]
+
+principal Alice[
+	pa = THRESHOLD_SIGN(s1, na, cl, msg)
+	pb = THRESHOLD_SIGN(s2, nb, cl, msg)
+]
+
+Alice -> Coordinator: pa, pb
+
+principal Coordinator[
+	sig = THRESHOLD_JOIN(pa, pb)
+	_ = SIGNVERIF(pk, msg, sig)?
+]
+
+queries[
+	authentication? Client -> Coordinator: msg
+]

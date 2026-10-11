@@ -4,14 +4,16 @@
 use std::sync::Arc;
 
 use super::{
-	AttemptIdx, Cheapest, Family, HONEST_NODE, NodeIdx, Search, normalize, runs_of, same_installs,
+	Adders, AttemptIdx, Cheapest, Family, HONEST_NODE, Late, NodeIdx, Search, normalize, runs_of,
+	same_installs,
 };
 use crate::engine::exec::{Install, Installs, install_at};
 use crate::engine::knowledge::{Knowledge, Origin};
-use crate::engine::program::{Event, RunIdx};
+use crate::engine::program::{DeliveryIdx, Event, RunIdx};
 use crate::protocol::SlotIdx;
 use crate::term::Value;
 use crate::theory::obtainable;
+use crate::util::index::Idx;
 use crate::verify::Truncation;
 
 impl<'a, 'b> Search<'a, 'b> {
@@ -35,8 +37,9 @@ impl<'a, 'b> Search<'a, 'b> {
 		signature: &[(SlotIdx, Value, Vec<RunIdx>)],
 		chained: &[Value],
 		trusted: bool,
+		sending: &[DeliveryIdx],
 	) -> Option<Vec<NodeIdx>> {
-		let capabilities = &self.cx.km.capabilities;
+		let capabilities = self.union.knowledge.capabilities();
 		let mut inputs =
 			crate::theory::KnowledgeInputs::new(capabilities, &self.union.knowledge.state);
 		let mut chosen: Vec<NodeIdx> = Vec::new();
@@ -51,6 +54,16 @@ impl<'a, 'b> Search<'a, 'b> {
 				})
 				.min()
 				.unwrap_or(self.cx.km.max_phase);
+			if !trusted
+				&& self.derivable_in(HONEST_NODE, value, phase)
+				&& let Some(&run) = targets.first()
+				&& let Some(late) = self.late_source(run, *slot, value, phase, &chosen)
+			{
+				if !chosen.contains(&late) {
+					chosen.insert(0, late);
+				}
+				continue;
+			}
 			if chosen.iter().any(|&n| self.derivable_in(n, value, phase)) {
 				continue;
 			}
@@ -68,22 +81,22 @@ impl<'a, 'b> Search<'a, 'b> {
 					}
 					with
 				});
-				if obtainable(value, capabilities, &with.state)
-					|| with.derivable(value, capabilities)
-				{
+				if obtainable(value, with.capabilities(), &with.state) || with.derivable(value) {
 					continue;
 				}
 				return None;
 			};
 			let used: Vec<usize> = used.iter().map(|idx| idx.get()).collect();
-			match self.cheapest_source(value, &used, phase) {
+			match self.cheapest_source(value, &used, phase, sending) {
 				Some(best) => chosen.push(best),
 				None => {
 					for &idx in &used {
 						let Some(buckets) = self.union.by_cost.get(idx) else {
 							continue;
 						};
-						let Some(&best) = buckets.iter().find_map(|bucket| bucket.first()) else {
+						let Some(&best) =
+							buckets.iter().flatten().find(|&&n| self.sends(n, sending))
+						else {
 							continue;
 						};
 						if best != HONEST_NODE && !chosen.contains(&best) {
@@ -96,9 +109,188 @@ impl<'a, 'b> Search<'a, 'b> {
 		Some(chosen)
 	}
 
-	fn cheapest_source(&self, value: &Value, used: &[usize], phase: i32) -> Option<NodeIdx> {
+	pub(super) fn receiving(
+		&self,
+		run: RunIdx,
+		slot: SlotIdx,
+		phase: i32,
+	) -> Option<std::cell::RefMut<'_, Late>> {
+		let step = *self.cx.program.runs[run].step_of_slot.get(&slot)?;
+		Some(std::cell::RefMut::map(
+			self.memo.late.borrow_mut(),
+			|memo| {
+				memo.entry((run, step)).or_insert_with(|| {
+					let honest = self.honest.at(phase);
+					let len = self
+						.facts
+						.honest_at
+						.get(&(run, step))
+						.map_or(honest.knowledge.len(), |&at| self.honest.order[at].known);
+					let before = honest.knowledge.disclosing(|at, _| at < len);
+					Late {
+						within: (usize::MAX, before.clone()),
+						before,
+						supplied: Vec::new(),
+						values: Vec::new(),
+					}
+				})
+			},
+		))
+	}
+
+	fn phase_union(&self, phase: i32) -> &Knowledge {
+		usize::try_from(phase)
+			.ok()
+			.and_then(|phase| self.union.earlier.get(phase))
+			.unwrap_or(&self.union.knowledge)
+	}
+
+	pub(super) fn emitted(&self, phase: i32) -> Vec<Value> {
+		let union = self.phase_union(phase);
+		let mut out: Vec<Value> = Vec::new();
+		for (v, _, _) in self.retries.fresh.values().flatten() {
+			if union.knows(v).is_some() && !out.iter().any(|held| held.equivalent(v, true)) {
+				out.push(v.clone());
+			}
+		}
+		out
+	}
+
+	pub(super) fn within<'l>(&self, receive: &'l mut Late, phase: i32) -> &'l Knowledge {
+		let registered = self.retries.fresh.values().map(Vec::len).sum::<usize>();
+		if receive.within.0 != registered {
+			let mut within = receive.before.clone();
+			for v in self.emitted(phase) {
+				within.learn(&v, Origin::Initial);
+			}
+			within.close();
+			receive.within = (registered, within);
+		}
+		&receive.within.1
+	}
+
+	fn late_source(
+		&self,
+		run: RunIdx,
+		slot: SlotIdx,
+		value: &Value,
+		phase: i32,
+		chosen: &[NodeIdx],
+	) -> Option<NodeIdx> {
+		let mut receive = self.receiving(run, slot, phase)?;
+		let receive = &mut *receive;
+		let before = &receive.before;
+		let at = match receive
+			.values
+			.iter()
+			.position(|held| held.value.equivalent(value, true))
+		{
+			Some(at) => at,
+			None => {
+				receive.values.push(Adders {
+					value: value.clone(),
+					late: !obtainable(value, before.capabilities(), &before.state),
+					reachable: (0, false),
+					scanned: HONEST_NODE.next(),
+					best: None,
+				});
+				receive.values.len() - 1
+			}
+		};
+		let adders = &mut receive.values[at];
+		if !adders.late {
+			return None;
+		}
+		let rank = |n: NodeIdx| (self.nodes[n].installs.len(), n);
+		let supplied = receive
+			.supplied
+			.iter()
+			.filter_map(|(target, n)| Some((target, (*n)?)))
+			.filter(|&(target, n)| {
+				let mut with = before.clone();
+				with.learn(target, Origin::Initial);
+				self.adds(n, value, phase, &with)
+			})
+			.map(|(_, n)| n)
+			.min_by_key(|&n| rank(n));
+		let union = self.phase_union(phase);
+		if adders.reachable.0 != self.union.size() {
+			let honest = &self.nodes[HONEST_NODE].at(phase).0;
+			let mut within = before.clone();
+			for v in union.state.known.iter() {
+				if honest.knows(v).is_none() {
+					within.learn(v, Origin::Initial);
+				}
+			}
+			adders.reachable = (
+				self.union.size(),
+				obtainable(value, union.capabilities(), &within.state),
+			);
+		}
+		if !adders.reachable.1 {
+			return supplied;
+		}
+		if let Some(&n) = chosen.iter().find(|&&n| self.adds(n, value, phase, before)) {
+			return Some(n);
+		}
+		for n in (adders.scanned.index()..self.nodes.len()).map(NodeIdx::new) {
+			if adders.best.is_some_and(|best| rank(best) <= rank(n))
+				|| !self.adds(n, value, phase, before)
+			{
+				continue;
+			}
+			adders.best = Some(n);
+		}
+		adders.scanned = self.nodes.next_index();
+		adders.best.or(supplied)
+	}
+
+	fn adds(&self, n: NodeIdx, value: &Value, phase: i32, before: &Knowledge) -> bool {
+		let capabilities = &self.nodes[n].at(phase).1;
+		let additions = self.additions(n, phase);
+		if additions.is_empty() {
+			return obtainable(value, capabilities, &before.state);
+		}
+		let mut within = before.clone();
+		for v in additions.iter() {
+			within.learn(v, Origin::Initial);
+		}
+		obtainable(value, capabilities, &within.state)
+	}
+
+	fn additions(&self, n: NodeIdx, phase: i32) -> Arc<[Value]> {
+		if let Some(known) = self.memo.additions.borrow().get(&(n, phase)) {
+			return Arc::clone(known);
+		}
+		let honest = &self.nodes[HONEST_NODE].at(phase).0;
+		let known: Arc<[Value]> = self.nodes[n]
+			.at(phase)
+			.0
+			.known
+			.iter()
+			.filter(|v| honest.knows(v).is_none())
+			.cloned()
+			.collect();
+		self.memo
+			.additions
+			.borrow_mut()
+			.insert((n, phase), Arc::clone(&known));
+		known
+	}
+
+	pub(super) fn sends(&self, n: NodeIdx, sending: &[DeliveryIdx]) -> bool {
+		sending.iter().all(|&d| self.nodes[n].sent[d].is_some())
+	}
+
+	fn cheapest_source(
+		&self,
+		value: &Value,
+		used: &[usize],
+		phase: i32,
+		sending: &[DeliveryIdx],
+	) -> Option<NodeIdx> {
 		let key = match value {
-			Value::Primitive(p) if crate::term::hashing::hashconsed(p) => {
+			Value::Primitive(p) if sending.is_empty() && crate::term::hashing::hashconsed(p) => {
 				Some((Arc::as_ptr(p) as usize, phase))
 			}
 			_ => None,
@@ -129,6 +321,7 @@ impl<'a, 'b> Search<'a, 'b> {
 				let start = bucket.partition_point(|&n| n < from);
 				for &n in &bucket[start..] {
 					if n == HONEST_NODE
+						|| !self.sends(n, sending)
 						|| !used.iter().all(|&idx| self.supplies(idx, n))
 						|| !self.derivable_in(n, value, phase)
 					{
@@ -208,7 +401,7 @@ impl<'a, 'b> Search<'a, 'b> {
 					.then(|| (slot, crate::term::hashing::hashcons(&value), targets))
 			})
 			.collect();
-		let bases = self.bases(&signature, chained, true)?;
+		let bases = self.bases(&signature, chained, true, &[])?;
 		let km = self.cx.km;
 		let bound = self.ctx.term_bound(km);
 		let mut installs: Installs = Vec::new();
@@ -259,15 +452,34 @@ impl<'a, 'b> Search<'a, 'b> {
 		if self.outcome(at).is_some_and(|outcome| !outcome.settled)
 			&& !self.done()
 			&& let Some(sourced) = self
-				.bases(&signature, chained, false)
+				.bases(&signature, chained, false, &[])
 				.filter(|sourced| *sourced != bases)
 		{
-			let merged = self.merged(&sourced, installs);
+			let merged = self.merged(&sourced, installs.clone());
 			self.consider(merged);
+		}
+		let first = at;
+		let mut awaited: Vec<DeliveryIdx> = Vec::new();
+		while let Some(d) = self.awaited(r, at).filter(|d| !awaited.contains(d))
+			&& !self.done()
+		{
+			awaited.push(d);
+			let Some(sending) = self
+				.bases(&signature, chained, true, &awaited)
+				.filter(|sending| *sending != bases)
+			else {
+				break;
+			};
+			let merged = self.merged(&sending, installs.clone());
+			let again = self.consider(merged);
+			if self.awaited(r, again) == Some(d) {
+				break;
+			}
+			at = again;
 		}
 		if targeted
 			&& !self.done()
-			&& let Some(unblocked) = self.unblocking(r, at)
+			&& let Some(unblocked) = self.unblocking(r, first)
 		{
 			at = unblocked;
 		}
@@ -286,13 +498,16 @@ impl<'a, 'b> Search<'a, 'b> {
 			.map(|(_, slot)| *slot)
 	}
 
-	fn unblocking(&mut self, r: RunIdx, at: AttemptIdx) -> Option<AttemptIdx> {
-		let d = self
-			.outcome(at)?
+	fn awaited(&self, r: RunIdx, at: AttemptIdx) -> Option<DeliveryIdx> {
+		self.outcome(at)?
 			.blocked
 			.iter()
-			.find(|(run, _)| *run == r)?
-			.1;
+			.find(|(run, _)| *run == r)
+			.map(|&(_, d)| d)
+	}
+
+	fn unblocking(&mut self, r: RunIdx, at: AttemptIdx) -> Option<AttemptIdx> {
+		let d = self.awaited(r, at)?;
 		let plan = self.attempts.tried.entries[at].0.clone();
 		let sender = self.cx.program.deliveries[d].sender;
 		let mut cone = Vec::new();

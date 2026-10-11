@@ -1,0 +1,33 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0 at one session and at two.
+//
+// Alice seals two messages under one key and one nonce, but only the second
+// ciphertext ever leaves her. The first is declared `forgeable`, and the
+// attacker holds its plaintext, nonce and associated data, so it can mint a
+// term equal to e1. That minted term repeats no keystream: the attacker made
+// it itself, as in cap_forgeable_is_not_a_reuse_pair.vp, and Alice's own e1 is
+// never disclosed in any form. So it is no reuse partner for e2, and m2 stays
+// confidential. The engine once asked only whether a principal had built a
+// mintable member, not whether the attacker held that principal's copy, and
+// read m2 out of the pair. A reuse member now passes the same test as a
+// decomposed term: built, and disclosed or genuine. The nonce is generated,
+// so the second session pairs nothing either.
+// cap_forgeable_sent_reuse_member.vp is the counterweight.
+attacker[passive]
+principal Alice[
+	knows private k
+	knows public ad
+	generates n, m1, m2
+	e1 = AEAD_ENC[forgeable](k, n, m1, ad)
+	e2 = AEAD_ENC(k, n, m2, ad)
+	leaks m1
+]
+Alice -> Bob: n, e2
+principal Bob[
+	_ = HASH(e2)
+]
+queries[
+	confidentiality? m2
+]

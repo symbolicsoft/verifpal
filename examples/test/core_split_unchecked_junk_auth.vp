@@ -1,0 +1,42 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a1 at one session and at two.
+//
+// The authentication twin of core_split_unchecked_junk.vp. Bob splits the
+// plaintext of Alice's guarded ciphertext without checking it, then accepts
+// `s` only if it equals the second field. The attacker replaces `ga` with
+// PUBKEY(nil): Bob's key becomes DH_KEX(gb, nil), which the attacker
+// computes, his decryption no longer matches, and his unchecked SPLIT yields
+// the unreduced term SPLIT(DEC(kb, c)). The attacker applies DEC and SPLIT
+// itself, replaces `s` with that term, and Bob's ASSERT passes on a value
+// Alice never sent.
+//
+// core_split_checked_junk_auth.vp checks the split and holds.
+attacker[active]
+principal Bob[
+	knows private b
+	gb = PUBKEY(b)
+]
+Bob -> Alice: [gb]
+principal Alice[
+	generates a, na, s
+	ga = PUBKEY(a)
+	ka = DH_KEX(gb, a)
+	c = ENC(ka, CONCAT(na, s))
+]
+Alice -> Bob: ga, [c], s
+principal Bob[
+	kb = DH_KEX(ga, b)
+	x, y = SPLIT(DEC(kb, c))
+	_ = ASSERT(s, y)?
+	generates z
+	h = HASH(z, s)
+]
+Bob -> Alice: h
+principal Alice[
+	_ = HASH(h)
+]
+queries[
+	authentication? Alice -> Bob: s
+]

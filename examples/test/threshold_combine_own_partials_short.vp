@@ -1,0 +1,26 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0c0 at one session and at two.
+//
+// The counterweight to threshold_combine_own_partials.vp: s2 stays secret.
+// The attacker can still forge a partial under s1 over any message, but one
+// partial is short of the threshold, so no SIGN(k0, m) and no secret.
+attacker[passive]
+principal Alice[
+	knows public m
+	generates k0, n0, m0, secret
+	s1, s2 = THRESHOLD_SPLIT[2](k0)
+	c0 = PUBKEY(n0)
+	p0 = THRESHOLD_SIGN[forgeable](s1, n0, c0, m0)
+	key = SIGN(k0, m)
+	e = ENC(key, secret)
+]
+Alice -> Bob: e
+principal Bob[
+	knows private bobonly
+]
+queries[
+	confidentiality? secret
+	confidentiality? key
+]

@@ -1,0 +1,36 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a0 at one session and at two.
+//
+// core_split_unchecked_junk_auth.vp with the split checked: when the attacker
+// replaces `ga`, Bob's decryption no longer yields a pair and his SPLIT halts
+// him before the ASSERT. With `ga` intact, `y` is Alice's own `s` from the
+// guarded ciphertext, so any other `s` fails the ASSERT.
+attacker[active]
+principal Bob[
+	knows private b
+	gb = PUBKEY(b)
+]
+Bob -> Alice: [gb]
+principal Alice[
+	generates a, na, s
+	ga = PUBKEY(a)
+	ka = DH_KEX(gb, a)
+	c = ENC(ka, CONCAT(na, s))
+]
+Alice -> Bob: ga, [c], s
+principal Bob[
+	kb = DH_KEX(ga, b)
+	x, y = SPLIT(DEC(kb, c))?
+	_ = ASSERT(s, y)?
+	generates z
+	h = HASH(z, s)
+]
+Bob -> Alice: h
+principal Alice[
+	_ = HASH(h)
+]
+queries[
+	authentication? Alice -> Bob: s
+]

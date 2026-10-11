@@ -154,7 +154,20 @@ fn lost_attacks(before: &str, after: &str) -> Vec<usize> {
 enum Change {
 	Stronger,
 	Weaker,
+	StrongerOn(&'static [u8]),
+	WeakerOn(&'static [u8]),
 	Invariant(fn(&str) -> String),
+}
+
+const DISCLOSURE_QUERIES: &[u8] = b"cf";
+
+const ORDINARY_QUERIES: &[u8] = b"caf";
+
+fn lost_on(before: &str, after: &str, kinds: &[u8]) -> Vec<usize> {
+	lost_attacks(before, after)
+		.into_iter()
+		.filter(|&q| kinds.contains(&before.as_bytes()[2 * q]))
+		.collect()
 }
 
 fn variants_attacker(model: &Model, attacker: AttackerKind) -> Vec<Model> {
@@ -265,6 +278,143 @@ fn variants_weakened(model: &Model) -> Vec<Model> {
 		}
 	}
 	out
+}
+
+fn checked(value: &Value, check: bool) -> Option<Value> {
+	let Value::Primitive(p) = value else {
+		return None;
+	};
+	if p.instance_check == check
+		|| (check && !crate::primitive::definition(p.id).is_ok_and(|d| d.definition_check()))
+	{
+		return None;
+	}
+	let updated = p.with(|application| application.instance_check = check);
+	Some(Value::Primitive(Arc::new(updated)))
+}
+
+fn variants_checked(model: &Model, check: bool) -> Vec<Model> {
+	let mut out = Vec::new();
+	for (bi, block) in model.blocks.iter().enumerate() {
+		let Block::Principal(principal) = block else {
+			continue;
+		};
+		for (ei, expression) in principal.expressions.iter().enumerate() {
+			let Some(changed) = expression
+				.assigned
+				.as_ref()
+				.and_then(|assigned| checked(assigned, check))
+			else {
+				continue;
+			};
+			let mut variant = model.clone();
+			if let Some(Block::Principal(p)) = variant.blocks.get_mut(bi)
+				&& let Some(e) = p.expressions.get_mut(ei)
+			{
+				e.assigned = Some(changed);
+				out.push(variant);
+			}
+		}
+	}
+	out
+}
+
+fn redeclared(
+	principal: &Principal,
+	target: ValueId,
+	from: impl Fn(&Expression) -> bool,
+	kind: Declaration,
+	qualifier: Qualifier,
+) -> Option<Principal> {
+	let mut changed = false;
+	let mut expressions = Vec::new();
+	for e in &principal.expressions {
+		let Some(at) = e
+			.constants
+			.iter()
+			.position(|c| c.id == target)
+			.filter(|_| from(e))
+		else {
+			expressions.push(e.clone());
+			continue;
+		};
+		changed = true;
+		let mut rest = e.clone();
+		let constant = rest.constants.remove(at);
+		if !rest.constants.is_empty() {
+			expressions.push(rest);
+		}
+		expressions.push(Expression {
+			span: Span::default(),
+			kind,
+			qualifier: Some(qualifier),
+			constants: vec![constant],
+			assigned: None,
+			comments: LineComments::default(),
+		});
+	}
+	changed.then(|| Principal {
+		expressions,
+		..principal.clone()
+	})
+}
+
+fn variants_redeclared(
+	model: &Model,
+	from: fn(&Expression) -> bool,
+	kind: Declaration,
+	qualifier: Qualifier,
+) -> Vec<Model> {
+	let mut targets: Vec<ValueId> = Vec::new();
+	for block in &model.blocks {
+		let Block::Principal(principal) = block else {
+			continue;
+		};
+		for e in principal.expressions.iter().filter(|e| from(e)) {
+			for c in &e.constants {
+				if !targets.contains(&c.id) {
+					targets.push(c.id);
+				}
+			}
+		}
+	}
+	targets
+		.into_iter()
+		.filter_map(|target| {
+			let mut variant = model.clone();
+			let mut changed = false;
+			for block in &mut variant.blocks {
+				if let Block::Principal(principal) = block
+					&& let Some(updated) = redeclared(principal, target, from, kind, qualifier)
+				{
+					*principal = updated;
+					changed = true;
+				}
+			}
+			changed.then_some(variant)
+		})
+		.collect()
+}
+
+fn variants_ungenerated(model: &Model) -> Vec<Model> {
+	variants_redeclared(
+		model,
+		|e| e.kind == Declaration::Generates,
+		Declaration::Knows,
+		Qualifier::Private,
+	)
+}
+
+fn variants_publicized(model: &Model) -> Vec<Model> {
+	if !model.scenarios.is_empty() {
+		return Vec::new();
+	}
+	variants_redeclared(
+		model,
+		|e| e.kind == Declaration::Knows && e.qualifier == Some(Qualifier::Private),
+		Declaration::Knows,
+		Qualifier::Public,
+	)
 }
 
 fn variants_rethresholded(model: &Model, delta: i64) -> Vec<Model> {
@@ -895,7 +1045,8 @@ fn check_variants<V: IntoIterator<Item = Model>>(
 		let Outcome::Code(before) = code_of(model, SESSIONS) else {
 			return None;
 		};
-		(!matches!(change, Change::Stronger) || before.contains('1')).then_some(before)
+		(!matches!(change, Change::Stronger | Change::StrongerOn(_)) || before.contains('1'))
+			.then_some(before)
 	});
 	let mut jobs: Vec<(usize, Model)> = Vec::new();
 	for (at, ((_, model), before)) in models.iter().zip(&originals).enumerate() {
@@ -927,6 +1078,8 @@ fn check_variants<V: IntoIterator<Item = Model>>(
 			let lost = match change {
 				Change::Stronger => lost_attacks(before, after),
 				Change::Weaker => lost_attacks(after, before),
+				Change::StrongerOn(kinds) => lost_on(before, after, kinds),
+				Change::WeakerOn(kinds) => lost_on(after, before, kinds),
 				Change::Invariant(expected) => {
 					let want = expected(before);
 					return if after == want {
@@ -1400,6 +1553,50 @@ mod tests {
 			|model| under(model, AttackerKind::Active, variant_hoisted),
 			Change::Stronger,
 			65,
+			Sweep::Fast,
+		);
+	}
+
+	#[test]
+	fn removing_a_check_never_loses_an_attack() {
+		check_variants(
+			"uncheck",
+			|model| variants_checked(model, false),
+			Change::StrongerOn(DISCLOSURE_QUERIES),
+			680,
+			Sweep::Fast,
+		);
+	}
+
+	#[test]
+	fn adding_a_check_never_adds_an_attack() {
+		check_variants(
+			"check",
+			|model| variants_checked(model, true),
+			Change::WeakerOn(DISCLOSURE_QUERIES),
+			120,
+			Sweep::Fast,
+		);
+	}
+
+	#[test]
+	fn a_generated_value_made_long_term_never_loses_an_attack() {
+		check_variants(
+			"ungenerate",
+			variants_ungenerated,
+			Change::StrongerOn(DISCLOSURE_QUERIES),
+			1250,
+			Sweep::Fast,
+		);
+	}
+
+	#[test]
+	fn a_private_value_made_public_never_loses_an_attack() {
+		check_variants(
+			"publicize",
+			variants_publicized,
+			Change::StrongerOn(ORDINARY_QUERIES),
+			860,
 			Sweep::Fast,
 		);
 	}

@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
 //
-// Expected: a1a0 at one session and at two.
+// Expected: a1a1 at one session and at two.
 //
 // search_starved_oracle_repair.vp with every message cut into one message per
 // value. The attack is the same: Bob@2's nb@2 and s2@2 are replaced so that
@@ -13,7 +13,8 @@
 // installed, her wait on s2@2 did not count as starvation and her check was
 // never repaired, so the one-session attack was missed. A slot now counts
 // when the honest execution never sends its message, wherever the run waits.
-// search_starved_oracle_repair_tagged.vp is the counterweight.
+// search_starved_oracle_repair_tagged.vp is the counterweight. s3 fails as in
+// spore_x509_three_way.vp: message 3 does not name Bob.
 attacker[active]
 
 principal Alice[

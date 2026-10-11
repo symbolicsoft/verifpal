@@ -1,0 +1,62 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a1 at one session and at two.
+//
+// Bob decrypts whatever arrives as cc under kb and leaks the plaintext.
+// Replaying Alice's c = ENC(kb, v) as cc teaches the attacker v in phase 0,
+// so it forges msg and MAC(v, HASH(msg, nd)) for Dave in phase 0. Honestly, v
+// is disclosed only by Alice's phase-1 leak.
+//
+// The execution that replays c taught only the phase-0 union: the final union
+// already held v from the honest leak, so it was not kept, and no node could
+// supply v to Dave's phase-0 receive. An execution that teaches any earlier
+// phase's union something is now kept. search_earlier_phase_source_guarded.vp
+// and search_earlier_phase_source_late.vp are the counterweights.
+attacker[active]
+
+principal Dave[
+	knows private v
+	generates nd
+]
+
+Dave -> Alice: nd
+
+principal Alice[
+	knows private kb, v
+	generates msg
+	c = ENC(kb, v)
+	tg = MAC(v, HASH(msg, nd))
+]
+
+Alice -> Carol: c
+
+principal Carol[
+	knows private kb
+	generates nc
+	cc = ENC(kb, nc)
+]
+
+Carol -> Bob: cc
+
+principal Bob[
+	knows private kb
+	d = DEC(kb, cc)
+	leaks d
+]
+
+Alice -> Dave: msg, tg
+
+principal Dave[
+	_ = ASSERT(MAC(v, HASH(msg, nd)), tg)?
+]
+
+phase[1]
+
+principal Alice[
+	leaks v
+]
+
+queries[
+	authentication? Alice -> Dave: msg
+]

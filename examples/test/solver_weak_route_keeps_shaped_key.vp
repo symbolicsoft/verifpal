@@ -1,0 +1,28 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1 at one session and at two.
+//
+// Bob encrypts s to the hx it receives. The attacker replaces hx with
+// PUBKEY(nil) and opens ob. Alice's unrelated w = PKE_ENC[weak](hx, t) only
+// reveals t, yet it made every PKE_ENC term offer a weak route to the
+// deducer, and a decomposition with any route was never shaped: the deducer
+// stopped asking for an attacker key at Bob's hx. A weak route is now one
+// more option beside the shaped key.
+// solver_weak_route_keeps_shaped_key_guarded.vp is the counterweight.
+attacker[active]
+principal Alice[
+	knows private t
+	generates x
+	hx = HASH(x)
+	w = PKE_ENC[weak](hx, t)
+]
+Alice -> Bob: hx, w
+principal Bob[
+	knows private s
+	ob = PKE_ENC(hx, s)
+]
+Bob -> Alice: ob
+queries[
+	confidentiality? s
+]

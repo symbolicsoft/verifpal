@@ -1,0 +1,35 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: a1 at one session and at two.
+//
+// Bob opens c with an unchecked decryption and then splits the plaintext into
+// two fields under a check. The attacker sends nil: Bob's decryption runs on
+// it, which is a use of c, and the split fails as the last step that
+// mentions c. Under positional acceptance this is a forgery, as it is when
+// the failing check binds one output (auth_accept_then_halt.vp).
+//
+// Each output of an assignment is its own step, and the second output of the
+// halted split was once read as a later use of c that the run never reached,
+// so it cancelled the acceptance: a0 at one session, where the same model
+// with `a = SPLIT(d)?` gave a1. Every output of the halted assignment is now
+// the failed use. auth_accept_then_split_halt_later_use.vp adds a use after
+// the split, which the halt does leave unreached.
+attacker[active]
+
+principal Alice[
+	knows private k
+	generates m1, m2
+	c = ENC(k, CONCAT(m1, m2))
+]
+
+Alice -> Bob: c
+
+principal Bob[
+	knows private k
+	d = DEC(k, c)
+	a, b = SPLIT(d)?
+]
+
+queries[
+	authentication? Alice -> Bob: c
+]

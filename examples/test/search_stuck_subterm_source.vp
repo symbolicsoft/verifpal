@@ -1,0 +1,54 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a1 at one and two sessions. Dave accepts m when it carries a
+// MAC under HASH(k). Bob and Eve each open k from what Alice leaks, but Bob
+// leaks it only after Dave's guarded gd, which Dave sends only after his
+// check: a forgery for Dave cannot wait for Bob. Eve leaks k at once, so the
+// attacker hands Eve we and Dave nil with MAC(HASH(k), nil). No run of Alice
+// emitted nil, so Dave's acceptance is a forgery. Bob is declared before Eve
+// so that his execution is the first found to know k; declaration order must
+// not decide the verdict. At two sessions the attacker can also replay
+// Alice's second m and t to the first Dave run, which then accepts one
+// emission twice.
+attacker[active]
+
+principal Bob[
+	knows private kb
+]
+
+principal Alice[
+	knows private kb, ke, k
+	generates jb, je, m
+	wb = ENC(kb, k)
+	we = ENC(ke, k)
+	xb = ENC(kb, jb)
+	xe = ENC(ke, je)
+	t = MAC(HASH(k), m)
+	leaks wb, we
+]
+Alice -> Bob: xb
+Alice -> Eve: xe
+Alice -> Dave: m, t
+
+principal Eve[
+	knows private ke
+	ye = DEC(ke, xe)
+	leaks ye
+]
+
+principal Dave[
+	knows private k
+	_ = ASSERT(MAC(HASH(k), m), t)?
+	generates gd
+]
+Dave -> Bob: [gd]
+
+principal Bob[
+	yb = DEC(kb, xb)
+	leaks yb
+]
+
+queries[
+	authentication? Alice -> Dave: m
+]

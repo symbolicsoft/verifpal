@@ -1,0 +1,40 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: u1 at one session and at two.
+//
+// Bob returns s1 and Carol s2, each encrypted to the hash it receives. The
+// attacker needs both oracles in one execution to rebuild a = HASH(s1, s2, n1)
+// and b = HASH(s1, s2, n2). Each secret is known to some node, so neither was
+// a query-source merge target on its own; the missing secret arguments of a
+// queried value are now merged jointly.
+// search_unlink_joint_arguments_guarded.vp is the counterweight.
+attacker[active]
+principal Alice[
+	knows private s1, s2
+	generates n1, n2, x, y
+	a = HASH(s1, s2, n1)
+	b = HASH(s1, s2, n2)
+	hx = HASH(x)
+	hy = HASH(y)
+]
+Alice -> Dave: n1, n2, a, b
+Alice -> Bob: hx
+Alice -> Carol: hy
+principal Bob[
+	knows private s1
+	ob = PKE_ENC(hx, s1)
+]
+principal Carol[
+	knows private s2
+	oc = PKE_ENC(hy, s2)
+]
+Bob -> Dave: ob
+Carol -> Dave: oc
+principal Dave[
+	_ = HASH(n1, n2, a, b)
+	_ = HASH(ob, oc)
+]
+queries[
+	unlinkability? a, b
+]

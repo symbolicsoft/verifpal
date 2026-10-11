@@ -67,6 +67,22 @@ impl<'a> Deducer<'a> {
 			}
 		}
 
+		if let Value::Primitive(whole) = &target {
+			for (join, rule) in crate::primitive::combines_into(whole.id) {
+				if join == p.id {
+					out.extend(self.invert_combination(&p.arguments, false, whole, rule, s));
+				} else if rule.partial == p.id && p.id != whole.id {
+					out.extend(self.invert_combination(
+						std::slice::from_ref(&term),
+						true,
+						whole,
+						rule,
+						s,
+					));
+				}
+			}
+		}
+
 		dedupe(out)
 	}
 
@@ -77,6 +93,9 @@ impl<'a> Deducer<'a> {
 	) -> Vec<Substitution> {
 		let empty = Substitution::default();
 		let mut out = Vec::new();
+		if contains_var(emission) {
+			out.extend(self.invert(emission, shape, &empty));
+		}
 		let mut pending = vec![emission.clone()];
 		let mut seen = TermSet::default();
 		while let Some(term) = pending.pop() {

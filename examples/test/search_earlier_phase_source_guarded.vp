@@ -1,0 +1,55 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a0 at one session and at two.
+//
+// search_earlier_phase_source.vp with Carol's cc guarded: Bob decrypts only
+// Carol's own ciphertext, so v reaches the attacker only through Alice's
+// phase-1 leak, after Dave's phase-0 check.
+attacker[active]
+
+principal Dave[
+	knows private v
+	generates nd
+]
+
+Dave -> Alice: nd
+
+principal Alice[
+	knows private kb, v
+	generates msg
+	c = ENC(kb, v)
+	tg = MAC(v, HASH(msg, nd))
+]
+
+Alice -> Carol: c
+
+principal Carol[
+	knows private kb
+	generates nc
+	cc = ENC(kb, nc)
+]
+
+Carol -> Bob: [cc]
+
+principal Bob[
+	knows private kb
+	d = DEC(kb, cc)
+	leaks d
+]
+
+Alice -> Dave: msg, tg
+
+principal Dave[
+	_ = ASSERT(MAC(v, HASH(msg, nd)), tg)?
+]
+
+phase[1]
+
+principal Alice[
+	leaks v
+]
+
+queries[
+	authentication? Alice -> Dave: msg
+]

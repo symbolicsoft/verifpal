@@ -25,10 +25,11 @@
 //               an advantage rather than a gap: it matches what an
 //               implementation that does not check field types actually does.
 //
-// a1 t4       — cross-session key substitution. The attacker replays session
-//               1's ticket t2 into session 2, so the server mints session 2's
-//               key against session 1's nonce, and the resulting t4 is
-//               accepted by Bob's ASSERT in the wrong run.
+// a1 t4       — the responder-side type flaw. The attacker reflects Bob's
+//               own message-2 ticket t2 back to him as the message-4 ticket
+//               t4. It is a genuine ciphertext under k_bs, its first field
+//               is Bob's nonce nb, so his ASSERT passes, and he takes the
+//               rest as the session key, a t4 the server never sent.
 
 attacker[active]
 

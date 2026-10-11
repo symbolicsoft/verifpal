@@ -3,28 +3,19 @@
 
 use std::sync::Arc;
 
+use super::decomposition::inverts_through;
 use super::shapes::rewrite_shapes_from;
 use super::{Deducer, match_each, refine_check};
 use crate::primitive::{
 	Capability, RewriteRule, commutativity_rule, commutativity_swap, reuse_rule, rewrite_rule,
 };
 use crate::solve::matching::{match_values, unifiers};
-use crate::solve::vars::{Substitution, apply, as_var, contains_var, dedupe};
-use crate::term::{Primitive, Value};
+use crate::solve::vars::{
+	Substitution, apply, as_var, contains_var, dedupe, remove_local_bindings,
+};
+use crate::term::{Primitive, Value, VariableId};
 use crate::theory::{forgeable_by_reuse, same_fixed};
-
-/// A projection whose tuple is still open is the one shape plain unification
-/// cannot see through: `unifiers` matches congruently, and rewrites already
-/// have their own routes, so this is the only case worth inverting a wire term
-/// for. Without the test the fallback runs for every wire term and every goal.
-fn projects_a_variable(v: &Value) -> bool {
-	crate::term::subterms(v).any(|term| match term {
-		Value::Primitive(p) => {
-			crate::primitive::is_projection(p.id) && p.arguments.first().is_some_and(contains_var)
-		}
-		Value::Constant(_) | Value::Variable(_) => false,
-	})
-}
+use crate::util::IdMap;
 
 fn shapes_a_variable(v: &Value) -> bool {
 	crate::term::subterms(v).any(|term| match term {
@@ -37,6 +28,47 @@ fn shapes_a_variable(v: &Value) -> bool {
 		}
 		Value::Constant(_) | Value::Variable(_) => false,
 	})
+}
+
+fn may_yield(term: &Value, goal: &Value) -> bool {
+	let Value::Primitive(p) = term else {
+		return true;
+	};
+	if rewrite_rule(p.id).is_some() || crate::primitive::is_projection(p.id) {
+		return true;
+	}
+	match goal {
+		Value::Variable(_) => true,
+		Value::Constant(_) => false,
+		Value::Primitive(q) => {
+			crate::primitive::is_projection(q.id) || (q.id == p.id && q.output == p.output)
+		}
+	}
+}
+
+fn abstract_oracles(
+	v: &Value,
+	oracles: &[(Arc<Primitive>, Value)],
+	memo: &mut IdMap<usize, Value>,
+) -> Value {
+	let Value::Primitive(p) = v else {
+		return v.clone();
+	};
+	if let Some((_, placeholder)) = oracles.iter().find(|(oracle, _)| Arc::ptr_eq(oracle, p)) {
+		return placeholder.clone();
+	}
+	let key = Arc::as_ptr(p) as usize;
+	if let Some(hit) = memo.get(&key) {
+		return hit.clone();
+	}
+	let arguments = p
+		.arguments
+		.iter()
+		.map(|argument| abstract_oracles(argument, oracles, memo))
+		.collect();
+	let out = Value::Primitive(Arc::new(p.with_arguments(arguments)));
+	memo.insert(key, out.clone());
+	out
 }
 
 impl<'a> Deducer<'a> {
@@ -138,22 +170,125 @@ impl<'a> Deducer<'a> {
 		out: &mut Vec<Substitution>,
 	) {
 		for term in self.shared.wire_terms.iter() {
-			if !contains_var(term) {
+			if contains_var(term) {
+				self.solve_through(term, goal, s, out);
+			}
+		}
+		let oracles = self
+			.shared
+			.revealed_oracles
+			.get_or_init(|| super::decomposition::revealed_oracles(&self.shared.wire_terms));
+		for (term, given) in oracles {
+			if !may_yield(term, &apply(goal, s)) {
 				continue;
 			}
-			for bound in unifiers(term, goal, s) {
+			let mut opened = vec![s.clone()];
+			for required in given {
+				if opened.is_empty() {
+					break;
+				}
+				opened = self.solve_each(required, &opened);
+			}
+			for candidate in &opened {
+				self.solve_by_oracles(term, goal, candidate, out);
+			}
+		}
+	}
+
+	fn solve_through(
+		&self,
+		term: &Value,
+		goal: &Value,
+		s: &Substitution,
+		out: &mut Vec<Substitution>,
+	) {
+		for bound in unifiers(term, goal, s) {
+			out.extend(self.require_constructible(&bound, s, false));
+		}
+		self.solve_by_oracles(term, goal, s, out);
+	}
+
+	fn solve_by_oracles(
+		&self,
+		term: &Value,
+		goal: &Value,
+		s: &Substitution,
+		out: &mut Vec<Substitution>,
+	) {
+		if let Value::Primitive(p) = term
+			&& let Some(rule) = rewrite_rule(p.id)
+		{
+			self.solve_by_oracle(p, rule, goal, s, out);
+			self.solve_by_rewrite_match(p, rule, goal, s, out);
+		}
+		if inverts_through(term) {
+			for bound in self.invert(term, goal, s) {
 				out.extend(self.require_constructible(&bound, s, false));
 			}
-			if let Value::Primitive(p) = term
-				&& let Some(rule) = rewrite_rule(p.id)
-			{
-				self.solve_by_oracle(p, rule, goal, s, out);
-				self.solve_by_rewrite_match(p, rule, goal, s, out);
-			}
-			if projects_a_variable(term) {
-				for bound in self.invert(term, goal, s) {
-					out.extend(self.require_constructible(&bound, s, false));
+		}
+		self.solve_by_nested_oracles(term, goal, s, out);
+	}
+
+	fn solve_by_nested_oracles(
+		&self,
+		term: &Value,
+		goal: &Value,
+		s: &Substitution,
+		out: &mut Vec<Substitution>,
+	) {
+		let Value::Primitive(top) = term else {
+			return;
+		};
+		let mut oracles: Vec<(Arc<Primitive>, Value)> = Vec::new();
+		for argument in &top.arguments {
+			for sub in crate::term::subterms(argument) {
+				if let Value::Primitive(p) = sub
+					&& rewrite_rule(p.id)
+						.is_some_and(|rule| p.arguments.get(rule.from).and_then(as_var).is_some())
+					&& !oracles.iter().any(|(seen, _)| Arc::ptr_eq(seen, p))
+				{
+					oracles.push((Arc::clone(p), self.fresh_var()));
 				}
+			}
+		}
+		if oracles.is_empty() {
+			return;
+		}
+		let abstracted = abstract_oracles(term, &oracles, &mut IdMap::default());
+		let locals: Vec<VariableId> = oracles
+			.iter()
+			.filter_map(|(_, placeholder)| as_var(placeholder))
+			.collect();
+		for bound in unifiers(&abstracted, goal, s) {
+			let mut frontier = vec![bound];
+			for (p, placeholder) in &oracles {
+				let Some(rule) = rewrite_rule(p.id) else {
+					continue;
+				};
+				let Some(var_id) = p.arguments.get(rule.from).and_then(as_var) else {
+					continue;
+				};
+				let mut next = Vec::new();
+				for candidate in &frontier {
+					let wanted = apply(placeholder, candidate);
+					if as_var(&wanted).is_some() {
+						next.extend(unifiers(
+							placeholder,
+							&Value::Primitive(Arc::clone(p)),
+							candidate,
+						));
+						continue;
+					}
+					for (shape, shaped) in self.rewrite_shapes_yielding(p, rule, &wanted, candidate)
+					{
+						self.bind_from_shape(&shape, &var_id, &shaped, false, &mut next);
+					}
+				}
+				frontier = dedupe(next);
+			}
+			for candidate in frontier {
+				let candidate = remove_local_bindings(candidate, &locals);
+				out.extend(self.require_constructible(&candidate, s, false));
 			}
 		}
 	}

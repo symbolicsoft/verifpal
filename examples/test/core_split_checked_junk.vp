@@ -1,0 +1,32 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0 at one session and at two.
+//
+// core_split_unchecked_junk.vp with Bob's SPLIT checked. A replaced `ga`
+// leaves Bob's decryption unmatched, so his checked SPLIT halts him before he
+// sends `e`. With the honest `ga`, from his own session or the other, `y` is
+// Alice's generated `s`, which never leaves her except under `ka`.
+attacker[active]
+principal Bob[
+	knows private b
+	gb = PUBKEY(b)
+]
+Bob -> Alice: [gb]
+principal Alice[
+	generates a, na, s
+	ga = PUBKEY(a)
+	ka = DH_KEX(gb, a)
+	c = ENC(ka, CONCAT(na, s))
+]
+Alice -> Bob: ga, [c]
+principal Bob[
+	generates s2
+	kb = DH_KEX(ga, b)
+	x, y = SPLIT(DEC(kb, c))?
+	e = ENC(HASH(y), s2)
+]
+Bob -> Alice: e
+queries[
+	confidentiality? s2
+]

@@ -1,0 +1,53 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1 at one session and at two.
+//
+// Bob and Dave each tag whatever arrives under the shared key k, and the key
+// of Alice's leaked e is a hash of the two tags over public constants. One
+// execution hands Bob c0 and Dave c1 and learns both tags, so m is
+// disclosed. Bob's xb reaches him through Relay.
+//
+// The tag over c0 was first learned from the execution that installs c0 at
+// Relay, which Relay then forwards to Bob. A query-source merge compared its
+// sources by where they install, so the execution installing c1 at Bob looked
+// compatible with it, although Bob's own install replaces what Relay
+// forwards; the merge ran that plan only and lost the tag over c0. A source
+// supplies every value its runs received from the attacker, relayed or not.
+// search_merge_relayed_source_guarded.vp guards the relay's second leg and
+// search_merge_relayed_source_one_tagger.vp is the counterweight.
+attacker[active]
+
+principal Alice[
+	knows private k
+	knows public c0, c1
+	generates xb, xd, m
+	e = ENC(HASH(HASH(k, c0), HASH(k, c1)), m)
+	leaks e
+]
+
+Alice -> Relay: xb
+
+principal Relay[
+	generates nr
+]
+
+Relay -> Bob: xb
+Alice -> Dave: xd
+
+principal Bob[
+	knows private k
+	sb = HASH(k, xb)
+]
+
+principal Dave[
+	knows private k
+	sd = HASH(k, xd)
+]
+
+Bob -> Alice: sb
+Dave -> Alice: sd
+
+queries[
+	confidentiality? m
+]

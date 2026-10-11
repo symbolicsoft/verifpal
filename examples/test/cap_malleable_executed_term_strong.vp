@@ -1,0 +1,34 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0 at one session and at two.
+//
+// cap_malleable_executed_term.vp without the `malleable` annotation: the
+// man-in-the-middle still opens w and holds Alice's ciphertext, but cannot
+// change its plaintext under k. Forwarded, it makes Bob encrypt s under sec,
+// which stays secret.
+attacker[active]
+principal Bob[
+	knows private k
+	generates b, s
+	gb = PUBKEY(b)
+]
+Bob -> Alice: gb
+principal Alice[
+	knows private k, sec
+	generates a
+	ga = PUBKEY(a)
+	c = ENC(k, CONCAT(gb, sec))
+	w = ENC(DH_KEX(gb, a), c)
+]
+Alice -> Bob: ga, w
+principal Bob[
+	cin = DEC(DH_KEX(ga, b), w)
+	y = DEC(k, cin)
+	p, q = SPLIT(y)
+	e = ENC(q, s)
+]
+Bob -> Alice: e
+queries[
+	confidentiality? s
+]

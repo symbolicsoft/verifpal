@@ -16,6 +16,7 @@ use std::sync::Arc;
 use super::exec::{Context, Execution, Install, Installs, install_at};
 use super::knowledge::{Knowledge, Origin};
 use super::program::{DeliveryIdx, Event, RunIdx, StepIdx};
+use crate::primitive::CapabilityIndex;
 use crate::protocol::SlotIdx;
 use crate::solve::symbolic;
 use crate::syntax::QueryKind;
@@ -44,14 +45,18 @@ struct Node {
 
 type PhaseKnowledge = (
 	Arc<AttackerState>,
+	Arc<CapabilityIndex>,
 	std::cell::RefCell<crate::theory::SavedMemo>,
 );
+
+type Additions = IdMap<(NodeIdx, i32), Arc<[Value]>>;
 
 struct HeldValue {
 	slot: SlotIdx,
 	value: Value,
 	received: bool,
 	installed: bool,
+	authored: bool,
 }
 
 impl Node {
@@ -71,6 +76,7 @@ impl Node {
 								value: crate::term::hashing::hashcons(&held.value),
 								received: held.sender.is_some(),
 								installed: held.installed.is_some(),
+								authored: held.authored,
 							})
 						})
 						.collect()
@@ -98,7 +104,11 @@ impl Node {
 						reused: Arc::clone(&state.reused),
 						chain: next_chain(),
 					});
-					(state, std::cell::RefCell::default())
+					(
+						state,
+						Arc::clone(phase.knowledge.capabilities()),
+						std::cell::RefCell::default(),
+					)
 				})
 				.collect(),
 		}
@@ -155,7 +165,7 @@ struct Attempts {
 	pending: Vec<AttemptIdx>,
 	probed: Tried,
 	drops: Vec<Installs>,
-	merged: IdMap<(u64, NodeIdx), Vec<Value>>,
+	merged: IdMap<(u64, NodeIdx), Vec<Vec<Value>>>,
 	family: Family,
 	executed: usize,
 }
@@ -174,7 +184,9 @@ struct Retries {
 struct Memo {
 	derivable: std::cell::RefCell<IdMap<(NodeIdx, usize, i32), bool>>,
 	cheapest: std::cell::RefCell<IdMap<(usize, i32), Cheapest>>,
-	holders: IdMap<(SlotIdx, QueryKind), Holders>,
+	late: std::cell::RefCell<IdMap<(RunIdx, StepIdx), Late>>,
+	additions: std::cell::RefCell<Additions>,
+	holders: IdMap<SlotIdx, Holders>,
 }
 
 struct Log {
@@ -185,6 +197,21 @@ struct Log {
 
 struct Cheapest {
 	used: Vec<usize>,
+	scanned: NodeIdx,
+	best: Option<NodeIdx>,
+}
+
+struct Late {
+	before: Knowledge,
+	within: (usize, Knowledge),
+	supplied: Vec<(Value, Option<NodeIdx>)>,
+	values: Vec<Adders>,
+}
+
+struct Adders {
+	value: Value,
+	late: bool,
+	reachable: (usize, bool),
 	scanned: NodeIdx,
 	best: Option<NodeIdx>,
 }
@@ -368,7 +395,7 @@ impl<'a, 'b> Search<'a, 'b> {
 			.flat_map(|query| query.constants)
 			.filter_map(|constant| cx.km.index_of(&constant))
 			.collect();
-		let mut knowledge = Knowledge::new(cx.km.max_phase);
+		let mut knowledge = Knowledge::new(cx.km.max_phase).declaring(&cx.km.capabilities);
 		let mut by_cost = Vec::new();
 		for v in root.knowledge.state.known.iter() {
 			if knowledge.learn(v, Origin::Initial) {
@@ -377,7 +404,7 @@ impl<'a, 'b> Search<'a, 'b> {
 		}
 		let earlier = (0..cx.km.max_phase)
 			.map(|phase| {
-				let mut earlier = Knowledge::new(phase);
+				let mut earlier = Knowledge::new(phase).declaring(&cx.km.capabilities);
 				let at = &root.at(phase).knowledge.state;
 				for v in at.known.iter() {
 					earlier.learn(v, Origin::Initial);
@@ -429,7 +456,7 @@ impl<'a, 'b> Search<'a, 'b> {
 				knowledge,
 				earlier,
 				by_cost,
-				closed: Knowledge::new(cx.km.max_phase),
+				closed: Knowledge::new(cx.km.max_phase).declaring(&cx.km.capabilities),
 				closed_at: (0, NodeIdx::new(0)),
 				protocol_seen: IdMap::default(),
 			},
@@ -515,6 +542,35 @@ impl<'a, 'b> Search<'a, 'b> {
 		}
 		self.reroute();
 		self.supply_wants();
+	}
+
+	fn supplied(&self, n: NodeIdx) -> Installs {
+		let program = self.cx.program;
+		let node = &self.nodes[n];
+		let mut out = node.installs.clone();
+		for (run, held) in node.held.iter_enumerated() {
+			for h in held.iter().filter(|h| h.authored && !h.installed) {
+				let unguarded = program.runs[run]
+					.step_of_slot
+					.get(&h.slot)
+					.and_then(|&step| match program.runs[run].steps[step].event {
+						Event::Recv(d) => program.deliveries[d]
+							.slots
+							.iter()
+							.find(|&&(slot, _)| slot == h.slot),
+						_ => None,
+					})
+					.is_some_and(|&(_, guarded)| !guarded);
+				if unguarded && install_at(&out, run, h.slot).is_none() {
+					out.push(Install::Value {
+						run,
+						slot: h.slot,
+						value: h.value.clone(),
+					});
+				}
+			}
+		}
+		normalize(out)
 	}
 
 	fn spoken(&self, install: &Install) -> String {
@@ -616,7 +672,12 @@ fn relevant_prefixes(ctx: &VerifyContext, cx: &Context) -> IndexVec<RunIdx, Step
 					continue;
 				};
 				let end = match query.kind {
-					QueryKind::Authentication | QueryKind::Freshness => run.steps.next_index(),
+					QueryKind::Authentication | QueryKind::Freshness
+						if cx.km.constant_used_by(run.id, constant) =>
+					{
+						run.steps.next_index()
+					}
+					QueryKind::Authentication | QueryKind::Freshness => continue,
 					_ => step.next(),
 				};
 				ends[r] = ends[r].max(end);

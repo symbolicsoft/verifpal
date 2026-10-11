@@ -1,0 +1,49 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0 at one session, c1 at two. As search_bases_other_source.vp,
+// but Carol's input is guarded, so only Eve can produce ENC(kb, s), and
+// doing so makes her fail her MAC check before she sends Bob the guarded gt:
+// Bob never receives x. At two sessions one Eve run is the oracle while the
+// other serves Bob.
+attacker[active]
+
+principal Alice[
+	knows private kc, km, s
+	generates ne, nc
+	z = ENC(kc, ne)
+	tz = MAC(km, z)
+	y = ENC(kc, nc)
+	w = ENC(kc, s)
+	leaks w
+]
+Alice -> Eve: z, [tz]
+Alice -> Carol: [y]
+
+principal Eve[
+	knows private kc, kb, km
+	generates gt, nx
+	ve = DEC(kc, z)
+	oute = ENC(kb, ve)
+	leaks oute
+	_ = ASSERT(MAC(km, z), tz)?
+	x = ENC(kb, nx)
+]
+Eve -> Bob: [gt], x
+
+principal Carol[
+	knows private kc, kb
+	vc = DEC(kc, y)
+	outc = ENC(kb, vc)
+	leaks outc
+]
+
+principal Bob[
+	knows private kb
+	d = DEC(kb, x)
+	leaks d
+]
+
+queries[
+	confidentiality? s
+]

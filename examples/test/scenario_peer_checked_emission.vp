@@ -1,0 +1,66 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0a1 at one session and at two.
+//
+// spore_splice_as.vp with a signed reply that names no peer: the server
+// answers SIGN(s, HASH(n2)). Mallory re-signs Client's message 3 as her own,
+// the server run whose scenario binds Mallory's key accepts it and signs the
+// hash of Client's nonce, and the attacker forwards that signature to Client,
+// whose own server run it halted. Client accepts a reply from a server run
+// that was serving Mallory. Its value is the honest one and names no peer,
+// but the run passed a check under the key its scenario binds before it
+// signed, so it is no emission Client's acceptance may be matched against.
+// scenario_peer_checked_emission_named.vp is the counterweight.
+attacker[active]
+
+principal Server[
+	knows private s
+	knows public gpeer
+	gs = PUBKEY(s)
+]
+
+principal Client[
+	knows private c
+	gc = PUBKEY(c)
+	generates n2, t
+]
+
+principal Mallory[
+	knows private mk
+	gm = PUBKEY(mk)
+	leaks mk
+]
+
+Server -> Client: [gs]
+Client -> Server: [gc]
+Mallory -> Server: [gm]
+
+principal Client[
+	e3 = PKE_ENC(gs, n2)
+	sig3 = SIGN(c, CONCAT(t, e3))
+]
+
+Client -> Server: t, e3, sig3
+
+principal Server[
+	_ = SIGNVERIF(gpeer, CONCAT(t, e3), sig3)?
+	n2_s = PKE_DEC(s, e3)
+	m6 = SIGN(s, HASH(n2_s))
+]
+
+Server -> Client: m6
+
+principal Client[
+	_ = SIGNVERIF(gs, HASH(n2), m6)?
+]
+
+scenarios[
+	Server[gpeer = gc]
+	Server[gpeer = gm]
+]
+
+queries[
+	confidentiality? n2
+	authentication? Server -> Client: m6
+]

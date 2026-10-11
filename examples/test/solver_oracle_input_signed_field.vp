@@ -1,0 +1,80 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1 at one session and at two.
+//
+// solver_oracle_input_honest_field.vp with hn pinned by a signature instead of
+// an equality check: Alice accepts hn only with Erin's signature he over it,
+// and Erin's key ske signs nothing but HASH(na). Bob signs whatever Carol
+// sends him under skb. The attacker has Bob sign CONCAT(PUBKEY(nil), HASH(na))
+// and gives Alice PUBKEY(nil) with that signature, keeping Dave's hn and he.
+//
+// Bob's oracle input comes from Alice's check shape SIGN(skb, CONCAT(gd, hn)),
+// whose gd and hn are Alice's received slots. A slot of another principal took
+// nil, the attacker's key, or a value one of that principal's equality checks
+// pins, so Bob was asked to sign CONCAT(PUBKEY(nil), nil), which Alice's
+// SIGNVERIF over he rejects. A slot that another check of that principal reads
+// now also takes what the attacker holds that passes that check, here hn from
+// Erin's signature, wherever the plain filler cannot pass it.
+//
+// solver_oracle_input_signed_field_guarded.vp guards Carol's input and holds.
+attacker[active]
+
+principal Bob[
+	knows private skb
+	pkb = PUBKEY(skb)
+]
+
+Bob -> Alice: [pkb]
+
+principal Erin[
+	knows private ske
+	pke = PUBKEY(ske)
+]
+
+Erin -> Alice: [pke]
+
+principal Carol[
+	generates c, nc
+	gc = PUBKEY(c)
+	y = CONCAT(gc, nc)
+]
+
+Carol -> Bob: y
+
+principal Bob[
+	sb = SIGN(skb, y)
+]
+
+Bob -> Carol: sb
+
+principal Alice[
+	generates na, a, s
+	ga = PUBKEY(a)
+]
+
+Alice -> Dave: na
+
+principal Dave[
+	knows private skb, ske
+	generates d
+	gd = PUBKEY(d)
+	hn = HASH(na)
+	he = SIGN(ske, hn)
+	sd = SIGN(skb, CONCAT(gd, hn))
+]
+
+Dave -> Alice: gd, hn, he, sd
+
+principal Alice[
+	_ = SIGNVERIF(pke, hn, he)?
+	_ = SIGNVERIF(pkb, CONCAT(gd, hn), sd)?
+	k = DH_KEX(gd, a)
+	ct = ENC(k, s)
+]
+
+Alice -> Dave: ga, ct
+
+queries[
+	confidentiality? s
+]

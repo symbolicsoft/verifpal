@@ -1,0 +1,67 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0 at one session and at two.
+//
+// solver_oracle_input_signed_field.vp with Carol's input to Bob guarded: Bob
+// signs only Carol's tuple, so no signature carries the attacker's key.
+attacker[active]
+
+principal Bob[
+	knows private skb
+	pkb = PUBKEY(skb)
+]
+
+Bob -> Alice: [pkb]
+
+principal Erin[
+	knows private ske
+	pke = PUBKEY(ske)
+]
+
+Erin -> Alice: [pke]
+
+principal Carol[
+	generates c, nc
+	gc = PUBKEY(c)
+	y = CONCAT(gc, nc)
+]
+
+Carol -> Bob: [y]
+
+principal Bob[
+	sb = SIGN(skb, y)
+]
+
+Bob -> Carol: sb
+
+principal Alice[
+	generates na, a, s
+	ga = PUBKEY(a)
+]
+
+Alice -> Dave: na
+
+principal Dave[
+	knows private skb, ske
+	generates d
+	gd = PUBKEY(d)
+	hn = HASH(na)
+	he = SIGN(ske, hn)
+	sd = SIGN(skb, CONCAT(gd, hn))
+]
+
+Dave -> Alice: gd, hn, he, sd
+
+principal Alice[
+	_ = SIGNVERIF(pke, hn, he)?
+	_ = SIGNVERIF(pkb, CONCAT(gd, hn), sd)?
+	k = DH_KEX(gd, a)
+	ct = ENC(k, s)
+]
+
+Alice -> Dave: ga, ct
+
+queries[
+	confidentiality? s
+]

@@ -1,0 +1,63 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1 at one session and at two.
+//
+// Bob peels two layers off what Carol sends: the outer one under the
+// unauthenticated Diffie-Hellman key kbob, the inner one under the long-term
+// kb, and sends what is left. Alice sends s to Dave as ENC(kb, s). The
+// attacker gives Bob PUBKEY(nil) for gc, so it can compute kbob itself, and
+// wraps Alice's ciphertext in ENC(kbob, ca); Bob decrypts both layers and
+// sends s.
+//
+// The oracle is DEC(kb, DEC(kbob, x)). Wire terms were inverted through a
+// rewrite only when its ciphertext was a variable or a constructor the
+// rewrite opens, and otherwise only through a projection of a variable, so a
+// rewrite over another rewrite of the attacker's input was never inverted.
+// It is now inverted like a projection.
+//
+// solver_onion_oracle_guarded.vp guards gc and holds.
+attacker[active]
+
+principal Bob[
+	knows private kb
+	generates b
+	gb = PUBKEY(b)
+]
+
+Bob -> Carol: gb
+
+principal Carol[
+	knows private kb
+	generates c, mc
+	gc = PUBKEY(c)
+	kc = DH_KEX(gb, c)
+	x = ENC(kc, ENC(kb, mc))
+]
+
+Carol -> Bob: gc, x
+
+principal Alice[
+	knows private kb
+	generates s
+	ca = ENC(kb, s)
+]
+
+Alice -> Dave: [ca]
+
+principal Dave[
+	knows private kb
+	sd = DEC(kb, ca)
+]
+
+principal Bob[
+	kbob = DH_KEX(gc, b)
+	m1 = DEC(kbob, x)
+	m2 = DEC(kb, m1)
+]
+
+Bob -> Carol: m2
+
+queries[
+	confidentiality? s
+]

@@ -1,0 +1,53 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a1 at one session and at two.
+//
+// solver_oracle_input_held_tuple.vp with Bob's ciphertext and key nonce nested
+// one tuple deeper, CONCAT(x, CONCAT(nonce, ciphertext)). The attacker hands
+// Bob CONCAT(nil, CONCAT(na, ca)). Completing the input from held terms has to
+// build two tuples around Frank's held ciphertext, so the completion recurses
+// through every constructor rather than stopping one level down.
+attacker[active]
+
+principal Frank[
+	knows private kb
+	generates ch, na
+	ca = ENC(HASH(kb, na), ch)
+]
+
+Frank -> Dave: na, [ca]
+
+principal Dave[
+	knows private kb, skb
+	sd = SIGN(skb, DEC(HASH(kb, na), ca))
+]
+
+Dave -> Frank: sd
+
+principal Carol[
+	knows private kb
+	generates mc, nc, xc
+	tc = CONCAT(xc, CONCAT(nc, ENC(HASH(kb, nc), mc)))
+]
+
+Carol -> Bob: tc
+
+principal Bob[
+	knows private kb, skb
+	yx, yp = SPLIT(tc)
+	yn, yc = SPLIT(yp)
+	e = SIGN(skb, DEC(HASH(kb, yn), yc))
+]
+
+Bob -> Carol: e
+
+principal Frank[
+	knows private skb
+	pkb = PUBKEY(skb)
+	_ = SIGNVERIF(pkb, ch, sd)?
+]
+
+queries[
+	authentication? Dave -> Frank: sd
+]

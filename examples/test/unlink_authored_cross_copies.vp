@@ -1,0 +1,39 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: u1 at one session and at two.
+//
+// Alice's a and Bob's b share s1 and s2, and each returns one of them
+// encrypted to the token it received from the other. Replacing each one's
+// copy of the other's token with the attacker's key turns both into oracles,
+// and the attacker rebuilds a and b, both on the wire, from s1 and s2.
+//
+// Each claimed run held an authored copy of one queried value, and the judge
+// paired every run's own copy, so the creators' genuine pair was never
+// examined. A run's authored copy now gives way to the creator's value, and
+// the search merges the two oracles that each supply one argument.
+// unlink_authored_cross_copies_guarded.vp is the counterweight.
+attacker[active]
+principal Alice[
+	knows private s1, s2
+	generates n1
+	a = HASH(s1, s2, n1)
+]
+Alice -> Bob: n1, a
+principal Bob[
+	knows private s1, s2
+	generates n2
+	b = HASH(s1, s2, n2)
+	ob = PKE_ENC(a, s1)
+]
+Bob -> Alice: n2, b, ob
+principal Alice[
+	oa = PKE_ENC(b, s2)
+]
+Alice -> Bob: oa
+principal Bob[
+	_ = HASH(oa)
+]
+queries[
+	unlinkability? a, b
+]

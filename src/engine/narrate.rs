@@ -28,6 +28,7 @@ pub(crate) struct Narrator<'a, 'b> {
 	gated: Vec<(RunIdx, SlotIdx)>,
 	pub(crate) steps: Vec<TraceStep>,
 	explained: crate::term::hashing::TermSet,
+	forged: crate::term::hashing::TermSet,
 	pending: Vec<Value>,
 }
 
@@ -139,6 +140,7 @@ impl<'a, 'b> Narrator<'a, 'b> {
 			gated: Vec::new(),
 			steps: Vec::new(),
 			explained: crate::term::hashing::TermSet::default(),
+			forged: crate::term::hashing::TermSet::default(),
 			pending: Vec::new(),
 		}
 	}
@@ -297,25 +299,37 @@ impl<'a, 'b> Narrator<'a, 'b> {
 
 	pub(crate) fn explain(&mut self, v: &Value, at: usize) {
 		let outer = std::mem::replace(&mut self.cutoff, at);
-		self.visit(v);
+		self.visit(v, false);
 		self.cutoff = outer;
 	}
 
-	fn visit(&mut self, v: &Value) {
-		if self.pending.iter().any(|p| p.equivalent(v, true)) {
-			self.build(v);
-			return;
+	fn visit(&mut self, v: &Value, opened: bool) {
+		match self
+			.pending
+			.iter()
+			.filter(|p| p.equivalent(v, true))
+			.count()
+		{
+			0 => {}
+			1 => {
+				self.pending.push(v.clone());
+				self.build(v);
+				self.pending.pop();
+				return;
+			}
+			_ => return,
 		}
-		if self.explained.insert(v.clone()) {
+		let reopened = opened && self.forged.contains(v);
+		if self.explained.insert(v.clone()) || reopened {
 			self.pending.push(v.clone());
-			self.narrate(v);
+			self.narrate(v, opened);
 			self.pending.pop();
 		}
 	}
 
 	fn proving(&self, knowledge: &Knowledge, len: usize, v: &Value) -> Option<Knowledge> {
 		let nested = self.within.is_some();
-		knowledge.proving(v, &self.cx.km.capabilities, |at, known| {
+		knowledge.proving(v, |at, known| {
 			at < len
 				&& (nested
 					|| !matches!(knowledge.origin(at), Origin::Derived(_))
@@ -328,45 +342,52 @@ impl<'a, 'b> Narrator<'a, 'b> {
 			&& let Some(built) = self.oriented(p)
 		{
 			for argument in &built.arguments {
-				self.visit(argument);
+				self.visit(argument, false);
 			}
 			self.constructs(v);
 			return;
 		}
 		let (knowledge, len) = self.view();
+		let capabilities = knowledge.capabilities().clone();
 		let keep: Vec<bool> = (0..knowledge.len()).map(|k| k < len).collect();
 		let restricted = knowledge.state.retaining(&keep).into_owned();
 		if let Value::Primitive(p) = v
 			&& let Some(built) =
-				crate::theory::can_reconstruct_primitive(p, &self.cx.km.capabilities, &restricted)
+				crate::theory::can_reconstruct_primitive(p, &capabilities, &restricted)
 		{
-			for ingredient in built.recipe() {
-				self.visit(ingredient);
+			for ingredient in built.supplied() {
+				self.visit(ingredient, false);
+			}
+			for ingredient in built.held() {
+				self.visit(ingredient, true);
 			}
 			self.derives(&built, v);
 			return;
 		}
-		let mut inputs = crate::theory::KnowledgeInputs::new(&self.cx.km.capabilities, &restricted);
+		let mut inputs = crate::theory::KnowledgeInputs::new(&capabilities, &restricted);
 		for idx in inputs.of_value(v).unwrap_or_default() {
 			let ingredient = restricted.known[idx.get()].clone();
-			self.visit(&ingredient);
+			self.visit(&ingredient, false);
 		}
 		if matches!(v, Value::Primitive(_)) {
 			self.constructs(v);
 		}
 	}
 
-	fn narrate(&mut self, v: &Value) {
+	fn narrate(&mut self, v: &Value, opened: bool) {
+		if !opened && self.view().0.proven(v) {
+			self.forged.insert(v.clone());
+		}
 		let (knowledge, len) = self.view();
 		let Some(i) = knowledge.knows(v).filter(|&i| i < len) else {
 			self.build(v);
 			return;
 		};
 		if knowledge.proven(v)
-			&& let Some(world) = self.proving(knowledge, len, v)
+			&& opened && let Some(world) = self.proving(knowledge, len, v)
 		{
 			let outer = self.within.replace(world);
-			self.narrate(v);
+			self.narrate(v, opened);
 			self.within = outer;
 			return;
 		}
@@ -398,9 +419,11 @@ impl<'a, 'b> Narrator<'a, 'b> {
 				));
 			}
 			Origin::Derived(record) => {
-				for ingredient in record.ingredients() {
-					let ingredient = ingredient.clone();
-					self.visit(&ingredient);
+				for ingredient in record.held() {
+					self.visit(ingredient, true);
+				}
+				for ingredient in record.supplied() {
+					self.visit(ingredient, false);
 				}
 				self.derives(&record, v);
 			}
@@ -534,10 +557,15 @@ impl<'a, 'b> Narrator<'a, 'b> {
 				delivery.recipient == run && delivery.slots.iter().any(|&(s, _)| s == slot)
 			})
 			.map(|delivery| delivery.sender);
-		let copy_of_sender = |other: RunIdx| {
+		let copy_of_sender = |other: RunIdx, to: RunIdx| {
 			sender.is_some_and(|sender| {
 				other != sender
-					&& km.interchangeable_for(program.runs[other].id, program.runs[sender].id, slot)
+					&& km.interchangeable_for(
+						program.runs[other].id,
+						program.runs[sender].id,
+						slot,
+						Some(program.runs[to].id),
+					)
 			})
 		};
 		program
@@ -547,7 +575,7 @@ impl<'a, 'b> Narrator<'a, 'b> {
 			})
 			.find_map(|(_, delivery, s, _)| {
 				if s == slot {
-					copy_of_sender(delivery.sender).then_some("run")
+					copy_of_sender(delivery.sender, delivery.recipient).then_some("run")
 				} else if within(&km.session_siblings, s) {
 					Some("session")
 				} else if within(&km.copy_siblings, s) {
@@ -886,14 +914,40 @@ impl<'a, 'b> Narrator<'a, 'b> {
 				used,
 			} => {
 				self.gate(*run, *used);
-				format!(
-					"{} ({}), sent by Attacker and not by {}, is successfully used in {} within {}'s state.",
-					km.slots[*slot].constant,
-					self.shown(*slot, value),
-					q.message.sender_name,
-					self.declared(*used),
-					self.run_name(*run)
-				)
+				let program = self.cx.program;
+				let rebound = program
+					.sends(&self.ex.sent)
+					.find(|&(_, delivery, s, v)| {
+						let from = program.runs[delivery.sender].id;
+						v.equivalent(value, true)
+							&& km.same_actor(from, q.message.sender)
+							&& !km.interchangeable_for(
+								from,
+								q.message.sender,
+								s,
+								Some(program.runs[delivery.recipient].id),
+							)
+					})
+					.map(|(_, delivery, _, _)| delivery.sender);
+				match rebound {
+					Some(other) => format!(
+						"{} ({}), which {} sent only in {}, under another scenario binding, is successfully used in {} within {}'s state.",
+						km.slots[*slot].constant,
+						self.shown(*slot, value),
+						q.message.sender_name,
+						self.run_name(other),
+						self.declared(*used),
+						self.run_name(*run)
+					),
+					None => format!(
+						"{} ({}), sent by Attacker and not by {}, is successfully used in {} within {}'s state.",
+						km.slots[*slot].constant,
+						self.shown(*slot, value),
+						q.message.sender_name,
+						self.declared(*used),
+						self.run_name(*run)
+					),
+				}
 			}
 			Violation::Replayed {
 				run,

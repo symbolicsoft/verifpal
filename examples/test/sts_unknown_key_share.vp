@@ -1,0 +1,72 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a1 at one session and at two.
+//
+// Station-to-station with plain signatures, the shape of Blake-Wilson and
+// Menezes' unknown-key-share attack. Alice's peer is the scenario axis: Bob,
+// or Mallory, whose key leaks. In her run with Mallory, Alice checks Bob's
+// signed DH shares under Mallory's key, which the attacker re-signs, and
+// signs CONCAT(gx, gy); her signature names no peer, so Bob accepts it as
+// Alice's message to him, while Alice believes she spoke to Mallory.
+//
+// The run with Mallory signed only what passed a check under Mallory's key,
+// so its emission cannot excuse Bob's acceptance. It once did, because the
+// signed value names no bound value. sts_unknown_key_share_named.vp is the
+// counterweight.
+attacker[active]
+
+principal Alice[
+	knows private a
+	knows public gpeer
+	ga = PUBKEY(a)
+	generates x
+	gx = PUBKEY(x)
+]
+
+principal Bob[
+	knows private b
+	gb = PUBKEY(b)
+	generates y
+	gy = PUBKEY(y)
+]
+
+principal Mallory[
+	knows private mk
+	gm = PUBKEY(mk)
+	leaks mk
+]
+
+Alice -> Bob: [ga]
+Bob -> Alice: [gb]
+Mallory -> Alice: [gm]
+
+Alice -> Bob: gx
+
+principal Bob[
+	sb = SIGN(b, CONCAT(gy, gx))
+]
+
+Bob -> Alice: gy, sb
+
+principal Alice[
+	_ = SIGNVERIF(gpeer, CONCAT(gy, gx), sb)?
+	sa = SIGN(a, CONCAT(gx, gy))
+	ka = DH_KEX(gy, x)
+]
+
+Alice -> Bob: sa
+
+principal Bob[
+	_ = SIGNVERIF(ga, CONCAT(gx, gy), sa)?
+	kb = DH_KEX(gx, y)
+]
+
+scenarios[
+	Alice[gpeer = gb]
+	Alice[gpeer = gm]
+]
+
+queries[
+	authentication? Alice -> Bob: sa
+]

@@ -1,0 +1,24 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1 at one session and at two.
+//
+// Alice keeps the result of an ASSERT and uses it as a key. An ASSERT stores
+// the assertion term itself, and every input of this one is public, so the
+// attacker builds ASSERT(x, x) as Alice did and opens `e`. The engine once
+// refused to let the attacker build any ASSERT, while Alice could hold one.
+// core_assert_value_private.vp is the counterweight.
+attacker[passive]
+principal Alice[
+	knows public x
+	generates sec
+	h = ASSERT(x, x)
+	e = ENC(h, sec)
+]
+Alice -> Bob: e
+principal Bob[
+	_ = HASH(e)
+]
+queries[
+	confidentiality? sec
+]

@@ -44,27 +44,35 @@ impl Union {
 
 impl<'a, 'b> Search<'a, 'b> {
 	pub(super) fn novel_terms(&self, ex: &Execution) -> Vec<Value> {
-		self.novel_in(&ex.knowledge, &self.union.knowledge.state)
+		self.novel_in(&ex.knowledge, &self.union.knowledge)
 	}
 
-	pub(super) fn absorb_earlier(&mut self, ex: &Execution) {
+	pub(super) fn absorb_earlier(&mut self, ex: &Execution) -> bool {
+		let mut taught = false;
 		for phase in 0..self.union.earlier.len() {
 			let knowledge = &ex
 				.at(self.union.earlier[phase].state.current_phase)
 				.knowledge;
-			let novel = self.novel_in(knowledge, &self.union.earlier[phase].state);
+			let novel = self.novel_in(knowledge, &self.union.earlier[phase]);
 			let union = &mut self.union.earlier[phase];
+			for (_, pre, own) in knowledge.protocol.iter() {
+				if *own {
+					union.note_annotated(pre);
+				}
+			}
 			for v in &novel {
-				union.learn(v, Origin::Initial);
+				taught |= union.learn(v, Origin::Initial);
 			}
 			for pair in knowledge.state.reused.iter() {
-				union.note_reused(pair);
+				taught |= union.note_reused(pair);
 			}
 		}
+		taught
 	}
 
-	fn novel_in(&self, knowledge: &Knowledge, union: &AttackerState) -> Vec<Value> {
-		let capabilities = &self.cx.km.capabilities;
+	fn novel_in(&self, knowledge: &Knowledge, union: &Knowledge) -> Vec<Value> {
+		let capabilities = union.capabilities();
+		let union = &union.state;
 		let _memo = crate::theory::DeductionMemo::scoped(capabilities, union);
 		let depth = self.ctx.term_bound(self.cx.km).depth();
 		let mut own: IdMap<u64, Vec<&Value>> = IdMap::default();
@@ -147,6 +155,9 @@ impl<'a, 'b> Search<'a, 'b> {
 			}
 			bucket.push((value.clone(), pre.clone()));
 			self.union.knowledge.note_protocol(value, pre, *own);
+			if *own {
+				self.union.knowledge.note_annotated(pre);
+			}
 		}
 		for term in built.iter() {
 			self.union.knowledge.note_built(term);
@@ -159,13 +170,12 @@ impl<'a, 'b> Search<'a, 'b> {
 	pub(super) fn close_union(&mut self) {
 		self.union.closed = self.union.knowledge.clone();
 		self.union.closed_at = (self.union.knowledge.len(), self.nodes.next_index());
-		self.union.closed.close(&self.cx.km.capabilities);
+		self.union.closed.close();
 	}
 
 	pub(super) fn derivable_in(&self, node: NodeIdx, v: &Value, phase: i32) -> bool {
 		let derive = || {
-			let capabilities = &self.cx.km.capabilities;
-			let (state, memo) = self.nodes[node].at(phase);
+			let (state, capabilities, memo) = self.nodes[node].at(phase);
 			memo.borrow_mut()
 				.within(capabilities, state, || obtainable(v, capabilities, state))
 		};

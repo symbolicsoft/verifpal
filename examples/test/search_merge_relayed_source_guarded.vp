@@ -1,0 +1,44 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1 at one session and at two.
+//
+// search_merge_relayed_source.vp with Relay's leg to Bob guarded, so Bob's
+// xb is whatever Relay holds and only an install at Relay reaches him.
+// Removing that guard must not lose the attack: here the merge pairs Relay's
+// c0 with Dave's c1, and the unguarded model must find the same execution.
+attacker[active]
+
+principal Alice[
+	knows private k
+	knows public c0, c1
+	generates xb, xd, m
+	e = ENC(HASH(HASH(k, c0), HASH(k, c1)), m)
+	leaks e
+]
+
+Alice -> Relay: xb
+
+principal Relay[
+	generates nr
+]
+
+Relay -> Bob: [xb]
+Alice -> Dave: xd
+
+principal Bob[
+	knows private k
+	sb = HASH(k, xb)
+]
+
+principal Dave[
+	knows private k
+	sd = HASH(k, xd)
+]
+
+Bob -> Alice: sb
+Dave -> Alice: sd
+
+queries[
+	confidentiality? m
+]

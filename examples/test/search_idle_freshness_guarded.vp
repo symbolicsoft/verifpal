@@ -1,9 +1,15 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
 //
-// Expected: f0 at one session and at two. Counterweight to
-// search_idle_freshness.vp: Bob's reply is guarded, so with Bob silent Carol never
-// receives an h at all, and with Bob running his h#2 is not a replay.
+// Expected: f0 at one session, f1 at two. search_idle_freshness.vp with Bob's
+// reply guarded: with Bob silent, Carol never receives an h at all. With Bob
+// running, the attacker replays Alice#2's s#2 and t#2 to Carol instead: her u
+// is then u#2, Bob hashes it and sends back h#2, and Carol and Carol#2 accept
+// one h. Bob computed it honestly, but from a replayed input, and a value
+// computed from a replayed one is replayed whichever run computes it
+// (freshness_replay_through_relay.vp). This model pinned f0 while replay
+// status stopped at the run that computed a value.
+// search_idle_freshness_bound.vp is the counterweight.
 attacker[active]
 
 principal Alice[

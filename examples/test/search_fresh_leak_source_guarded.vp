@@ -1,0 +1,65 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a0 at one session and at two.
+//
+// search_fresh_leak_source.vp with Carol's cc guarded: Bob decrypts and
+// leaks only Carol's own nc, and v reaches the attacker only after Dave's
+// check.
+attacker[active]
+
+principal Alice[
+	knows private kad, kb
+	generates v
+	cv = ENC(kad, v)
+]
+
+Alice -> Dave: [cv]
+
+principal Dave[
+	knows private kad
+	dv = DEC(kad, cv)
+	generates nd
+]
+
+Dave -> Alice: [nd]
+
+principal Alice[
+	generates msg
+	c = ENC(kb, v)
+	tg = MAC(v, HASH(msg, nd))
+]
+
+Alice -> Carol: c
+
+principal Carol[
+	knows private kb
+	generates nc
+	cc = ENC(kb, nc)
+]
+
+Carol -> Bob: [cc]
+
+principal Bob[
+	knows private kb
+	d = DEC(kb, cc)
+	leaks d
+]
+
+Alice -> Dave: msg, tg
+
+principal Dave[
+	_ = ASSERT(MAC(dv, HASH(msg, nd)), tg)?
+	generates ack
+]
+
+Dave -> Alice: [ack]
+
+principal Alice[
+	_ = HASH(ack)
+	leaks v
+]
+
+queries[
+	authentication? Alice -> Dave: msg
+]

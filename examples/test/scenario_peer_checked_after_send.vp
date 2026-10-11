@@ -1,0 +1,58 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a0 at one session, a1 at two.
+//
+// scenario_peer_checked_later_send.vp with Alice's check of her peer moved
+// after her message to Bob. Alice@2 now sends x@2 to Bob@2 before anything
+// her scenario binds has been checked, so that emission is the one Bob's
+// acceptance of a replayed x@2 matches, and Bob@2 halts at the tag without
+// accepting it. At two sessions Bob and Bob#2 both accept x#2, which Alice
+// sent once.
+attacker[active]
+principal Mallory[
+	knows private skm
+	gm = PUBKEY(skm)
+	leaks skm
+]
+principal Bob[
+	knows private skb
+	knows private k
+	gb = PUBKEY(skb)
+]
+Bob -> Alice: [gb]
+Mallory -> Alice: [gm]
+principal Alice[
+	knows public gpeer
+	knows private k
+	knows private ska
+	ga = PUBKEY(ska)
+	generates x
+	sx = SIGN(ska, x)
+	tag = MAC(k, gpeer)
+]
+Alice -> Bob: [ga]
+Alice -> Carol: x
+principal Carol[
+	_ = HASH(x)
+]
+principal Bob[
+	generates nb
+	sb = SIGN(skb, nb)
+]
+Alice -> Bob: [tag], x, sx
+principal Bob[
+	_ = ASSERT(tag, MAC(k, gb))?
+	_ = SIGNVERIF(ga, x, sx)?
+]
+Bob -> Alice: nb, sb
+principal Alice[
+	_ = SIGNVERIF(gpeer, nb, sb)?
+]
+scenarios[
+	Alice[gpeer = gb]
+	Alice[gpeer = gm]
+]
+queries[
+	authentication? Alice -> Bob: x
+]

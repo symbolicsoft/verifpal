@@ -1,0 +1,39 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: f0f0 at one session, f1f1 at two.
+//
+// freshness_replay_through_relay.vp with Bob also hashing what he hashed: when
+// the replayed na#2 reaches Bob and Bob#2, both u and na_b are accepted twice.
+// u is computed from a replayed input, so it is replayed too, at the same run
+// in the same execution as na_b.
+attacker[active]
+
+principal Alice[
+	knows private ska
+	knows public tag
+	gka = PUBKEY(ska)
+	generates na
+	bundle = CONCAT(na, tag)
+	s1 = SIGN(ska, bundle)
+]
+
+Alice -> Carol: [gka], bundle, s1
+
+principal Carol[
+	knows public tag
+	_ = SIGNVERIF(gka, bundle, s1)?
+	na_b, tag_b = SPLIT(bundle)?
+]
+
+Carol -> Bob: [na_b]
+
+principal Bob[
+	u = HASH(na_b)
+	w = HASH(u)
+]
+
+queries[
+	freshness? na_b
+	freshness? u
+]

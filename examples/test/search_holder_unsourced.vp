@@ -1,0 +1,55 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1 at one session and at two.
+//
+// Alice encrypts her fresh s1 to the public key she receives, unguarded, and
+// under kb on the wire. Bob decrypts whatever arrives as cd under kb. In one
+// execution the attacker replaces gc with its own key, opens e, and replays
+// c1 as cd, so Bob's d is s1.
+//
+// The execution that replays c1 to Bob teaches the union nothing, and the
+// union already knows s1 from the other execution, so the holder was never
+// kept and never merged with it. A node is now kept when a run holds a
+// queried value no node holds yet and its own execution does not obtain, and
+// a query-source merge takes a target the union knows when the holder does
+// not derive it. search_holder_unsourced_guarded.vp and
+// search_holder_unsourced_bobguarded.vp are the counterweights.
+attacker[active]
+
+principal Carol[
+	knows private c
+	gc = PUBKEY(c)
+]
+
+Carol -> Alice: gc
+
+principal Alice[
+	knows private kb
+	generates s1
+	c1 = ENC(kb, s1)
+	e = PKE_ENC(gc, s1)
+]
+
+Alice -> Carol: c1, e
+
+principal Carol[
+	x = PKE_DEC(c, e)
+]
+
+principal Dave[
+	knows private kb
+	generates sd
+	cd = ENC(kb, sd)
+]
+
+Dave -> Bob: cd
+
+principal Bob[
+	knows private kb
+	d = DEC(kb, cd)
+]
+
+queries[
+	confidentiality? d
+]

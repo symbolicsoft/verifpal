@@ -1,7 +1,7 @@
 /* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
  * SPDX-License-Identifier: GPL-3.0-only */
 
-use super::exec::{Context, Execution, Held, RunState};
+use super::exec::{Context, Execution, Held, RunState, later_outputs};
 use super::program::{DeliveryIdx, Event, RunIdx, StepIdx};
 use super::unlink::{Link, Linker};
 use crate::protocol::ProtocolTrace;
@@ -144,16 +144,26 @@ impl<'a, 'b> Judge<'a, 'b> {
 			.or_else(|| self.state(self.creator_run(slot)?)?.held(slot))
 	}
 
+	fn genuine(&self, r: RunIdx, slot: SlotIdx) -> Option<(RunIdx, &Held)> {
+		if let Some(held) = self.state(r)?.held(slot).filter(|held| !held.authored) {
+			return Some((r, held));
+		}
+		let creator = self.creator_run(slot)?;
+		Some((creator, self.state(creator)?.held(slot)?))
+	}
+
 	fn confidentiality(&self, q: &Query) -> Option<Violation> {
 		let c = q.subject().ok()?;
 		let slot = self.km().index_of(c)?;
 		let attacker = &self.ex.knowledge.state;
 		self.claimed_runs().find_map(|r| {
 			let h = self.state(r)?.held(slot)?;
-			obtainable(&h.value, &self.cx.km.capabilities, attacker).then(|| Violation::Disclosed {
-				run: r,
-				slot,
-				value: h.value.clone(),
+			obtainable(&h.value, self.ex.knowledge.capabilities(), attacker).then(|| {
+				Violation::Disclosed {
+					run: r,
+					slot,
+					value: h.value.clone(),
+				}
 			})
 		})
 	}
@@ -181,17 +191,26 @@ impl<'a, 'b> Judge<'a, 'b> {
 			mentioning = sites(&|v| mentions_across_principals(v, km, program.id, target));
 		}
 		let eventually = &self.whole.runs[run];
+		let failed: Vec<SlotIdx> = eventually
+			.halted
+			.into_iter()
+			.flat_map(|halt| {
+				let at = program.step_of_slot[&halt];
+				std::iter::once(halt).chain(later_outputs(self.cx, run, at, halt))
+			})
+			.collect();
 		let mut first = None;
 		for (i, slot) in mentioning {
+			if failed.contains(&slot) {
+				continue;
+			}
 			if !now.reached(i) {
 				if eventually.reached(i) {
 					continue;
 				}
 				return None;
 			}
-			if now.halted != Some(slot) {
-				first.get_or_insert(slot);
-			}
+			first.get_or_insert(slot);
 		}
 		first
 	}
@@ -229,6 +248,7 @@ impl<'a, 'b> Judge<'a, 'b> {
 		}
 		let acceptances = self
 			.accepting(q.message.recipient, &siblings, &h.value)
+			.filter(|&(r, s)| self.accepts_from_sender(r, q.message.recipient, s))
 			.count();
 		(acceptances > emissions).then(|| Violation::Replayed {
 			run: b,
@@ -255,8 +275,12 @@ impl<'a, 'b> Judge<'a, 'b> {
 		}
 		sends
 			.filter(|&(d, from, s, _)| {
-				km.interchangeable_for(program.runs[from].id, q.message.sender, s)
-					&& self.reaches(d, s, q.message.recipient, &mut Vec::new())
+				km.interchangeable_for(
+					program.runs[from].id,
+					q.message.sender,
+					s,
+					Some(program.runs[program.deliveries[d].recipient].id),
+				) && self.reaches(d, s, q.message.recipient, &mut Vec::new())
 			})
 			.count()
 	}
@@ -292,7 +316,7 @@ impl<'a, 'b> Judge<'a, 'b> {
 		actor: PrincipalId,
 		siblings: &'s [SlotIdx],
 		value: &'s Value,
-	) -> impl Iterator<Item = RunIdx> + 's {
+	) -> impl Iterator<Item = (RunIdx, SlotIdx)> + 's {
 		let km = self.km();
 		self.ex
 			.runs
@@ -307,7 +331,19 @@ impl<'a, 'b> Judge<'a, 'b> {
 						.first_use(&self.ex.runs[r], r, km.slots[s].constant.id)
 						.is_some()
 			})
-			.map(|(r, _)| r)
+	}
+
+	fn accepts_from_sender(&self, r: RunIdx, recipient: PrincipalId, s: SlotIdx) -> bool {
+		let km = self.km();
+		let id = self.cx.program.runs[r].id;
+		let target = km.slots[s].constant.id;
+		km.same_binding(id, recipient)
+			|| !km.slots.iter().any(|t| {
+				t.creator == id
+					&& matches!(&t.initial_value, Value::Primitive(p) if p.instance_check)
+					&& km.binding_dependent(&t.constant)
+					&& mentions(km, &t.initial_value, target, id, &mut Vec::new())
+			})
 	}
 
 	fn freshness(&self, q: &Query) -> Option<Violation> {
@@ -327,6 +363,7 @@ impl<'a, 'b> Judge<'a, 'b> {
 				true if !self.replayed_into(state, r, slot) => return None,
 				true => Some(
 					self.accepting(self.cx.program.runs[r].id, &siblings, &h.value)
+						.map(|(other, _)| other)
 						.find(|&other| other != r)?,
 				),
 			};
@@ -344,23 +381,27 @@ impl<'a, 'b> Judge<'a, 'b> {
 	fn replayed_into(&self, state: &RunState, r: RunIdx, slot: SlotIdx) -> bool {
 		let km = self.km();
 		let program = &self.cx.program.runs[r];
-		if state.held(slot).is_some_and(|h| h.authored) {
+		let Some(held) = state.held(slot) else {
+			return false;
+		};
+		if held.authored {
 			return true;
 		}
 		if km.slots[slot].creator != program.id {
-			return false;
+			return held
+				.sender
+				.is_some_and(|sender| self.replayed_into(&self.ex.runs[sender], sender, slot));
 		}
 		let value = &km.slots[slot].initial_value;
 		program.steps.iter().any(|step| match step.event {
 			Event::Recv(d) => self.cx.program.deliveries[d].slots.iter().any(|&(t, _)| {
-				state.held(t).is_some_and(|h| h.authored)
-					&& mentions(
-						km,
-						value,
-						km.slots[t].constant.id,
-						program.id,
-						&mut Vec::new(),
-					)
+				mentions(
+					km,
+					value,
+					km.slots[t].constant.id,
+					program.id,
+					&mut Vec::new(),
+				) && self.replayed_into(state, r, t)
 			}),
 			_ => false,
 		})
@@ -398,17 +439,18 @@ impl<'a, 'b> Judge<'a, 'b> {
 		let km = self.km();
 		let linker = Linker::new(self.cx, self.ex);
 		for r in self.claimed_runs() {
-			let claimed: Vec<(&Constant, SlotIdx, &Held)> = q
+			let claimed: Vec<(&Constant, RunIdx, SlotIdx, &Held)> = q
 				.constants
 				.iter()
 				.filter_map(|c| {
 					let slot = km.index_of(c)?;
-					Some((c, slot, self.claimed(r, slot)?))
+					let (holder, held) = self.genuine(r, slot)?;
+					Some((c, holder, slot, held))
 				})
 				.collect();
-			for (i, &(a, sa, ha)) in claimed.iter().enumerate() {
-				for &(b, sb, hb) in &claimed[i + 1..] {
-					if let Some(link) = linker.link([(sa, ha), (sb, hb)]) {
+			for (i, &(a, ra, sa, ha)) in claimed.iter().enumerate() {
+				for &(b, rb, sb, hb) in &claimed[i + 1..] {
+					if let Some(link) = linker.link([(ra, sa, ha), (rb, sb, hb)]) {
 						return Some(Violation::Linked {
 							link,
 							resolved: vec![

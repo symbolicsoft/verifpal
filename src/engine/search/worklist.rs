@@ -314,14 +314,15 @@ impl<'a, 'b> Search<'a, 'b> {
 		let km = self.cx.km;
 		let honest = &self.honest;
 		let state = &ex.knowledge.state;
-		let _memo = crate::theory::DeductionMemo::scoped(&km.capabilities, state);
+		let _memo = crate::theory::DeductionMemo::scoped(ex.knowledge.capabilities(), state);
 		let obtains = |run: RunIdx, slot: SlotIdx, v: &Value| {
 			let program = &self.cx.program.runs[run];
 			let phase = program
 				.step_of_slot
 				.get(&slot)
 				.map_or(km.max_phase, |&step| program.steps[step].phase);
-			obtainable(v, &km.capabilities, &ex.at(phase).knowledge.state)
+			let at = &ex.at(phase).knowledge;
+			obtainable(v, at.capabilities(), &at.state)
 		};
 		let honest_value =
 			|run: RunIdx, slot: SlotIdx| honest.runs[run].held(slot).map(|h| &h.value);
@@ -484,9 +485,10 @@ impl<'a, 'b> Search<'a, 'b> {
 			return false;
 		}
 		crate::engine::judge(self.ctx, self.cx, &ex, &installs, &self.honest);
-		self.absorb_earlier(&ex);
+		let earlier = self.absorb_earlier(&ex);
 		let novel = self.novel_terms(&ex);
-		let kept = !novel.is_empty()
+		let kept = earlier
+			|| !novel.is_empty()
 			|| ex
 				.knowledge
 				.state
@@ -509,8 +511,9 @@ impl<'a, 'b> Search<'a, 'b> {
 		}
 		let node = Node::of(installs, &ex, &self.facts.queried);
 		let at = self.nodes.next_index();
-		let fresh = self.note_fresh(at, &node);
-		if !(kept || fresh || alternative) {
+		let fresh = self.note_fresh(at, &node, &ex);
+		let holder = !(kept || fresh || alternative) && self.holds_unsourced(&ex);
+		if !(kept || fresh || alternative || holder) {
 			if !self.retries.rerouting {
 				let sends: Vec<(Value, RunIdx, Bypassed)> = self
 					.rerouted_sends(at, &node)

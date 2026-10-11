@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
 //
-// Expected: a0a0 at one session, a1a0 at two.
+// Expected: a0a1 at one session, a1a1 at two.
 //
 // CCITT X.509 three-way authentication, timestamps and payloads elided:
 //   1. A -> B: A, {Na, B}SKa
@@ -17,6 +17,15 @@
 // nonce and a Mallory signature over it, and her receive of them is starved
 // because her scenario partner rejects her first message: the search repaired
 // halted proposers only. spore_x509_three_way_named.vp is the counterweight.
+//
+// s3 fails at both counts, and it is the flaw itself. Mallory presents Bob's
+// nonce nb to Alice's run with her under a Mallory signature, Alice signs it,
+// and Bob accepts that SIGN(a, nb) as Alice's message 3. The attacker makes
+// Alice's run with Bob halt on a bad s2, so the only Alice run that ever
+// signed nb is the one whose peer is Mallory. That run passed a check under
+// the key its scenario binds before it signed, so its signature is no
+// emission Bob's acceptance may be matched against, although its value names
+// no peer.
 attacker[active]
 
 principal Alice[

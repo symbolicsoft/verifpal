@@ -1,0 +1,45 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0 at one session, c1 at two.
+//
+// search_merge_relayed_source.vp with Dave's xd guarded: Dave only ever tags
+// his own nonce, so both tags have to come from Bob, and one run of Bob tags
+// one value. Installing c0 at Relay and c1 at Bob does not give both: Bob's
+// install replaces what Relay forwards. At two sessions Bob#2 tags the other
+// constant.
+attacker[active]
+
+principal Alice[
+	knows private k
+	knows public c0, c1
+	generates xb, xd, m
+	e = ENC(HASH(HASH(k, c0), HASH(k, c1)), m)
+	leaks e
+]
+
+Alice -> Relay: xb
+
+principal Relay[
+	generates nr
+]
+
+Relay -> Bob: xb
+Alice -> Dave: [xd]
+
+principal Bob[
+	knows private k
+	sb = HASH(k, xb)
+]
+
+principal Dave[
+	knows private k
+	sd = HASH(k, xd)
+]
+
+Bob -> Alice: sb
+Dave -> Alice: sd
+
+queries[
+	confidentiality? m
+]

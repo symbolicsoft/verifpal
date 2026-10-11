@@ -1,0 +1,49 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a0 at one session and at two.
+//
+// solver_oracle_input_held_completion.vp with nc guarded: Bob decrypts only
+// under HASH(kb, nc), which opens no ciphertext carrying ch, so he never
+// produces MAC(kmac, ch).
+attacker[active]
+
+principal Carol[
+	knows private kb
+	generates mc, nc
+	xc = ENC(HASH(kb, nc), mc)
+]
+
+Carol -> Bob: [nc], xc
+
+principal Alice[
+	knows private kb, kmac
+	generates na, ch
+	ca = ENC(HASH(kb, na), ch)
+]
+
+Alice -> Dave: na, [ca]
+
+principal Dave[
+	knows private kb, kmac
+	chd = DEC(HASH(kb, na), ca)
+	t2 = MAC(kmac, chd)
+]
+
+Dave -> Alice: t2
+
+principal Bob[
+	knows private kb, kmac
+	m = DEC(HASH(kb, nc), xc)
+	t = MAC(kmac, m)
+]
+
+Bob -> Carol: t
+
+principal Alice[
+	_ = ASSERT(MAC(kmac, ch), t2)?
+]
+
+queries[
+	authentication? Dave -> Alice: t2
+]

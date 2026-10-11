@@ -1,0 +1,60 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a0 at one session and at two.
+//
+// solver_oracle_chain_unguarded_link.vp with Bea's nonce guarded. Bea opens only
+// layers under HASH(kb2, nc2), so Bob's peeled copy of Frank's challenge stays
+// sealed, and Bea never signs ch.
+attacker[active]
+
+principal Frank[
+	knows private kb, kb2
+	generates ch, na, na2
+	ca = ENC(HASH(kb, na), ENC(HASH(kb2, na2), ch))
+]
+
+Frank -> Dave: na, na2, [ca]
+
+principal Dave[
+	knows private kb, kb2, skb
+	db = DEC(HASH(kb2, na2), DEC(HASH(kb, na), ca))
+	sd = SIGN(skb, db)
+]
+
+Dave -> Frank: sd
+
+principal Carol[
+	knows private kb, kb2
+	generates mc, nc, nc2
+	xc = ENC(HASH(kb, nc), ENC(HASH(kb2, nc2), mc))
+]
+
+Carol -> Bob: nc, xc
+
+principal Bob[
+	knows private kb
+	m1 = DEC(HASH(kb, nc), xc)
+]
+
+Bob -> Bea: m1
+
+Carol -> Bea: [nc2]
+
+principal Bea[
+	knows private kb2, skb
+	m = DEC(HASH(kb2, nc2), m1)
+	e = SIGN(skb, m)
+]
+
+Bea -> Carol: e
+
+principal Frank[
+	knows private skb
+	pkb = PUBKEY(skb)
+	_ = SIGNVERIF(pkb, ch, sd)?
+]
+
+queries[
+	authentication? Dave -> Frank: sd
+]

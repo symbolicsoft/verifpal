@@ -15,10 +15,8 @@
 // rests on. Two things were wrong: the deduction rule consulted a narrower
 // capability lookup than the validator did, so the forging step was never
 // recorded as one; and absorption kept whichever explanation arrived first.
-//
-// It also used to print "Attacker constructs ASSERT(...)", because ASSERT was
-// the one core primitive reconstruction did not refuse. ASSERT denotes a check,
-// not a value: there is nothing there for an attacker to hold.
+// Bob's ASSERT is his check over the installed values, not a value the trace
+// has to explain.
 attacker[active]
 
 principal Alice[

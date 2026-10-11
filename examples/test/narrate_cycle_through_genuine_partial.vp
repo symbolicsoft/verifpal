@@ -1,0 +1,38 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1c1 at one session and at two.
+//
+// x is readable two ways: e2 under the leaked k2, and e1 under h = HASH(v),
+// where v is a partial the attacker can forge. The closure records the second
+// route for x. v is also opened for s1, which needs a genuine copy, and the
+// genuine copy comes out of e3 under x. Narrating x therefore visits v, whose
+// genuine route visits x again while x is still being explained. x is a
+// constant, so the construction the narrator falls back to for a value still
+// being explained looked x up among the attacker's knowledge, found x, and
+// visited it again: the narrator recursed until the stack overflowed and the
+// process aborted. A value already being built is now not built again, and a
+// proven partial is narrated through its genuine route only where a step
+// opens it: as the argument of h, its forgery is enough, so x's trace forges
+// v instead of opening e3 with x.
+attacker[passive]
+principal Alice[
+	knows private k2
+	generates k0, n, m, x
+	s1, s2 = THRESHOLD_SPLIT[2](k0)
+	c = PUBKEY(n)
+	v = THRESHOLD_SIGN[forgeable](s1, n, c, m)
+	h = HASH(v)
+	e1 = ENC(h, x)
+	e2 = ENC(k2, x)
+	e3 = ENC(x, v)
+	leaks k2
+]
+Alice -> Bob: n, c, m, e1, e2, e3
+principal Bob[
+	knows private bobonly
+]
+queries[
+	confidentiality? x
+	confidentiality? s1
+]

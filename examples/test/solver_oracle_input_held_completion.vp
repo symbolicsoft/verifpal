@@ -1,0 +1,62 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a1 at one session and at two.
+//
+// Bob decrypts whatever arrives under HASH(kb, nc), both unguarded, and
+// returns MAC(kmac, m) over the plaintext. Alice sends her challenge ch to
+// Dave as ENC(HASH(kb, na), ch) with na in clear, and accepts t2 once it is
+// MAC(kmac, ch). The attacker leaves Dave unstarted, hands Bob na and Alice's
+// ciphertext, and gives Alice Bob's MAC: no run of Dave emitted it.
+//
+// Alice's check names the MAC Bob must produce, and inverting Bob's emission
+// against it fixes his ciphertext as ENC(HASH(kb, nc), ch) with his own nonce
+// still open. Two things were missing: an emission was unified with the
+// wanted shape but never inverted through the decryption inside it, and an
+// input slot left open was always filled with nil, so Bob was asked to
+// decrypt ENC(HASH(kb, nil), ch), which nobody can build. When nil leaves the
+// input unconstructible, the input is now also completed from each held term
+// it matches, here Alice's ciphertext with na.
+//
+// solver_oracle_input_held_completion_guarded.vp guards nc and holds.
+attacker[active]
+
+principal Carol[
+	knows private kb
+	generates mc, nc
+	xc = ENC(HASH(kb, nc), mc)
+]
+
+Carol -> Bob: nc, xc
+
+principal Alice[
+	knows private kb, kmac
+	generates na, ch
+	ca = ENC(HASH(kb, na), ch)
+]
+
+Alice -> Dave: na, [ca]
+
+principal Dave[
+	knows private kb, kmac
+	chd = DEC(HASH(kb, na), ca)
+	t2 = MAC(kmac, chd)
+]
+
+Dave -> Alice: t2
+
+principal Bob[
+	knows private kb, kmac
+	m = DEC(HASH(kb, nc), xc)
+	t = MAC(kmac, m)
+]
+
+Bob -> Carol: t
+
+principal Alice[
+	_ = ASSERT(MAC(kmac, ch), t2)?
+]
+
+queries[
+	authentication? Dave -> Alice: t2
+]

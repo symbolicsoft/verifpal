@@ -4,6 +4,9 @@
 // Expected: a1 at one and two sessions. After the key leaks, the attacker
 // constructs a new ciphertext and its MAC together, with a five-field
 // plaintext so both the MAC check and every checked projection succeed.
+// Bob then hashes the fifth field, a later use of the ciphertext: without it
+// a failing split would be the last use, and a ciphertext that passes only the
+// MAC check would already be accepted (auth_accept_then_split_halt.vp).
 
 attacker[active]
 principal Alice[
@@ -20,6 +23,7 @@ principal Bob[
 	_ = ASSERT(tag, MAC(k, ciphertext))?
 	opened = DEC(k, ciphertext)
 	first, second, third, fourth, fifth = SPLIT(opened)?
+	_ = HASH(fifth)
 ]
 queries[
 	authentication? Alice -> Bob: ciphertext

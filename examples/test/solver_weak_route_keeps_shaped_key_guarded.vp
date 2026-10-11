@@ -1,0 +1,23 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0 at one session and at two.
+//
+// solver_weak_route_keeps_shaped_key.vp with hx guarded: ob stays under
+// HASH(x), which the attacker cannot invert, and the weak w reveals only t.
+attacker[active]
+principal Alice[
+	knows private t
+	generates x
+	hx = HASH(x)
+	w = PKE_ENC[weak](hx, t)
+]
+Alice -> Bob: [hx], w
+principal Bob[
+	knows private s
+	ob = PKE_ENC(hx, s)
+]
+Bob -> Alice: ob
+queries[
+	confidentiality? s
+]

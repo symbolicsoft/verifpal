@@ -3,6 +3,7 @@
 
 use super::attacker::AttackerState;
 use crate::primitive::{ReuseRule, reuse_rule};
+use crate::term::equivalence::equivalent_primitives;
 use crate::term::{Primitive, Value};
 
 fn fixed_alike(a: &Primitive, b: &Primitive, rule: &ReuseRule) -> bool {
@@ -29,14 +30,31 @@ pub(crate) fn reused_pair(a: &Value, b: &Value) -> bool {
 }
 
 pub(crate) fn reused(p: &Primitive, attacker: &AttackerState) -> Option<[Value; 2]> {
+	reused_where(p, attacker, |_| true)
+}
+
+pub(crate) fn forging_pair(p: &Primitive, attacker: &AttackerState) -> Option<[Value; 2]> {
+	reused_where(
+		p,
+		attacker,
+		|member| !matches!(member, Value::Primitive(q) if equivalent_primitives(q, p, true)),
+	)
+}
+
+fn reused_where(
+	p: &Primitive,
+	attacker: &AttackerState,
+	admit: impl Fn(&Value) -> bool,
+) -> Option<[Value; 2]> {
 	let rule = reuse_rule(p.id)?;
 	attacker
 		.reused
 		.iter()
 		.find(|pair| {
 			matches!(&pair[0], Value::Primitive(held) if fixed_alike(held, p, rule))
-				&& attacker.knows(&pair[0]).is_some()
-				&& attacker.knows(&pair[1]).is_some()
+				&& pair
+					.iter()
+					.all(|member| admit(member) && attacker.knows(member).is_some())
 		})
 		.cloned()
 }

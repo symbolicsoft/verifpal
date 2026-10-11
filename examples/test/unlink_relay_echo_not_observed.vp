@@ -1,0 +1,38 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: u0 at one session and at two.
+//
+// a = HASH(s, n1) and b = HASH(s, n2) share Alice's leaked s, but b never
+// leaves Alice, so it is never observed and there is nothing to link. The
+// attacker can build HASH(s, n2) itself and install it as Relay's a, which
+// Relay then forwards to Bob. That send was counted as a disclosure, so b
+// became observable through the attacker's own value, and the same protocol
+// without Relay held. A send or leak of a value its sender holds authored
+// discloses only what the attacker supplied. unlink_relay_echo_sent.vp is the
+// counterweight.
+attacker[active]
+
+principal Alice[
+	knows private s
+	generates n1, n2
+	a = HASH(s, n1)
+	b = HASH(s, n2)
+	leaks s
+]
+
+Alice -> Relay: n1, n2, a
+
+principal Relay[
+	generates nr
+]
+
+Relay -> Bob: n1, n2, a
+
+principal Bob[
+	_ = HASH(n1, n2, a)
+]
+
+queries[
+	unlinkability? a, b
+]

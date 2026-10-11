@@ -1,0 +1,41 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: f0 at one session and at two.
+//
+// The counterweight to freshness_replay_through_relay.vp: Alice signs Carol's
+// challenge nc with na, and Carol checks it, so a replayed flight from
+// session 2 fails at Carol and never reaches Bob.
+attacker[active]
+
+principal Carol[
+	generates nc
+]
+
+Carol -> Alice: nc
+
+principal Alice[
+	knows private ska
+	gka = PUBKEY(ska)
+	generates na
+	bundle = CONCAT(na, nc)
+	s1 = SIGN(ska, bundle)
+]
+
+Alice -> Carol: [gka], bundle, s1
+
+principal Carol[
+	_ = SIGNVERIF(gka, bundle, s1)?
+	na_b, nc_b = SPLIT(bundle)?
+	_ = ASSERT(nc_b, nc)?
+]
+
+Carol -> Bob: [na_b]
+
+principal Bob[
+	u = HASH(na_b)
+]
+
+queries[
+	freshness? na_b
+]

@@ -1,0 +1,35 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: u1u1u1 at one session and at two.
+//
+// unlink_cert_key_confirms.vp with every pair: the signature and its key
+// link (unlink_signature_and_its_key.vp), and so do the certificate and the
+// key it certifies, and the certificate and the signature.
+attacker[passive]
+principal Ca[
+	knows private ca
+	gca = PUBKEY(ca)
+]
+principal Alice[
+	knows private sk
+	knows public m1
+	pk = PUBKEY(sk)
+]
+Alice -> Ca: pk
+principal Ca[
+	cert = SIGN(ca, pk)
+]
+Ca -> Alice: gca, cert
+principal Alice[
+	sig = SIGN(sk, m1)
+]
+Alice -> Bob: cert, sig
+principal Bob[
+	_ = HASH(cert, sig)
+]
+queries[
+	unlinkability? sig, pk
+	unlinkability? cert, pk
+	unlinkability? sig, cert
+]

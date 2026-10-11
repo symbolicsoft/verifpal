@@ -1,0 +1,61 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a1 at one session and at two.
+//
+// solver_oracle_input_held_completion.vp with Bob leaking kb after he
+// decrypts. The attack is unchanged: Dave never starts, Bob gets na and
+// Alice's ciphertext, and Alice gets Bob's MAC(kmac, ch).
+//
+// An oracle input left open at Bob's own nonce was completed from held terms
+// only when filling it with nil left it unconstructible, judged against the
+// knowledge of the whole phase. Once kb leaks, ENC(HASH(kb, nil), ch) looks
+// constructible, although only Bob discloses kb, after his receive, so the
+// attacker cannot build it there. A nil fill that needs a value only the
+// receiving run discloses later now counts as unconstructible. Adding the
+// leak used to lose the attack at one session (the `leaks` metamorphic
+// property).
+//
+// solver_oracle_input_held_completion_leaked_key_guarded.vp guards nc.
+attacker[active]
+
+principal Carol[
+	knows private kb
+	generates mc, nc
+	xc = ENC(HASH(kb, nc), mc)
+]
+
+Carol -> Bob: nc, xc
+
+principal Alice[
+	knows private kb, kmac
+	generates na, ch
+	ca = ENC(HASH(kb, na), ch)
+]
+
+Alice -> Dave: na, [ca]
+
+principal Dave[
+	knows private kb, kmac
+	chd = DEC(HASH(kb, na), ca)
+	t2 = MAC(kmac, chd)
+]
+
+Dave -> Alice: t2
+
+principal Bob[
+	knows private kb, kmac
+	m = DEC(HASH(kb, nc), xc)
+	t = MAC(kmac, m)
+	leaks kb
+]
+
+Bob -> Carol: t
+
+principal Alice[
+	_ = ASSERT(MAC(kmac, ch), t2)?
+]
+
+queries[
+	authentication? Dave -> Alice: t2
+]

@@ -1,0 +1,37 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: f0 at one session, f1 at two.
+//
+// freshness_replay_through_relay.vp with the split moved to Bob: Carol forwards
+// the whole bundle on a guarded leg and Bob splits it. The same replay of
+// Alice#2's flight makes Bob and Bob#2 accept na#2. Where the projection
+// happens must not decide the verdict.
+attacker[active]
+
+principal Alice[
+	knows private ska
+	knows public tag
+	gka = PUBKEY(ska)
+	generates na
+	bundle = CONCAT(na, tag)
+	s1 = SIGN(ska, bundle)
+]
+
+Alice -> Carol: [gka], bundle, s1
+
+principal Carol[
+	knows public tag
+	_ = SIGNVERIF(gka, bundle, s1)?
+]
+
+Carol -> Bob: [bundle]
+
+principal Bob[
+	na_b, tag_b = SPLIT(bundle)?
+	u = HASH(na_b)
+]
+
+queries[
+	freshness? na_b
+]

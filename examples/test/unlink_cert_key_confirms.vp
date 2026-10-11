@@ -1,0 +1,37 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: u1 at one session and at two.
+//
+// cert = SIGN(ca, pk) certifies Alice's key, and sig = SIGN(sk, m1) verifies
+// under it. With gca on the wire, the attacker checks that cert contains pk,
+// and that sig verifies under that same pk: the two values identify one key.
+// A signed public key was never a confirmed argument, because ring members
+// were excluded by shape, and no row tied a key to a value that confirms it.
+// A position checked against several targets still confirms nothing.
+// unlink_cert_key_confirms_unsent_ca.vp is the counterweight.
+attacker[passive]
+principal Ca[
+	knows private ca
+	gca = PUBKEY(ca)
+]
+principal Alice[
+	knows private sk
+	knows public m1
+	pk = PUBKEY(sk)
+]
+Alice -> Ca: pk
+principal Ca[
+	cert = SIGN(ca, pk)
+]
+Ca -> Alice: gca, cert
+principal Alice[
+	sig = SIGN(sk, m1)
+]
+Alice -> Bob: cert, sig
+principal Bob[
+	_ = HASH(cert, sig)
+]
+queries[
+	unlinkability? sig, cert
+]

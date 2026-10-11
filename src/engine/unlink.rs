@@ -4,8 +4,9 @@
 use std::sync::Arc;
 
 use super::exec::{Context, Execution, Held, Taken};
+use super::judgment::mentions;
 use super::knowledge::{Knowledge, Origin};
-use super::program::Event;
+use super::program::{Event, RunIdx};
 use crate::primitive::{CapabilityIndex, PrimitiveSpec, Reveal, RewriteRule};
 use crate::protocol::ProtocolTrace;
 use crate::protocol::SlotIdx;
@@ -46,7 +47,7 @@ impl Scope<'_> {
 	}
 
 	fn obtainable(&self, v: &Value) -> bool {
-		obtainable(v, &self.km.capabilities, self.attacker())
+		obtainable(v, self.knowledge.capabilities(), self.attacker())
 	}
 }
 
@@ -54,7 +55,6 @@ pub(crate) struct Linker<'a> {
 	cx: &'a Context<'a>,
 	ex: &'a Execution,
 	observed: std::cell::OnceCell<TermSet>,
-	supplied: std::cell::OnceCell<Knowledge>,
 }
 
 impl<'a> Linker<'a> {
@@ -63,11 +63,13 @@ impl<'a> Linker<'a> {
 			cx,
 			ex,
 			observed: std::cell::OnceCell::new(),
-			supplied: std::cell::OnceCell::new(),
 		}
 	}
 
-	pub(crate) fn link(&self, pair: [(SlotIdx, &Held); 2]) -> Option<Link> {
+	pub(crate) fn link(
+		&self,
+		[(ra, a, ha), (rb, b, hb)]: [(RunIdx, SlotIdx, &Held); 2],
+	) -> Option<Link> {
 		let scope = Scope {
 			km: self.cx.km,
 			knowledge: &self.ex.knowledge,
@@ -78,13 +80,8 @@ impl<'a> Linker<'a> {
 				self.observed
 					.get_or_init(|| observed(&scope, self.cx, self.ex))
 			},
-			|| {
-				&self
-					.supplied
-					.get_or_init(|| supplied(self.cx, self.ex))
-					.state
-			},
-			pair,
+			|| supplied(self.cx, self.ex, [(ra, a), (rb, b)]),
+			[(a, ha), (b, hb)],
 		)
 	}
 }
@@ -99,12 +96,9 @@ pub(crate) fn honest_reduct(km: &ProtocolTrace, slot: SlotIdx) -> Value {
 fn link<'s>(
 	scope: &Scope,
 	observed: impl FnOnce() -> &'s TermSet,
-	supplied: impl FnOnce() -> &'s AttackerState,
+	supplied: impl FnOnce() -> Knowledge,
 	[(a, ha), (b, hb)]: [(SlotIdx, &Held); 2],
 ) -> Option<Link> {
-	if ha.authored || hb.authored {
-		return None;
-	}
 	let km = scope.km;
 	let (av, bv) = (&ha.value, &hb.value);
 	let observed = observed();
@@ -119,7 +113,7 @@ fn link<'s>(
 	let supplied = supplied();
 	let valid = |w: &Value, kind: LinkKind| {
 		scope.secret(w)
-			&& !obtainable(w, &km.capabilities, supplied)
+			&& !obtainable(w, supplied.capabilities(), &supplied.state)
 			&& (matches!(kind, LinkKind::ObservedEquality)
 				|| w.constant_leaves().any(|c| shared.contains(&c.id)))
 	};
@@ -188,9 +182,11 @@ fn ties(scope: &Scope, v: &Value, via: Option<&Value>) -> Vec<Tied> {
 		for arg in rule
 			.matching
 			.iter()
-			.flat_map(|(_, targets)| targets.iter().filter_map(|&t| p.arguments.get(t)))
-		{
-			if crate::primitive::value_is_key_derivation(arg) || !scope.obtainable(arg) {
+			.filter_map(|(_, targets)| match targets[..] {
+				[target] => p.arguments.get(target),
+				_ => None,
+			}) {
+			if !scope.obtainable(arg) {
 				continue;
 			}
 			tie(arg.clone(), Tie::Confirms(check.id));
@@ -239,8 +235,8 @@ fn strongest(
 				(Tie::Itself, Tie::Built) | (Tie::Built, Tie::Itself) => {
 					Some((3, LinkKind::SharedSecret))
 				}
-				(Tie::Confirms(i), Tie::Built | Tie::Confirms(_))
-				| (Tie::Built, Tie::Confirms(i))
+				(Tie::Confirms(i), Tie::Built | Tie::Confirms(_) | Tie::Key(_))
+				| (Tie::Built | Tie::Key(_), Tie::Confirms(i))
 					if fresh =>
 				{
 					Some((4, LinkKind::RecognizedSecret(i)))
@@ -328,10 +324,20 @@ fn public(v: &Value, km: &ProtocolTrace) -> bool {
 }
 
 fn observed(scope: &Scope, cx: &Context, ex: &Execution) -> TermSet {
-	let mut pending: Vec<Value> = ex.sent.iter().flatten().flatten().cloned().collect();
+	let mut pending: Vec<Value> = cx
+		.program
+		.sends(&ex.sent)
+		.filter(|&(_, delivery, slot, _)| {
+			ex.runs[delivery.sender]
+				.held(slot)
+				.is_none_or(|held| !held.authored)
+		})
+		.map(|(_, _, _, v)| v.clone())
+		.collect();
 	for &Taken { run, step, .. } in &ex.order {
 		if let Event::Leak(slot) = cx.program.runs[run].steps[step].event
 			&& let Some(held) = ex.runs[run].held(slot)
+			&& !held.authored
 		{
 			pending.push(held.value.clone());
 		}
@@ -348,10 +354,12 @@ fn observed(scope: &Scope, cx: &Context, ex: &Execution) -> TermSet {
 		if crate::primitive::core_reveals_arguments(p.id) {
 			pending.extend(p.arguments.iter().cloned());
 		}
-		if let Some(opened) = crate::theory::can_decompose(p, &scope.km.capabilities, attacker) {
+		if let Some(opened) =
+			crate::theory::can_decompose(p, scope.knowledge.capabilities(), attacker)
+		{
 			pending.extend(opened.revealed);
 		}
-		if let Some(revealed) = scope.knowledge.breaks(p, &scope.km.capabilities) {
+		if let Some(revealed) = scope.knowledge.breaks(p) {
 			pending.extend(revealed);
 		}
 		if let Some(rule) = crate::primitive::reuse_rule(p.id)
@@ -415,17 +423,41 @@ fn shared_secret_leaves(scope: &Scope, a: SlotIdx, b: SlotIdx) -> IdSet<ValueId>
 		.collect()
 }
 
-fn supplied(cx: &Context, ex: &Execution) -> Knowledge {
+fn supplied(cx: &Context, ex: &Execution, holders: [(RunIdx, SlotIdx); 2]) -> Knowledge {
 	let mut supplied = cx.initial.clone();
 	supplied.set_phase(ex.knowledge.state.current_phase);
-	for components in ex
-		.runs
-		.iter()
-		.flat_map(|run| run.env.iter().flatten())
-		.filter_map(|held| held.installed.as_ref())
-	{
-		for component in components.iter() {
-			supplied.learn(component, Origin::Initial);
+	let mut seen: Vec<(RunIdx, SlotIdx)> = Vec::new();
+	let mut pending = holders.to_vec();
+	while let Some((run, slot)) = pending.pop() {
+		if seen.contains(&(run, slot)) {
+			continue;
+		}
+		seen.push((run, slot));
+		let Some(held) = ex.runs[run].held(slot) else {
+			continue;
+		};
+		if let Some(components) = &held.installed {
+			for component in components.iter() {
+				supplied.learn(component, Origin::Initial);
+			}
+			continue;
+		}
+		if let Some(sender) = held.sender {
+			pending.push((sender, slot));
+			continue;
+		}
+		let program = &cx.program.runs[run];
+		let value = &cx.km.slots[slot].initial_value;
+		for step in &program.steps {
+			let Event::Recv(d) = step.event else {
+				continue;
+			};
+			for &(input, _) in &cx.program.deliveries[d].slots {
+				let target = cx.km.slots[input].constant.id;
+				if mentions(cx.km, value, target, program.id, &mut Vec::new()) {
+					pending.push((run, input));
+				}
+			}
 		}
 	}
 	supplied
@@ -469,10 +501,7 @@ fn withholding(scope: &Scope, of: &Value) -> Arc<AttackerState> {
 	if let Some(state) = remembered {
 		return state;
 	}
-	let state = scope
-		.knowledge
-		.withholding(of, &scope.km.capabilities)
-		.state;
+	let state = scope.knowledge.withholding(of).state;
 	WITHHELD.with_current(|memo| {
 		memo.group(group)
 			.entry(key)
@@ -486,7 +515,7 @@ fn held_without(scope: &Scope, w: &Value, of: &Value) -> bool {
 	let restricted = withholding(scope, of);
 	let restricted: &AttackerState = &restricted;
 	restricted.knows(w).is_some()
-		|| obtainable(w, &scope.km.capabilities, restricted)
+		|| obtainable(w, scope.knowledge.capabilities(), restricted)
 		|| restricted.known.iter().any(|known| match known {
 			Value::Primitive(q) => {
 				can_recompose(q, restricted).is_some_and(|r| r.revealed.equivalent(w, true))
@@ -597,7 +626,7 @@ fn origin_leaves(scope: &Scope, v: &Value) -> Option<Vec<Value>> {
 		.collect();
 	let without = scope.attacker().retaining(&keep);
 	let without: &AttackerState = &without;
-	let capabilities = &scope.km.capabilities;
+	let capabilities = scope.knowledge.capabilities();
 	let mut out = Vec::new();
 	let leaves = collect_leaves(v, capabilities, without, &mut Vec::new(), &mut out)
 		.then_some(out)
@@ -726,7 +755,7 @@ mod tests {
 			);
 			assert!(ex.runs[bob].held(slot("x")).unwrap().installed.is_some());
 			assert!(ex.knowledge.state.knows(&s).is_some());
-			let supplied = supplied(&cx, &ex);
+			let supplied = supplied(&cx, &ex, [(bob, slot("a")), (bob, slot("b"))]);
 			let supplied = |v: &Value| supplied.knows(v).is_some();
 			assert!(supplied(&value));
 			assert!(supplied(&y));

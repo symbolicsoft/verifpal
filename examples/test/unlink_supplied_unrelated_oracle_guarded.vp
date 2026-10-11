@@ -1,0 +1,42 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: u0 at one session and at two.
+//
+// unlink_supplied_unrelated_oracle.vp with Carol's m guarded: Carol2 never
+// takes an attacker message, kb stays secret, and b is never observed.
+attacker[active]
+principal Carol2[
+	knows private skc
+	gc = PUBKEY(skc)
+]
+Carol2 -> Carol: [gc]
+principal Alice[
+	knows private s, kb
+	generates n1, n2
+	a = HASH(s, n1)
+	b = HASH(s, n2)
+	eb = ENC(kb, b)
+	leaks s
+]
+Alice -> Dave: n1, n2, a, eb
+principal Carol[
+	knows private s
+	generates r
+	m = PKE_ENC(gc, CONCAT(s, r))
+]
+Carol -> Carol2: [m]
+principal Carol2[
+	knows private s, kb
+	d = PKE_DEC(skc, m)
+	ds, dr = SPLIT(d)
+	_ = ASSERT(ds, s)?
+	o = ENC(dr, kb)
+]
+Carol2 -> Dave: o
+principal Dave[
+	_ = HASH(n1, n2, a, eb, o)
+]
+queries[
+	unlinkability? a, b
+]

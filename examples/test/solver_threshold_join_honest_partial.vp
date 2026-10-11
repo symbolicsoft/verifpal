@@ -1,0 +1,100 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a1 at one session and at two.
+//
+// FROST at threshold two. The dealer leaks s3, Alice signs whatever message and
+// co-signer commitment she is sent, and the Coordinator joins the partials it
+// receives and checks the result against the Client's message itself. The
+// attacker hands Alice nil and the commitment PUBKEY(nil), so Alice's partial
+// is THRESHOLD_SIGN(s1, na, CONCAT(ca, PUBKEY(nil)), nil). It builds
+// THRESHOLD_SIGN(s3, nil, CONCAT(ca, PUBKEY(nil)), nil) itself, puts it in
+// Bob's place and replaces the Coordinator's m with nil: the join is
+// SIGN(k, nil), and the Coordinator accepts a message the Client never sent.
+//
+// A join was inverted only into partials the attacker makes alone, under its
+// own commitment list PUBKEY(nil), and an emitted partial was never inverted
+// toward the signature it joins into. Alice is the oracle: her partial is now
+// inverted toward the signature the Coordinator's check names, together with
+// the partials the attacker can add under her commitment list and message,
+// which binds her co-signer's commitment to PUBKEY(nil). The Coordinator's
+// join is now inverted around each held partial too, with the attacker's
+// partials under that partial's list and message.
+//
+// solver_threshold_join_honest_partial_guarded.vp guards Alice's message and
+// holds.
+attacker[active]
+
+principal Dealer[
+	knows private psk_a
+	knows private psk_b
+	generates k
+	pk = PUBKEY(k)
+	s1, s2, s3 = THRESHOLD_SPLIT[2](k)
+	generates nd_a
+	ea = AEAD_ENC(psk_a, nd_a, s1, pk)
+	generates nd_b
+	eb = AEAD_ENC(psk_b, nd_b, s2, pk)
+	leaks s3
+]
+
+Dealer -> Alice: [pk], nd_a, ea
+
+Dealer -> Bob: [pk], nd_b, eb
+
+Dealer -> Coordinator: [pk]
+
+principal Alice[
+	knows private psk_a
+	sa = AEAD_DEC(psk_a, nd_a, ea, pk)?
+	generates na
+	ca = PUBKEY(na)
+]
+
+principal Bob[
+	knows private psk_b
+	sb = AEAD_DEC(psk_b, nd_b, eb, pk)?
+	generates nb
+	cb = PUBKEY(nb)
+]
+
+Alice -> Coordinator: [ca]
+
+Bob -> Coordinator: [cb]
+
+principal Client[
+	generates m
+]
+
+Client -> Coordinator: m
+
+Client -> Alice: m
+
+Client -> Bob: [m]
+
+Coordinator -> Alice: cb
+
+Coordinator -> Bob: [ca]
+
+principal Alice[
+	cl_a = CONCAT(ca, cb)
+	pa = THRESHOLD_SIGN(sa, na, cl_a, m)
+]
+
+principal Bob[
+	cl_b = CONCAT(ca, cb)
+	pb = THRESHOLD_SIGN(sb, nb, cl_b, m)
+]
+
+Alice -> Coordinator: pa
+
+Bob -> Coordinator: pb
+
+principal Coordinator[
+	sig = THRESHOLD_JOIN(pa, pb)
+	_ = SIGNVERIF(pk, m, sig)?
+]
+
+queries[
+	authentication? Client -> Coordinator: m
+]

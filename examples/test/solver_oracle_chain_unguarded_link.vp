@@ -1,0 +1,74 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a1 at one session and at two.
+//
+// Two decryption oracles in a chain. Frank sends Dave his challenge ch under
+// two layers, ENC(HASH(kb, na), ENC(HASH(kb2, na2), ch)), and accepts Dave's
+// signature over it. Bob peels a kb layer under whatever nonce he is sent and
+// forwards the result to Bea over an unguarded link. Bea peels a kb2 layer and
+// signs the result with the key Dave signs with. The attacker leaves Dave
+// unstarted, hands Bob na and Frank's ciphertext, lets Bob's output reach Bea
+// unchanged, hands Bea na2, and gives Frank the signature Bea emits.
+//
+// Bea's input must be ENC(HASH(kb2, na2), ch), which only Bob's decryption can
+// produce. Oracle inputs were proposed only against other principals' checks,
+// and Bea's decryption is unchecked, so nothing asked Bob for it. With the link
+// guarded, Bob's slots are reached through the relay and the chain was found;
+// guarding a wire must not be what makes an attack reachable. Another
+// principal's unchecked rewrite over its received slots is now a wanted
+// shape for oracle inputs, like its checks.
+//
+// solver_oracle_chain_unguarded_link_guarded.vp guards Bea's nonce and holds.
+attacker[active]
+
+principal Frank[
+	knows private kb, kb2
+	generates ch, na, na2
+	ca = ENC(HASH(kb, na), ENC(HASH(kb2, na2), ch))
+]
+
+Frank -> Dave: na, na2, [ca]
+
+principal Dave[
+	knows private kb, kb2, skb
+	db = DEC(HASH(kb2, na2), DEC(HASH(kb, na), ca))
+	sd = SIGN(skb, db)
+]
+
+Dave -> Frank: sd
+
+principal Carol[
+	knows private kb, kb2
+	generates mc, nc, nc2
+	xc = ENC(HASH(kb, nc), ENC(HASH(kb2, nc2), mc))
+]
+
+Carol -> Bob: nc, xc
+
+principal Bob[
+	knows private kb
+	m1 = DEC(HASH(kb, nc), xc)
+]
+
+Bob -> Bea: m1
+
+Carol -> Bea: nc2
+
+principal Bea[
+	knows private kb2, skb
+	m = DEC(HASH(kb2, nc2), m1)
+	e = SIGN(skb, m)
+]
+
+Bea -> Carol: e
+
+principal Frank[
+	knows private skb
+	pkb = PUBKEY(skb)
+	_ = SIGNVERIF(pkb, ch, sd)?
+]
+
+queries[
+	authentication? Dave -> Frank: sd
+]

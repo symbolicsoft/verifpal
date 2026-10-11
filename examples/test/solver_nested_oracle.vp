@@ -1,0 +1,55 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1 at one session and at two.
+//
+// Bob decrypts whatever arrives under HASH(kb, nc), with both the nonce and
+// the ciphertext unguarded, and returns the plaintext under the public key
+// kp. Alice sends s to Dave under HASH(kb, na), with na in clear. The
+// attacker hands Bob na and Alice's ciphertext; Bob returns ENC(kp, s) and
+// the attacker opens it.
+//
+// Bob's decryption sits inside his encryption, so the oracle is not a wire
+// term but a value that decrypting one reveals. Wire terms were inverted
+// through their rewrites, while what decomposing them revealed was only
+// matched against the goal, which a decryption over variables never
+// matches. The same model sending m in clear failed, and this one held.
+// Revealed values that still reduce over variables are now inverted like
+// wire terms, once the keys that open them are solved.
+//
+// solver_nested_oracle_guarded.vp guards the nonce and holds.
+attacker[active]
+
+principal Carol[
+	knows private kb
+	generates mc, nc
+	xc = ENC(HASH(kb, nc), mc)
+]
+
+Carol -> Bob: nc, xc
+
+principal Alice[
+	knows private kb
+	generates s, na
+	ca = ENC(HASH(kb, na), s)
+]
+
+Alice -> Dave: na, [ca]
+
+principal Dave[
+	knows private kb
+	sd = DEC(HASH(kb, na), ca)
+]
+
+principal Bob[
+	knows private kb
+	knows public kp
+	m = DEC(HASH(kb, nc), xc)
+	e = ENC(kp, m)
+]
+
+Bob -> Carol: e
+
+queries[
+	confidentiality? s
+]

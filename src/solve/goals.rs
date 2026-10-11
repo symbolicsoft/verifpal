@@ -6,8 +6,8 @@ use super::matching::unifiers;
 use super::symbolic::SymbolicState;
 use super::vars::Substitution;
 use super::{deduce, diverge, matching, symbolic, vars};
-use crate::protocol::ProtocolTrace;
 use crate::protocol::trace::resolve_trace_constant;
+use crate::protocol::{ProtocolTrace, SlotIdx};
 use crate::syntax::{PrincipalId, Query, QueryKind};
 use crate::term::{Constant, PrimitiveId, Value, VariableId};
 use crate::theory::AttackerState;
@@ -36,9 +36,31 @@ pub(super) fn oracle_input_goals(
 	}
 	let mut wanted: Wanted = Vec::new();
 	let mut foreign: Substitution = Substitution::default();
+	let mut kept: Substitution = Substitution::default();
+	let mut pins: Vec<Substitution> = Vec::new();
 	for &other in &km.principal_ids {
-		check_shapes(km, other, sym, attacker, deducer, &mut wanted, &mut foreign);
+		pins.extend(check_shapes(
+			km,
+			other,
+			sym,
+			attacker,
+			deducer,
+			&mut wanted,
+			(&mut foreign, &mut kept),
+		));
 	}
+	if !kept.is_empty() {
+		pins.push(kept);
+	}
+	let foreign = vars::dedupe(
+		std::iter::once(foreign.clone())
+			.chain(pins.into_iter().map(|pin| {
+				let mut pinned = foreign.clone();
+				pinned.extend(pin);
+				pinned
+			}))
+			.collect(),
+	);
 	let nested = nested_shapes(&wanted, &emissions);
 	wanted.extend(nested);
 	let empty = Substitution::default();
@@ -49,12 +71,79 @@ pub(super) fn oracle_input_goals(
 			if bounds.is_empty() {
 				bounds = deducer.invert_into_revealed(emission, shape);
 			}
-			out.extend(bounds.iter().filter_map(|bound| {
-				oracle_proposal(sym, emission, target.as_ref(), bound, &foreign)
-			}));
+			for bound in &bounds {
+				for bound in completed(km, principal, sym, deducer, bound) {
+					out.extend(foreign.iter().filter_map(|foreign| {
+						oracle_proposal(sym, emission, target.as_ref(), &bound, foreign)
+					}));
+				}
+			}
 		}
 	}
 	out
+}
+
+fn completed(
+	km: &ProtocolTrace,
+	principal: PrincipalId,
+	sym: &SymbolicState,
+	deducer: &Deducer,
+	bound: &Substitution,
+) -> Vec<Substitution> {
+	let empty = Substitution::default();
+	let nil: Substitution = sym
+		.var_slots()
+		.map(vars::attacker_var_id)
+		.filter(|id| {
+			!bound.contains_key(id) && bound.values().any(|value| vars::occurs(id, value, &empty))
+		})
+		.map(|id| (id, crate::term::value_nil()))
+		.collect();
+	let mut out = vec![bound.clone()];
+	for (id, value) in bound {
+		if !vars::is_slot_var_id(id)
+			|| !sym.is_var_slot(vars::slot_of_var_id(id))
+			|| !(nil.keys().any(|local| vars::occurs(local, value, &empty))
+				|| tied(&vars::apply(value, bound)))
+		{
+			continue;
+		}
+		let filled = vars::ground_free(&vars::apply(&vars::apply(value, bound), &nil));
+		if !deducer.holds(&filled)
+			|| disclosed_after(km, principal, vars::slot_of_var_id(id), &filled)
+		{
+			out.extend(deducer.held_matches(value, bound));
+		}
+	}
+	out
+}
+
+fn disclosed_after(km: &ProtocolTrace, principal: PrincipalId, slot: SlotIdx, v: &Value) -> bool {
+	let Some(at) = km.slots[slot]
+		.sent_by
+		.iter()
+		.filter(|event| event.recipient == principal)
+		.map(|event| event.declared_at)
+		.min()
+	else {
+		return false;
+	};
+	v.constant_leaves().any(|leaf| {
+		let sends = km.index_of(leaf).into_iter().flat_map(|disclosed| {
+			km.slots[disclosed]
+				.sent_by
+				.iter()
+				.map(|event| (event.sender, event.declared_at))
+		});
+		let leaks = km
+			.leaks
+			.iter()
+			.filter(|event| event.constant_id == leaf.id)
+			.map(|event| (event.principal_id, event.declared_at));
+		let mut disclosures = sends.chain(leaks).peekable();
+		disclosures.peek().is_some()
+			&& disclosures.all(|(by, declared)| by == principal && declared > at)
+	})
 }
 
 fn push_wanted(wanted: &mut Wanted, shape: Value, target: Option<VariableId>) {
@@ -73,8 +162,9 @@ fn check_shapes(
 	attacker: &AttackerState,
 	deducer: &Deducer,
 	wanted: &mut Wanted,
-	foreign: &mut Substitution,
-) {
+	(foreign, kept): (&mut Substitution, &mut Substitution),
+) -> Vec<Substitution> {
+	let mut pins = Vec::new();
 	let slot_var = |v: &Value| vars::as_var(v).filter(vars::is_slot_var_id);
 	let controllable = crate::solve::control::Controllable::of(km, principal, attacker);
 	let other = symbolic::build(&controllable, km, principal, attacker);
@@ -92,6 +182,7 @@ fn check_shapes(
 	}
 	let inverter = deduce::Deducer::with_basis(
 		km,
+		deducer.capabilities(),
 		attacker,
 		&other,
 		&deduce::Arities::default(),
@@ -105,30 +196,69 @@ fn check_shapes(
 		let Value::Primitive(prim) = &other.terms[c] else {
 			continue;
 		};
-		if !prim.instance_check || !vars::contains_var(&other.terms[c]) {
+		let opened = crate::primitive::rewrite_rule(prim.id).is_some_and(|rule| {
+			prim.arguments
+				.get(rule.from)
+				.is_some_and(vars::contains_var)
+		});
+		if !(prim.instance_check || opened) || !vars::contains_var(&other.terms[c]) {
 			continue;
 		}
 		for bound in inverter.equality_shapes(prim) {
+			let mut pin = Substitution::default();
 			for slot in other.var_slots() {
 				let id = vars::attacker_var_id(slot);
 				let Some(value) = bound.get(&id) else {
 					continue;
 				};
 				let shape = vars::apply(value, &bound);
+				if !sym.is_var_slot(slot) && !vars::contains_var(&shape) {
+					pin.insert(id.clone(), shape.clone());
+				}
 				if matches!(shape, Value::Primitive(_)) {
 					push_wanted(wanted, shape, Some(id));
 				}
+			}
+			if !pin.is_empty() {
+				pins.push(pin);
 			}
 		}
 		let shapes: Wanted = match crate::primitive::rewrite_rule(prim.id) {
 			Some(rule) => {
 				let target = prim.arguments.get(rule.from).and_then(slot_var);
-				deduce::rewrite_shapes_from(prim, rule, |_| deducer.fresh_var(), true)
+				let shapes = deduce::rewrite_shapes_from(prim, rule, |_| deducer.fresh_var(), true);
+				if prim.instance_check
+					&& shapes
+						.iter()
+						.any(|shape| !deducer.holds(&grounded(&vars::apply(shape, foreign))))
+				{
+					let mut read = Vec::new();
+					vars::collect_vars(&other.terms[c], &mut read);
+					for id in read {
+						if !vars::is_slot_var_id(&id) {
+							continue;
+						}
+						let slot = vars::slot_of_var_id(&id);
+						if !other.is_var_slot(slot) || sym.is_var_slot(slot) {
+							continue;
+						}
+						let honest = resolve_trace_constant(&km.slots[slot].constant, km);
+						if !crate::primitive::value_is_key_derivation(&honest)
+							&& deducer.holds(&honest)
+						{
+							kept.insert(id, honest);
+						}
+					}
+				}
+				shapes
 					.into_iter()
 					.map(|shape| (shape, target.clone()))
 					.collect()
 			}
-			None if crate::primitive::is_core(prim.id) && prim.arguments.len() == 2 => {
+			None if prim.instance_check
+				&& crate::primitive::is_core(prim.id)
+				&& prim.arguments.len() == 2 =>
+			{
 				vec![
 					(prim.arguments[0].clone(), slot_var(&prim.arguments[1])),
 					(prim.arguments[1].clone(), slot_var(&prim.arguments[0])),
@@ -140,6 +270,29 @@ fn check_shapes(
 			push_wanted(wanted, shape, target);
 		}
 	}
+	pins
+}
+
+fn tied(v: &Value) -> bool {
+	let mut seen: Vec<&VariableId> = Vec::new();
+	crate::term::subterms(v).any(|term| match term {
+		Value::Variable(id) if vars::is_free_var_id(id) => {
+			let again = seen.contains(&id);
+			seen.push(id);
+			again
+		}
+		_ => false,
+	})
+}
+
+fn grounded(v: &Value) -> Value {
+	let mut ids = Vec::new();
+	vars::collect_vars(v, &mut ids);
+	let nil: Substitution = ids
+		.into_iter()
+		.map(|id| (id, crate::term::value_nil()))
+		.collect();
+	vars::apply(v, &nil)
 }
 
 fn nested_shapes(wanted: &Wanted, emissions: &[&Value]) -> Wanted {
@@ -265,7 +418,7 @@ pub(super) fn goals_for_query(
 				.filter_map(|c| slot_term(Some(c), km, sym))
 				.collect();
 			for pair in terms.windows(2) {
-				out.extend(diverge::solve_divergent(&pair[0], &pair[1], base));
+				out.extend(diverge::solve_divergent(km, sym, &pair[0], &pair[1], base));
 			}
 			out
 		}

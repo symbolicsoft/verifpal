@@ -1,0 +1,58 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a0 at one session and at two.
+//
+// search_earlier_phase_source.vp with Bob's leak moved to phase 1: the
+// replayed c still decrypts to v, but the attacker learns it only after
+// Dave's phase-0 check.
+attacker[active]
+
+principal Dave[
+	knows private v
+	generates nd
+]
+
+Dave -> Alice: nd
+
+principal Alice[
+	knows private kb, v
+	generates msg
+	c = ENC(kb, v)
+	tg = MAC(v, HASH(msg, nd))
+]
+
+Alice -> Carol: c
+
+principal Carol[
+	knows private kb
+	generates nc
+	cc = ENC(kb, nc)
+]
+
+Carol -> Bob: cc
+
+principal Bob[
+	knows private kb
+	d = DEC(kb, cc)
+]
+
+Alice -> Dave: msg, tg
+
+principal Dave[
+	_ = ASSERT(MAC(v, HASH(msg, nd)), tg)?
+]
+
+phase[1]
+
+principal Alice[
+	leaks v
+]
+
+principal Bob[
+	leaks d
+]
+
+queries[
+	authentication? Alice -> Dave: msg
+]

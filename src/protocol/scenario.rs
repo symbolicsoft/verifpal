@@ -32,7 +32,7 @@ pub(crate) fn expand_scenarios(m: &Model, sessions: u8) -> VResult<Expansion> {
 			siblings: IdMap::default(),
 			interchangeable: IdMap::default(),
 			actors: IdMap::default(),
-			bound: IdSet::default(),
+			dependent: IdSet::default(),
 		});
 	}
 	sanity_scenarios(m)?;
@@ -97,12 +97,36 @@ pub(crate) fn expand_scenarios(m: &Model, sessions: u8) -> VResult<Expansion> {
 			.iter()
 			.flat_map(|&(id, _)| copies.iter().map(move |copy| (copy.principal_id(id), id)))
 			.collect(),
-		bound: scenarios
-			.iter()
-			.flat_map(|(s, _)| rebindings(s))
-			.map(|(_, value)| value.id)
-			.collect(),
+		dependent: binding_dependent(m),
 	})
+}
+
+fn binding_dependent(m: &Model) -> IdSet<ValueId> {
+	let mut dependent: IdSet<ValueId> = IdSet::default();
+	for block in &m.blocks {
+		let Block::Principal(p) = block else {
+			continue;
+		};
+		let targets: IdSet<ValueId> = m
+			.scenarios
+			.iter()
+			.filter(|s| s.principal == p.id)
+			.flat_map(rebindings)
+			.map(|(target, _)| target.id)
+			.collect();
+		for expr in &p.expressions {
+			let Some(value) = &expr.assigned else {
+				continue;
+			};
+			if value
+				.constant_leaves()
+				.any(|c| targets.contains(&c.id) || dependent.contains(&c.id))
+			{
+				dependent.extend(expr.constants.iter().map(|c| c.id));
+			}
+		}
+	}
+	dependent
 }
 
 fn scenario_copies<'a>(
@@ -514,10 +538,10 @@ fn corruption(m: &Model, copies: &[ModelCopy]) -> Vec<i32> {
 			}
 			(0..=km.max_phase)
 				.find(|&phase| {
-					let attacker = &honest.at(phase).knowledge.state;
-					material
-						.iter()
-						.any(|v| crate::theory::obtainable(v, &km.capabilities, attacker))
+					let knowledge = &honest.at(phase).knowledge;
+					material.iter().any(|v| {
+						crate::theory::obtainable(v, knowledge.capabilities(), &knowledge.state)
+					})
 				})
 				.unwrap_or(i32::MAX)
 		})

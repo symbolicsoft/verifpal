@@ -98,6 +98,11 @@ impl DerivationRecord {
 		self.parts().1
 	}
 
+	pub(crate) fn held(&self) -> impl Iterator<Item = &Value> {
+		let ([first, second], _) = self.parts();
+		first.iter().chain(second)
+	}
+
 	pub(crate) fn forged(&self) -> bool {
 		matches!(
 			self,

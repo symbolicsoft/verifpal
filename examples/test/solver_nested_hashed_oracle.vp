@@ -1,0 +1,53 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1 at one session and at two.
+//
+// Bob decrypts whatever arrives under HASH(kb, nc), both unguarded, and sends
+// HASH(m). Alice sends s to Dave as ENC(HASH(kb, na), s) with na in clear; the
+// query is on hs = HASH(s). The attacker hands Bob na and Alice's ciphertext,
+// and Bob sends HASH(s).
+//
+// The decryption sits under HASH in Bob's emission. Wire terms were inverted
+// through a rewrite at their head, or through a projection or a rewrite over a
+// rewrite, so a rewrite of the attacker's input under a constructor never
+// was. Each such rewrite in a wire term, or in what decomposing one reveals,
+// is now abstracted to a variable: the term is unified with the goal, and the
+// value the variable must take is produced by inverting that rewrite.
+//
+// solver_nested_hashed_oracle_guarded.vp guards nc and holds.
+attacker[active]
+
+principal Carol[
+	knows private kb
+	generates mc, nc
+	xc = ENC(HASH(kb, nc), mc)
+]
+
+Carol -> Bob: nc, xc
+
+principal Alice[
+	knows private kb
+	generates s, na
+	ca = ENC(HASH(kb, na), s)
+	hs = HASH(s)
+]
+
+Alice -> Dave: na, [ca]
+
+principal Dave[
+	knows private kb
+	sd = DEC(HASH(kb, na), ca)
+]
+
+principal Bob[
+	knows private kb
+	m = DEC(HASH(kb, nc), xc)
+	e = HASH(m)
+]
+
+Bob -> Carol: e
+
+queries[
+	confidentiality? hs
+]

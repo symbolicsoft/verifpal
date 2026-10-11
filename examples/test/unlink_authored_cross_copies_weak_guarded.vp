@@ -1,0 +1,32 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: u0 at one session and at two.
+//
+// unlink_authored_cross_copies_weak.vp with b guarded: the weak ob still
+// reveals s1, but oa stays under b, which the attacker cannot open, so s2
+// stays secret and neither value can be rebuilt.
+attacker[active]
+principal Alice[
+	knows private s1, s2
+	generates n1
+	a = HASH(s1, s2, n1)
+]
+Alice -> Bob: n1, a
+principal Bob[
+	knows private s1, s2
+	generates n2
+	b = HASH(s1, s2, n2)
+	ob = PKE_ENC[weak](a, s1)
+]
+Bob -> Alice: n2, [b], ob
+principal Alice[
+	oa = PKE_ENC(b, s2)
+]
+Alice -> Bob: oa
+principal Bob[
+	_ = HASH(oa)
+]
+queries[
+	unlinkability? a, b
+]

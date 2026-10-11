@@ -1,0 +1,69 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a1 at one session and at two.
+//
+// Alice signs a fresh x and sends it to Carol, then checks her peer's signed
+// nonce under the key her scenario binds, then sends x, its signature and a
+// tag over her peer's key to Bob. Bob checks the tag and the signature. At
+// one session the attacker signs a nonce with Mallory's leaked key so that
+// Alice@2, whose peer is Mallory, passes her check and sends x@2, then
+// replays x@2 and its signature to Bob. Bob@2 halts at the tag, which names
+// Mallory, so Bob is the only run of his that accepts x@2, and the only
+// emission of x@2 towards Bob's runs was made after a check under Mallory's
+// key: Alice@2 was speaking to Mallory, and Bob's acceptance matches no
+// emission (Lowe's attack). At two sessions the attack reported is the
+// session replay: Bob and Bob#2 both accept x#2, which Alice sent once.
+//
+// Interchangeability looked at the copy's first send of the slot, the one to
+// Carol, which comes before the check, so the emission to Bob@2 counted and
+// excused Bob; without the send to Carol the attack was found. Each emission
+// is judged by the checks made before that send.
+// scenario_peer_checked_after_send.vp is the counterweight.
+attacker[active]
+principal Mallory[
+	knows private skm
+	gm = PUBKEY(skm)
+	leaks skm
+]
+principal Bob[
+	knows private skb
+	knows private k
+	gb = PUBKEY(skb)
+]
+Bob -> Alice: [gb]
+Mallory -> Alice: [gm]
+principal Alice[
+	knows public gpeer
+	knows private k
+	knows private ska
+	ga = PUBKEY(ska)
+	generates x
+	sx = SIGN(ska, x)
+	tag = MAC(k, gpeer)
+]
+Alice -> Bob: [ga]
+Alice -> Carol: x
+principal Carol[
+	_ = HASH(x)
+]
+principal Bob[
+	generates nb
+	sb = SIGN(skb, nb)
+]
+Bob -> Alice: nb, sb
+principal Alice[
+	_ = SIGNVERIF(gpeer, nb, sb)?
+]
+Alice -> Bob: [tag], x, sx
+principal Bob[
+	_ = ASSERT(tag, MAC(k, gb))?
+	_ = SIGNVERIF(ga, x, sx)?
+]
+scenarios[
+	Alice[gpeer = gb]
+	Alice[gpeer = gm]
+]
+queries[
+	authentication? Alice -> Bob: x
+]

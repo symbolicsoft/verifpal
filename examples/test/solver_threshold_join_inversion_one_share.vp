@@ -1,0 +1,45 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a0 at one session and at two.
+//
+// solver_threshold_join_inversion.vp with only s3 leaked: one share is below
+// the threshold, so the attacker can build one partial over its own message,
+// not two.
+attacker[active]
+
+principal Client[
+	generates msg
+]
+
+Client -> Alice: [msg]
+
+Client -> Coordinator: msg
+
+principal Alice[
+	generates k, na, nb
+	s1, s2, s3 = THRESHOLD_SPLIT[2](k)
+	pk = PUBKEY(k)
+	ca = PUBKEY(na)
+	cb = PUBKEY(nb)
+	cl = CONCAT(ca, cb)
+	leaks s3
+]
+
+Alice -> Coordinator: [pk]
+
+principal Alice[
+	pa = THRESHOLD_SIGN(s1, na, cl, msg)
+	pb = THRESHOLD_SIGN(s2, nb, cl, msg)
+]
+
+Alice -> Coordinator: pa, pb
+
+principal Coordinator[
+	sig = THRESHOLD_JOIN(pa, pb)
+	_ = SIGNVERIF(pk, msg, sig)?
+]
+
+queries[
+	authentication? Client -> Coordinator: msg
+]

@@ -1,0 +1,53 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a1 at one session and at two.
+//
+// solver_threshold_join_inversion.vp with pk unguarded. The attack is
+// unchanged: pk keeps its honest value, msg becomes nil, and the partials are
+// the attacker's own under the leaked shares s2 and s3.
+//
+// With pk replaceable, the check names SIGN(pk, msg) with the key a variable,
+// and the join was inverted only when a held sharing's secret matched the
+// whole's key one way, which a variable never does. The secret is now unified
+// with it, which binds the key to k. Removing the guard used to lose the
+// attack at one session (the `unguard` metamorphic property).
+//
+// solver_threshold_join_inversion_unguarded_key_one_share.vp leaks only s3.
+attacker[active]
+
+principal Client[
+	generates msg
+]
+
+Client -> Alice: [msg]
+
+Client -> Coordinator: msg
+
+principal Alice[
+	generates k, na, nb
+	s1, s2, s3 = THRESHOLD_SPLIT[2](k)
+	pk = PUBKEY(k)
+	ca = PUBKEY(na)
+	cb = PUBKEY(nb)
+	cl = CONCAT(ca, cb)
+	leaks s2, s3
+]
+
+Alice -> Coordinator: pk
+
+principal Alice[
+	pa = THRESHOLD_SIGN(s1, na, cl, msg)
+	pb = THRESHOLD_SIGN(s2, nb, cl, msg)
+]
+
+Alice -> Coordinator: pa, pb
+
+principal Coordinator[
+	sig = THRESHOLD_JOIN(pa, pb)
+	_ = SIGNVERIF(pk, msg, sig)?
+]
+
+queries[
+	authentication? Client -> Coordinator: msg
+]

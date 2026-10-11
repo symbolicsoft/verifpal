@@ -1,0 +1,38 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: e1 at one session and at two.
+//
+// Carol seals an empty payload, nil, to Alice, who opens it and forwards the
+// plaintext to Bob on an open leg. The query asks whether Bob's copy is still
+// nil. Bob holds both queried values, so any other value the attacker hands
+// him, HASH(nil) for one, is a divergence.
+//
+// The equivalence goal varied each value it could replace to nil. Here nil is
+// the honest value, so the proposal changed nothing and no other value was
+// ever tried. A varied value now takes the first filler that differs from the
+// honest one. equivalence_nil_payload_guarded.vp guards the leg to Bob and
+// holds.
+attacker[active]
+
+principal Carol[
+	knows private k
+	generates n
+	e = AEAD_ENC(k, n, nil, nil)
+]
+
+Carol -> Alice: [n], [e]
+
+principal Alice[
+	knows private k
+	x = AEAD_DEC(k, n, e, nil)?
+]
+
+Alice -> Bob: x
+
+principal Bob[
+	_ = HASH(x)
+]
+
+queries[
+	equivalence? x, nil
+]

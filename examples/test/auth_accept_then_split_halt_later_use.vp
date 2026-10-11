@@ -1,0 +1,30 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: a0 at one session, a1 at two.
+//
+// auth_accept_then_split_halt.vp with one more use of c after the split. A
+// forged c fails the split, because without k the attacker cannot make the
+// plaintext a pair, and the halt leaves HASH(c, a) unreached, which cancels
+// the acceptance at one session. At two sessions the attacker replays the
+// other session's c, Bob's split passes, and two Bob runs accept the one
+// value Alice#2 sent.
+attacker[active]
+
+principal Alice[
+	knows private k
+	generates m1, m2
+	c = ENC(k, CONCAT(m1, m2))
+]
+
+Alice -> Bob: c
+
+principal Bob[
+	knows private k
+	d = DEC(k, c)
+	a, b = SPLIT(d)?
+	_ = HASH(c, a)
+]
+
+queries[
+	authentication? Alice -> Bob: c
+]

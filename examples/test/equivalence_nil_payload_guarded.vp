@@ -1,0 +1,31 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: e0 at one session and at two.
+//
+// equivalence_nil_payload.vp with the leg to Bob guarded. Bob's copy is
+// whatever Alice forwards, and Alice's checked decryption of Carol's guarded
+// ciphertext can only yield nil, so the two queried values never differ.
+attacker[active]
+
+principal Carol[
+	knows private k
+	generates n
+	e = AEAD_ENC(k, n, nil, nil)
+]
+
+Carol -> Alice: [n], [e]
+
+principal Alice[
+	knows private k
+	x = AEAD_DEC(k, n, e, nil)?
+]
+
+Alice -> Bob: [x]
+
+principal Bob[
+	_ = HASH(x)
+]
+
+queries[
+	equivalence? x, nil
+]

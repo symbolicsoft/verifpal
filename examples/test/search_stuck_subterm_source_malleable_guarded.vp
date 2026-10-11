@@ -1,0 +1,50 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a0 at one session, a1 at two. As
+// search_stuck_subterm_source_guarded.vp, but we is malleable. Eve's input is
+// guarded, so no reshaping of we reaches her, and only Bob can open k, after
+// Dave has already checked m: at one session the attacker cannot tag a value
+// of its own in time. At two sessions it replays Alice's second m and t to
+// the first Dave run, which accepts one emission twice.
+attacker[active]
+
+principal Bob[
+	knows private kb
+]
+
+principal Alice[
+	knows private kb, ke, k
+	generates jb, je, m
+	wb = ENC(kb, k)
+	we = ENC[malleable](ke, k)
+	xb = ENC(kb, jb)
+	xe = ENC(ke, je)
+	t = MAC(HASH(k), m)
+	leaks wb, we
+]
+Alice -> Bob: xb
+Alice -> Eve: [xe]
+Alice -> Dave: m, t
+
+principal Eve[
+	knows private ke
+	ye = DEC(ke, xe)
+	leaks ye
+]
+
+principal Dave[
+	knows private k
+	_ = ASSERT(MAC(HASH(k), m), t)?
+	generates gd
+]
+Dave -> Bob: [gd]
+
+principal Bob[
+	yb = DEC(kb, xb)
+	leaks yb
+]
+
+queries[
+	authentication? Alice -> Dave: m
+]

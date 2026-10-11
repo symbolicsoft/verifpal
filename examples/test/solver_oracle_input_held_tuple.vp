@@ -1,0 +1,63 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a1 at one session and at two.
+//
+// Bob is a decryption oracle whose ciphertext and key nonce arrive together in
+// one tuple: he splits it, decrypts the first field under HASH(kb, second
+// field) and signs the result with the key Dave signs with. Frank sends Dave
+// his challenge as ENC(HASH(kb, na), ch) with na in clear and accepts Dave's
+// signature over ch. The attacker leaves Dave unstarted, hands Bob
+// CONCAT(ca, na), and gives Frank the signature Bob emits.
+//
+// Inverting Bob's emission toward Frank's check opens Bob's tuple into two
+// fields, the first ENC(HASH(kb, f), ch) for the second field f. Held
+// completion ran only when a received slot was left open, and matched only
+// whole held terms against the whole input, so the tuple, held nowhere, was
+// never completed and f fell to nil. An input whose open positions are tied
+// by one variable is now completed too, and each of its arguments may be a
+// held term on its own.
+//
+// solver_oracle_input_held_tuple_guarded.vp guards Bob's tuple and holds.
+attacker[active]
+
+principal Frank[
+	knows private kb
+	generates ch, na
+	ca = ENC(HASH(kb, na), ch)
+]
+
+Frank -> Dave: na, [ca]
+
+principal Dave[
+	knows private kb, skb
+	sd = SIGN(skb, DEC(HASH(kb, na), ca))
+]
+
+Dave -> Frank: sd
+
+principal Carol[
+	knows private kb
+	generates mc, nc
+	tc = CONCAT(ENC(HASH(kb, nc), mc), nc)
+]
+
+Carol -> Bob: tc
+
+principal Bob[
+	knows private kb, skb
+	yc, yn = SPLIT(tc)
+	e = SIGN(skb, DEC(HASH(kb, yn), yc))
+]
+
+Bob -> Carol: e
+
+principal Frank[
+	knows private skb
+	pkb = PUBKEY(skb)
+	_ = SIGNVERIF(pkb, ch, sd)?
+]
+
+queries[
+	authentication? Dave -> Frank: sd
+]

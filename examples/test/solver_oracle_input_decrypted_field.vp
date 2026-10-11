@@ -1,0 +1,70 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1 at one session and at two.
+//
+// Alice accepts gd only with Bob's key's signature over CONCAT(gd, h), where h
+// is what she decrypts from Dave's AEAD ciphertext under kad, and then
+// encrypts s under DH_KEX(gd, a). Bob signs whatever Carol sends him. Dave
+// also sends hn in clear. The attacker has Bob sign CONCAT(PUBKEY(nil), hn) and
+// gives Alice PUBKEY(nil) with that signature, keeping Dave's nonce and
+// ciphertext, so h is hn and both of Alice's checks pass.
+//
+// Bob's oracle input comes from Alice's check shape, in which h is
+// AEAD_DEC(kad, nn, e, nil) over Alice's received nn and e. Those slots took
+// nil, so Bob was asked to sign over a decryption that fails. A slot that one
+// of Alice's checks reads now also takes the held value that passes it, here
+// Dave's nonce and ciphertext, wherever the plain filler cannot.
+//
+// solver_oracle_input_decrypted_field_guarded.vp guards Carol's input and holds.
+attacker[active]
+
+principal Bob[
+	knows private skb
+	pkb = PUBKEY(skb)
+]
+
+Bob -> Alice: [pkb]
+
+principal Carol[
+	generates c, nc
+	gc = PUBKEY(c)
+	y = CONCAT(gc, nc)
+]
+
+Carol -> Bob: y
+
+principal Bob[
+	sb = SIGN(skb, y)
+]
+
+Bob -> Carol: sb
+
+principal Alice[
+	knows private kad
+	generates a, s
+	ga = PUBKEY(a)
+]
+
+principal Dave[
+	knows private skb, kad
+	generates d, hn, nn
+	gd = PUBKEY(d)
+	e = AEAD_ENC(kad, nn, hn, nil)
+	sd = SIGN(skb, CONCAT(gd, hn))
+]
+
+Dave -> Alice: gd, nn, e, sd, hn
+
+principal Alice[
+	h = AEAD_DEC(kad, nn, e, nil)?
+	_ = SIGNVERIF(pkb, CONCAT(gd, h), sd)?
+	kk = DH_KEX(gd, a)
+	ct = ENC(kk, s)
+]
+
+Alice -> Dave: ga, ct
+
+queries[
+	confidentiality? s
+]

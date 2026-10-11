@@ -1,0 +1,46 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: c0e0 at one session, c0e1 at two.
+//
+// Alice seals a two-field message and a three-field message under one key.
+// Bob opens each and splits it under a check. The attacker swaps the first
+// ciphertext into the second slot: Bob's decryption passes, and his checked
+// split of a two-field value into three fields fails, so Bob halts at
+// `a, b, c = SPLIT(d2)?` and never holds a.
+//
+// The engine runs each output of an assignment as its own step. It once held
+// a = label and b = q from the first two steps and halted only at c, so the
+// label Alice leaks disclosed a (c1) and a differed from p (e1). A checked
+// assignment is one check: when any output fails, the run now halts at the
+// first output, which holds the failing application, so neither query reads
+// a value Bob never obtained. No ciphertext under k opens to a three-field
+// value whose first field is the leaked label, so confidentiality holds at
+// both counts.
+// At two sessions the attacker swaps in the other session's three-field
+// message, Bob's split passes and a = p#2 genuinely differs from p.
+// split_checked_partial_output_full.vp seals a three-field first message,
+// and the same swap passes the check and fails both queries.
+attacker[active]
+
+principal Alice[
+	knows private k, label
+	generates p, q, r, n1, n2
+	e1 = AEAD_ENC(k, n1, CONCAT(label, q), nil)
+	e2 = AEAD_ENC(k, n2, CONCAT(p, q, r), nil)
+	leaks label
+]
+
+Alice -> Bob: n1, e1, n2, e2
+
+principal Bob[
+	knows private k
+	d1 = AEAD_DEC(k, n1, e1, nil)?
+	f1, f2 = SPLIT(d1)?
+	d2 = AEAD_DEC(k, n2, e2, nil)?
+	a, b, c = SPLIT(d2)?
+]
+
+queries[
+	confidentiality? a
+	equivalence? a, p
+]

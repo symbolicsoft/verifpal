@@ -1,0 +1,52 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1 at one and two sessions. Bob and Eve each open k from what
+// Alice leaks, and Carol opens ENC(k, s), which reveals s with k. Bob checks
+// a guarded MAC on his input after leaking what he opened, so using him as
+// the oracle halts him before he sends Carol the guarded gb she waits for,
+// and Carol never opens anything. Eve has no check: the attacker hands Eve
+// we and Carol wc, Bob runs honestly, and Carol's leak opens under Eve's.
+attacker[active]
+
+principal Alice[
+	knows private kb, ke, kc, km, s
+	generates k, jb, je, jc
+	wb = ENC(kb, k)
+	we = ENC(ke, k)
+	c = ENC(k, s)
+	wc = ENC(kc, c)
+	xb = ENC(kb, jb)
+	tb = MAC(km, xb)
+	xe = ENC(ke, je)
+	xc = ENC(kc, jc)
+	leaks wb, we, wc
+]
+Alice -> Bob: xb, [tb]
+Alice -> Eve: xe
+Alice -> Carol: xc
+
+principal Bob[
+	knows private kb, km
+	generates gb
+	yb = DEC(kb, xb)
+	leaks yb
+	_ = ASSERT(MAC(km, xb), tb)?
+]
+Bob -> Carol: [gb]
+
+principal Eve[
+	knows private ke
+	ye = DEC(ke, xe)
+	leaks ye
+]
+
+principal Carol[
+	knows private kc
+	yc = DEC(kc, xc)
+	leaks yc
+]
+
+queries[
+	confidentiality? s
+]

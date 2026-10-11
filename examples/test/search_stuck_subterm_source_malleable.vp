@@ -1,0 +1,52 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a1 at one and two sessions. As search_stuck_subterm_source.vp,
+// but we is malleable, which opens a second route to the forged tag: hand
+// Eve we reshaped around MAC(HASH(k), nil) and she leaks the tag. That route
+// needs k from Bob, who leaks it only after Dave's check, so it must not
+// stand in for Eve opening we as it is: the attacker hands Eve we, learns k
+// at once, and sends Dave nil with MAC(HASH(k), nil), which no run of Alice
+// emitted. At two sessions the attacker can also replay Alice's second m and
+// t to the first Dave run.
+attacker[active]
+
+principal Bob[
+	knows private kb
+]
+
+principal Alice[
+	knows private kb, ke, k
+	generates jb, je, m
+	wb = ENC(kb, k)
+	we = ENC[malleable](ke, k)
+	xb = ENC(kb, jb)
+	xe = ENC(ke, je)
+	t = MAC(HASH(k), m)
+	leaks wb, we
+]
+Alice -> Bob: xb
+Alice -> Eve: xe
+Alice -> Dave: m, t
+
+principal Eve[
+	knows private ke
+	ye = DEC(ke, xe)
+	leaks ye
+]
+
+principal Dave[
+	knows private k
+	_ = ASSERT(MAC(HASH(k), m), t)?
+	generates gd
+]
+Dave -> Bob: [gd]
+
+principal Bob[
+	yb = DEC(kb, xb)
+	leaks yb
+]
+
+queries[
+	authentication? Alice -> Dave: m
+]

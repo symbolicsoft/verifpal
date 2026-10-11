@@ -1,0 +1,60 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0a0 at one session and at two.
+//
+// Counterweight to scenario_peer_checked_emission.vp: the server signs its
+// peer's key with the hash, and Client checks for her own, so the server run
+// serving Mallory signs a reply Client rejects.
+attacker[active]
+
+principal Server[
+	knows private s
+	knows public gpeer
+	gs = PUBKEY(s)
+]
+
+principal Client[
+	knows private c
+	gc = PUBKEY(c)
+	generates n2, t
+]
+
+principal Mallory[
+	knows private mk
+	gm = PUBKEY(mk)
+	leaks mk
+]
+
+Server -> Client: [gs]
+Client -> Server: [gc]
+Mallory -> Server: [gm]
+
+principal Client[
+	e3 = PKE_ENC(gs, n2)
+	sig3 = SIGN(c, CONCAT(t, e3))
+]
+
+Client -> Server: t, e3, sig3
+
+principal Server[
+	_ = SIGNVERIF(gpeer, CONCAT(t, e3), sig3)?
+	n2_s = PKE_DEC(s, e3)
+	m6 = SIGN(s, CONCAT(HASH(n2_s), gpeer))
+]
+
+Server -> Client: m6
+
+principal Client[
+	_ = SIGNVERIF(gs, CONCAT(HASH(n2), gc), m6)?
+]
+
+scenarios[
+	Server[gpeer = gc]
+	Server[gpeer = gm]
+]
+
+queries[
+	confidentiality? n2
+	authentication? Server -> Client: m6
+]

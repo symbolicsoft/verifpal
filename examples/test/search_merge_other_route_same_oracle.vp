@@ -1,0 +1,39 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0 at one session, c1 at two. As search_merge_other_route.vp,
+// but ENC(k2, s) is now sealed under kb as well, so both routes to s need
+// two ciphertexts opened under kb. Carol cannot open either, and one Bob run
+// opens only one, so one session holds. At two sessions the second Bob run
+// opens the other half.
+attacker[active]
+
+principal Alice[
+	knows private kb, kc, s
+	generates k1, k2, jb, jc
+	w1 = ENC(kb, k1)
+	w2 = ENC(kb, ENC(k1, s))
+	w3 = ENC(kb, k2)
+	w4 = ENC(kb, ENC(k2, s))
+	xb = ENC(kb, jb)
+	xc = ENC(kc, jc)
+	leaks w1, w2, w3, w4
+]
+Alice -> Bob: xb
+Alice -> Carol: xc
+
+principal Bob[
+	knows private kb
+	y = DEC(kb, xb)
+	leaks y
+]
+
+principal Carol[
+	knows private kc
+	z = DEC(kc, xc)
+	leaks z
+]
+
+queries[
+	confidentiality? s
+]

@@ -115,7 +115,7 @@ pub(crate) struct ProtocolTrace {
 	pub copy_siblings: IdMap<ValueId, Arc<Vec<ValueId>>>,
 	pub interchangeable: IdMap<PrincipalId, PrincipalId>,
 	pub actors: IdMap<PrincipalId, PrincipalId>,
-	pub scenario_bound: IdSet<ValueId>,
+	pub scenario_dependent: IdSet<ValueId>,
 	pub equivalence_queried: IdSet<ValueId>,
 	pub capabilities: CapabilityIndex,
 }
@@ -168,19 +168,39 @@ impl ProtocolTrace {
 		a: PrincipalId,
 		b: PrincipalId,
 		slot: SlotIdx,
+		to: Option<PrincipalId>,
 	) -> bool {
-		if Self::grouped(&self.interchangeable, a, b) {
+		if self.same_binding(a, b) {
 			return true;
 		}
-		if !self.same_actor(a, b) || self.scenario_bound.is_empty() {
+		if !self.same_actor(a, b) {
 			return false;
 		}
 		let Some(trace_slot) = self.slots.get(slot) else {
 			return false;
 		};
-		!resolve_trace_constant(&trace_slot.constant, self)
-			.constant_leaves()
-			.any(|c| self.scenario_bound.contains(&copy_index_of(c.id).1))
+		let sent = trace_slot
+			.sent_by
+			.iter()
+			.filter(|event| event.sender == a && to.is_none_or(|to| event.recipient == to))
+			.map(|event| event.declared_at)
+			.min()
+			.unwrap_or(trace_slot.declared_at + 1);
+		!self.binding_dependent(&trace_slot.constant)
+			&& !self.slots.iter().any(|t| {
+				t.creator == a
+					&& t.declared_at < sent
+					&& matches!(&t.initial_value, Value::Primitive(p) if p.instance_check)
+					&& self.binding_dependent(&t.constant)
+			})
+	}
+
+	pub(crate) fn same_binding(&self, a: PrincipalId, b: PrincipalId) -> bool {
+		Self::grouped(&self.interchangeable, a, b)
+	}
+
+	pub(crate) fn binding_dependent(&self, c: &Constant) -> bool {
+		self.scenario_dependent.contains(&copy_index_of(c.id).1)
 	}
 
 	fn grouped(map: &IdMap<PrincipalId, PrincipalId>, a: PrincipalId, b: PrincipalId) -> bool {

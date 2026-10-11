@@ -1,0 +1,34 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: u1 at one session and at two.
+//
+// unlink_relay_echo_not_observed.vp with Alice also sending b to Relay. Now
+// both values are on the wire as Alice sent them, both rebuild from the
+// leaked s and the nonces, and the attacker links them via s with no install
+// at all.
+attacker[active]
+
+principal Alice[
+	knows private s
+	generates n1, n2
+	a = HASH(s, n1)
+	b = HASH(s, n2)
+	leaks s
+]
+
+Alice -> Relay: n1, n2, a, b
+
+principal Relay[
+	generates nr
+]
+
+Relay -> Bob: n1, n2, a
+
+principal Bob[
+	_ = HASH(n1, n2, a)
+]
+
+queries[
+	unlinkability? a, b
+]

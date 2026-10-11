@@ -4,6 +4,7 @@
 use super::{Family, Mode, NodeIdx, Search, normalize};
 use crate::engine::exec::Install;
 use crate::engine::program::{Event, RunIdx, StepIdx};
+use crate::primitive::CapabilityIndex;
 use crate::protocol::{ProtocolTrace, SlotIdx};
 use crate::solve::deduce::Deducer;
 use crate::solve::symbolic::{self, SymbolicState};
@@ -33,7 +34,7 @@ impl<'a, 'b> Search<'a, 'b> {
 			for (r, run) in program.runs.iter_enumerated() {
 				let sends = match q.kind {
 					QueryKind::Authentication => {
-						km.interchangeable_for(run.id, q.message.sender, slot)
+						km.interchangeable_for(run.id, q.message.sender, slot, None)
 					}
 					_ => program.deliveries.iter().any(|delivery| {
 						delivery.sender == r
@@ -191,6 +192,7 @@ impl<'a, 'b> Search<'a, 'b> {
 		let Some(attacker) = self.union.at_last_receive(km, principal) else {
 			return Vec::new();
 		};
+		let capabilities = std::sync::Arc::clone(self.union.knowledge.capabilities());
 		let controllable = crate::solve::control::Controllable::of(km, principal, &attacker);
 		let sym = match mode {
 			Mode::Unshaped => symbolic::build_unshaped(&controllable, km, principal, &attacker),
@@ -201,7 +203,7 @@ impl<'a, 'b> Search<'a, 'b> {
 		}
 		let mut replays = Vec::new();
 		if mode != Mode::Refined || pass != Pass::Targeted {
-			replays = self.propose_and_try(r, pass, &attacker, &sym, taken, false);
+			replays = self.propose_and_try(r, pass, (&capabilities, &attacker), &sym, taken, false);
 		} else {
 			for honest in crate::solve::slots_blocking_reduction(&sym) {
 				if self.done() {
@@ -218,7 +220,7 @@ impl<'a, 'b> Search<'a, 'b> {
 					replays.extend(self.propose_and_try(
 						r,
 						pass,
-						&attacker,
+						(&capabilities, &attacker),
 						&refined,
 						Vec::new(),
 						false,
@@ -241,7 +243,14 @@ impl<'a, 'b> Search<'a, 'b> {
 			.collect();
 		let addressed = symbolic::build_addressed(&controllable, km, principal, &attacker, &shared);
 		if addressed.has_variables() {
-			self.propose_and_try(r, pass, &attacker, &addressed, Vec::new(), true);
+			self.propose_and_try(
+				r,
+				pass,
+				(&capabilities, &attacker),
+				&addressed,
+				Vec::new(),
+				true,
+			);
 		}
 		replays
 	}
@@ -250,14 +259,14 @@ impl<'a, 'b> Search<'a, 'b> {
 		&mut self,
 		r: RunIdx,
 		pass: Pass,
-		attacker: &AttackerState,
+		(capabilities, attacker): (&CapabilityIndex, &AttackerState),
 		sym: &SymbolicState,
 		taken: Vec<Substitution>,
 		addressed: bool,
 	) -> Vec<Substitution> {
 		let km = self.cx.km;
 		let run = &self.cx.program.runs[r];
-		let deducer = self.deducer(attacker, sym);
+		let deducer = self.deducer(capabilities, attacker, sym);
 		let (mut proposals, replays) = propose(self.ctx, km, run.id, pass, attacker, sym, deducer);
 		proposals.extend(taken);
 		let flights = flights(km, sym, proposals);
@@ -277,7 +286,14 @@ impl<'a, 'b> Search<'a, 'b> {
 			}
 			let halted = self.try_flight(r, signature, addressed, &chained, pass == Pass::Targeted);
 			if let Some(check) = halted.filter(|_| pass == Pass::Targeted) {
-				self.repair(r, attacker, sym, addressed, (check, variant), &mut repairer);
+				self.repair(
+					r,
+					(capabilities, attacker),
+					sym,
+					addressed,
+					(check, variant),
+					&mut repairer,
+				);
 			}
 		}
 		replays
@@ -286,7 +302,7 @@ impl<'a, 'b> Search<'a, 'b> {
 	fn repair<'x>(
 		&mut self,
 		r: RunIdx,
-		attacker: &'x AttackerState,
+		(capabilities, attacker): (&'x CapabilityIndex, &'x AttackerState),
 		sym: &'x SymbolicState,
 		addressed: bool,
 		halted: (SlotIdx, Substitution),
@@ -315,7 +331,7 @@ impl<'a, 'b> Search<'a, 'b> {
 				continue;
 			}
 			let deducer = repairer.get_or_insert_with(|| {
-				self.deducer(attacker, sym)
+				self.deducer(capabilities, attacker, sym)
 					.in_scope(std::sync::Arc::from("repair"))
 			});
 			let started = self.log.debug.then(std::time::Instant::now);
@@ -355,7 +371,12 @@ impl<'a, 'b> Search<'a, 'b> {
 		}
 	}
 
-	fn deducer<'x>(&self, attacker: &'x AttackerState, sym: &'x SymbolicState) -> Deducer<'x>
+	fn deducer<'x>(
+		&self,
+		capabilities: &'x CapabilityIndex,
+		attacker: &'x AttackerState,
+		sym: &'x SymbolicState,
+	) -> Deducer<'x>
 	where
 		'b: 'x,
 	{
@@ -381,8 +402,15 @@ impl<'a, 'b> Search<'a, 'b> {
 				)
 			})
 			.collect();
-		Deducer::with_basis(km, attacker, sym, &self.ctx.known_arities(attacker), honest)
-			.with_bound(inputs)
+		Deducer::with_basis(
+			km,
+			capabilities,
+			attacker,
+			sym,
+			&self.ctx.known_arities(attacker),
+			honest,
+		)
+		.with_bound(inputs)
 	}
 }
 

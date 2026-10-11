@@ -1,0 +1,31 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0 at one session and at two.
+//
+// Alice signs two partials under one share and one nonce. p1 is `forgeable`
+// and never leaves her; p2 is sent, but its commitment list cb hides nb, so p2
+// alone opens nothing. The attacker holds na, ca and m1 and can mint a term
+// equal to p1 without k1, but a partial it forged is no second equation over
+// k1: a forged term reveals nothing it was forged over
+// (threshold_sign_forged_partial_keeps_share.vp). The engine once paired the
+// minted p1 with p2 because Alice had built p1, and read k1 out through the
+// nonce-reuse rule. threshold_sign_forged_sent_reuse_member.vp is the
+// counterweight.
+attacker[passive]
+principal Alice[
+	generates k0, na, nb, m1, m2
+	k1, k2 = THRESHOLD_SPLIT[2](k0)
+	ca = PUBKEY(na)
+	cb = PUBKEY(nb)
+	p1 = THRESHOLD_SIGN[forgeable](k1, na, ca, m1)
+	p2 = THRESHOLD_SIGN(k1, na, cb, m2)
+	leaks na
+]
+Alice -> Bob: ca, m1, p2
+principal Bob[
+	_ = HASH(p2)
+]
+queries[
+	confidentiality? k1
+]

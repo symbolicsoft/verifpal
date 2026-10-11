@@ -6,7 +6,7 @@ use std::sync::Arc;
 use super::attacker::{AttackerState, DerivationRecord, KnownIdx, RecomposeResult};
 use super::decompose::can_decompose;
 use super::memo::{DeductionMemo, with_memo};
-use super::reuse::reused;
+use super::reuse::forging_pair;
 use super::rewrite::{can_rewrite, combine_binding_values, combine_bindings_hold};
 use crate::primitive::{
 	Capability, CapabilityIndex, CombineRule, MAX_SHARES, Reveal, combines_into,
@@ -245,8 +245,7 @@ fn can_reconstruct_primitive_directly(
 		let Value::Primitive(failed) = &rewrite_value else {
 			return None;
 		};
-		return (!crate::primitive::is_core(p.id)
-			&& !p.instance_check
+		return (!p.instance_check
 			&& failed
 				.arguments
 				.iter()
@@ -255,18 +254,12 @@ fn can_reconstruct_primitive_directly(
 			from: failed.arguments.clone(),
 		});
 	}
-	if crate::primitive::is_core(p.id)
-		&& crate::primitive::core_spec(p.id).is_ok_and(|s| s.definition_check)
-		&& rewrite_value.equivalent(&Value::Primitive(Arc::clone(p)), true)
-	{
-		return None;
-	}
 	let Value::Primitive(rewritten_prim) = &rewrite_value else {
 		return None;
 	};
 	let forgeable_secret =
 		capabilities.forgeable_secret_position(rewritten_prim, attacker.current_phase);
-	let reused = reused(rewritten_prim, attacker);
+	let reused = forging_pair(rewritten_prim, attacker);
 	let by_reuse: &[usize] = match reuse_rule(rewritten_prim.id) {
 		Some(rule) if reused.is_some() && !capabilities.forgery_denied(rewritten_prim) => {
 			&rule.forgeable
@@ -396,6 +389,7 @@ fn bound_partials(partial: &Primitive, rule: &CombineRule) -> Vec<Value> {
 fn partial_groups(
 	target: &Primitive,
 	rule: &CombineRule,
+	capabilities: &CapabilityIndex,
 	attacker: &AttackerState,
 ) -> Vec<PartialGroup> {
 	let Some(reveal) = recompose_rule(rule.split).map(|r| r.reveal) else {
@@ -461,7 +455,72 @@ fn partial_groups(
 			}),
 		}
 	}
+	groups.extend(chosen_groups(target, rule, capabilities, attacker));
 	groups
+}
+
+fn chosen_groups(
+	target: &Primitive,
+	rule: &CombineRule,
+	capabilities: &CapabilityIndex,
+	attacker: &AttackerState,
+) -> Vec<PartialGroup> {
+	let Some(reveal) = recompose_rule(rule.split).map(|r| r.reveal) else {
+		return Vec::new();
+	};
+	let Some(&arity) = crate::primitive::spec(rule.partial)
+		.ok()
+		.and_then(|spec| spec.arity.first())
+	else {
+		return Vec::new();
+	};
+	let nil = crate::term::value_nil();
+	let agree: Vec<Value> = rule
+		.agree
+		.iter()
+		.map(|&i| {
+			if let Some(at) = rule.carry.iter().position(|&c| c == i) {
+				return target.arguments[1 + at].clone();
+			}
+			match rule.bindings.iter().find(|binding| binding.list == i) {
+				Some(binding) => Value::primitive(binding.wrapper, vec![nil.clone()], 0),
+				None => nil.clone(),
+			}
+		})
+		.collect();
+	let secret = &target.arguments[0];
+	let mut splits: Vec<Arc<Primitive>> = Vec::new();
+	let shares = attacker
+		.known
+		.iter()
+		.chain(capabilities.forgeable_secrets(rule.partial, attacker.current_phase));
+	for share in shares {
+		let Value::Primitive(share) = share else {
+			continue;
+		};
+		if share.id != rule.split
+			|| share.threshold == 0
+			|| !share
+				.arguments
+				.get(reveal)
+				.is_some_and(|s| s.equivalent(secret, true))
+			|| splits
+				.iter()
+				.any(|held| equivalent_primitives(held, share, false))
+		{
+			continue;
+		}
+		splits.push(Arc::clone(share));
+	}
+	splits
+		.into_iter()
+		.map(|split| PartialGroup {
+			split,
+			agree: agree.clone(),
+			arity: arity as usize,
+			held: Vec::new(),
+		})
+		.collect()
 }
 
 fn combinable(
@@ -473,7 +532,7 @@ fn combinable(
 		if target.arguments.len() != 1 + rule.carry.len() {
 			continue;
 		}
-		for group in partial_groups(target, rule, attacker) {
+		for group in partial_groups(target, rule, capabilities, attacker) {
 			let threshold = group.split.threshold;
 			let mut used: Vec<Value> = group.held.iter().map(|(_, v)| v.clone()).collect();
 			if used.len() >= threshold {

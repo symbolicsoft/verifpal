@@ -112,7 +112,7 @@ pub(crate) struct Knowledge {
 	origins: Arc<Vec<Origin>>,
 	pub(crate) protocol: Arc<Vec<(Value, Value, bool)>>,
 	pub(crate) built: Arc<TermSet>,
-	annotated: Arc<CapabilityIndex>,
+	capabilities: Arc<CapabilityIndex>,
 	candidates: Arc<Candidates>,
 	pools: Arc<IdMap<(usize, usize), usize>>,
 	settled: Arc<Vec<u8>>,
@@ -136,7 +136,7 @@ impl Knowledge {
 			origins: Arc::new(Vec::new()),
 			protocol: Arc::new(Vec::new()),
 			built: Arc::new(TermSet::default()),
-			annotated: Arc::new(CapabilityIndex::default()),
+			capabilities: Arc::new(CapabilityIndex::default()),
 			candidates: Arc::new(Candidates::default()),
 			pools: Arc::new(IdMap::default()),
 			settled: Arc::new(Vec::new()),
@@ -205,7 +205,7 @@ impl Knowledge {
 		let mut out = Knowledge {
 			protocol: Arc::clone(&self.protocol),
 			built: Arc::clone(&self.built),
-			annotated: Arc::clone(&self.annotated),
+			capabilities: Arc::clone(&self.capabilities),
 			candidates: Arc::clone(&self.candidates),
 			..Knowledge::new(self.state.current_phase)
 		};
@@ -224,17 +224,29 @@ impl Knowledge {
 		out
 	}
 
-	pub(crate) fn breaks(
-		&self,
-		p: &Primitive,
-		capabilities: &CapabilityIndex,
-	) -> Option<Vec<Value>> {
-		broken(p, capabilities, &self.annotated, &self.state)
+	pub(crate) fn declaring(mut self, capabilities: &CapabilityIndex) -> Knowledge {
+		self.capabilities = Arc::new(capabilities.clone());
+		self
 	}
 
-	pub(crate) fn withholding(&self, v: &Value, capabilities: &CapabilityIndex) -> Knowledge {
+	pub(crate) fn capabilities(&self) -> &Arc<CapabilityIndex> {
+		&self.capabilities
+	}
+
+	pub(crate) fn breaks(&self, p: &Primitive) -> Option<Vec<Value>> {
+		can_break_weak(p, &self.capabilities, &self.state)
+	}
+
+	pub(crate) fn disclosing(&self, keep: impl Fn(usize, &Value) -> bool) -> Knowledge {
+		let mut out = self.disclosed_where(keep);
+		out.close();
+		out
+	}
+
+	pub(crate) fn withholding(&self, v: &Value) -> Knowledge {
 		let mut out = self.disclosed(Some(v));
-		out.closing(capabilities, Some(v));
+		let capabilities = Arc::clone(&self.capabilities);
+		out.closing(&capabilities, Some(v));
 		out
 	}
 
@@ -256,11 +268,10 @@ impl Knowledge {
 	pub(crate) fn proving(
 		&self,
 		v: &Value,
-		capabilities: &CapabilityIndex,
 		disclosed: impl Fn(usize, &Value) -> bool,
 	) -> Option<Knowledge> {
 		let mut world = self.disclosed_where(disclosed);
-		world.closing(&capabilities.without_forging(v), None);
+		world.closing(&self.capabilities.without_forging(v), None);
 		world.state.knows(v).is_some().then_some(world)
 	}
 
@@ -298,10 +309,14 @@ impl Knowledge {
 		for term in &built {
 			self.note_built(term);
 		}
+		self.note_annotated(pre);
+	}
+
+	pub(crate) fn note_annotated(&mut self, pre: &Value) {
 		if crate::term::subterms(pre)
 			.any(|term| matches!(term, Value::Primitive(p) if !p.capabilities.is_empty()))
 		{
-			Arc::make_mut(&mut self.annotated).insert(pre);
+			Arc::make_mut(&mut self.capabilities).insert(pre);
 			self.closed = false;
 		}
 	}
@@ -313,13 +328,14 @@ impl Knowledge {
 		}
 	}
 
-	pub(crate) fn derivable(&mut self, v: &Value, capabilities: &CapabilityIndex) -> bool {
-		self.close(capabilities);
-		obtainable(v, capabilities, &self.state)
+	pub(crate) fn derivable(&mut self, v: &Value) -> bool {
+		self.close();
+		obtainable(v, &self.capabilities, &self.state)
 	}
 
-	pub(crate) fn close(&mut self, capabilities: &CapabilityIndex) {
-		self.closing(capabilities, None);
+	pub(crate) fn close(&mut self) {
+		let capabilities = Arc::clone(&self.capabilities);
+		self.closing(&capabilities, None);
 	}
 
 	fn closing(&mut self, capabilities: &CapabilityIndex, withheld: Option<&Value>) {
@@ -334,13 +350,13 @@ impl Knowledge {
 				grown,
 				settling,
 				unproven,
+				pairs,
 				..
 			} = {
 				let snapshot = Arc::clone(&self.state);
 				let _memo = crate::theory::DeductionMemo::scoped(capabilities, &snapshot);
 				Pass {
 					capabilities,
-					annotated: &self.annotated,
 					attacker: &snapshot,
 					built: &self.built,
 					pools: &self.pools,
@@ -366,7 +382,6 @@ impl Knowledge {
 					self.learn(&v, Origin::Derived(record));
 				}
 			}
-			let pairs = reuse_pairs(capabilities, &self.state, &self.built);
 			for pair in pairs {
 				self.note_reused(&pair);
 				let Value::Primitive(p) = &pair[0] else {
@@ -413,15 +428,6 @@ impl Knowledge {
 	}
 }
 
-fn broken(
-	p: &Primitive,
-	capabilities: &CapabilityIndex,
-	annotated: &CapabilityIndex,
-	attacker: &AttackerState,
-) -> Option<Vec<Value>> {
-	can_break_weak(p, capabilities, attacker).or_else(|| can_break_weak(p, annotated, attacker))
-}
-
 fn disclosure(record: &DerivationRecord) -> bool {
 	matches!(
 		record,
@@ -433,7 +439,6 @@ type Pools = Vec<((usize, usize), usize)>;
 
 struct Pass<'s> {
 	capabilities: &'s CapabilityIndex,
-	annotated: &'s CapabilityIndex,
 	attacker: &'s AttackerState,
 	built: &'s TermSet,
 	pools: &'s IdMap<(usize, usize), usize>,
@@ -446,6 +451,7 @@ struct Found {
 	grown: Pools,
 	settling: Vec<(usize, u8)>,
 	unproven: Vec<usize>,
+	pairs: Vec<[Value; 2]>,
 	seen: TermSet,
 }
 
@@ -490,6 +496,7 @@ impl Pass<'_> {
 		self.reconstructions(&mut found, candidates);
 		self.recompositions(&mut found, candidates);
 		self.forward_rewrites(&mut found, candidates);
+		self.reuse_pairs(&mut found);
 		found
 	}
 
@@ -520,7 +527,7 @@ impl Pass<'_> {
 		}
 		if flags & BROKEN == 0
 			&& now & BROKEN == 0
-			&& let Some(revealed) = broken(p, capabilities, self.annotated, attacker)
+			&& let Some(revealed) = can_break_weak(p, capabilities, attacker)
 		{
 			for r in revealed {
 				found.push(
@@ -570,7 +577,9 @@ impl Pass<'_> {
 		if disclosure(&attacker.derivations[at]) || self.genuine.contains(known) {
 			return true;
 		}
-		found.unproven.push(at);
+		if !found.unproven.contains(&at) {
+			found.unproven.push(at);
+		}
 		false
 	}
 
@@ -631,6 +640,52 @@ impl Pass<'_> {
 						using: p.arguments.clone(),
 					},
 				);
+			}
+		}
+	}
+
+	fn reuse_pairs(&self, found: &mut Found) {
+		let (capabilities, attacker) = (self.capabilities, self.attacker);
+		let mut buckets: IdMap<u64, Vec<usize>> = IdMap::default();
+		for (i, known) in attacker.known.iter().enumerate() {
+			let Value::Primitive(p) = known else {
+				continue;
+			};
+			let Some(rule) = reuse_rule(p.id) else {
+				continue;
+			};
+			if rule.fixed.iter().all(|&at| {
+				p.arguments
+					.get(at)
+					.is_some_and(|a| obtainable(a, capabilities, attacker))
+			}) {
+				continue;
+			}
+			if !self.openable(found, i, p, known) {
+				continue;
+			}
+			let mut key = u64::from(p.id);
+			for &at in &rule.fixed {
+				let Some(argument) = p.arguments.get(at) else {
+					continue;
+				};
+				key = key.rotate_left(17).wrapping_add(argument.hash_value());
+			}
+			buckets.entry(key).or_default().push(i);
+		}
+		for members in buckets.values() {
+			if members.len() < 2 {
+				continue;
+			}
+			for &i in members {
+				let of = &attacker.known[i];
+				let Some(&j) = members
+					.iter()
+					.find(|&&j| reused_pair(of, &attacker.known[j]))
+				else {
+					continue;
+				};
+				found.pairs.push([of.clone(), attacker.known[j].clone()]);
 			}
 		}
 	}
@@ -736,69 +791,6 @@ fn advance(choice: &mut [usize], base: usize) -> bool {
 	false
 }
 
-fn minted(
-	p: &Arc<Primitive>,
-	held: &Value,
-	capabilities: &CapabilityIndex,
-	attacker: &AttackerState,
-	built: &TermSet,
-) -> bool {
-	!built.contains(held)
-		&& can_reconstruct_primitive(p, capabilities, attacker).is_some_and(|b| b.forged())
-}
-
-fn reuse_pairs(
-	capabilities: &CapabilityIndex,
-	attacker: &AttackerState,
-	built: &TermSet,
-) -> Vec<[Value; 2]> {
-	let _memo = crate::theory::DeductionMemo::ensure(capabilities, attacker);
-	let mut buckets: IdMap<u64, Vec<usize>> = IdMap::default();
-	for (i, known) in attacker.known.iter().enumerate() {
-		let Value::Primitive(p) = known else {
-			continue;
-		};
-		let Some(rule) = reuse_rule(p.id) else {
-			continue;
-		};
-		if rule.fixed.iter().all(|&at| {
-			p.arguments
-				.get(at)
-				.is_some_and(|a| obtainable(a, capabilities, attacker))
-		}) {
-			continue;
-		}
-		if minted(p, known, capabilities, attacker, built) {
-			continue;
-		}
-		let mut key = u64::from(p.id);
-		for &at in &rule.fixed {
-			let Some(argument) = p.arguments.get(at) else {
-				continue;
-			};
-			key = key.rotate_left(17).wrapping_add(argument.hash_value());
-		}
-		buckets.entry(key).or_default().push(i);
-	}
-	let mut pairs = Vec::new();
-	for members in buckets.values() {
-		if members.len() < 2 {
-			continue;
-		}
-		for &i in members {
-			let of = &attacker.known[i];
-			let Some(&j) = members
-				.iter()
-				.find(|&&j| reused_pair(of, &attacker.known[j]))
-			else {
-				continue;
-			};
-			pairs.push([of.clone(), attacker.known[j].clone()]);
-		}
-	}
-	pairs
-}
-
 fn applied(declared: &Value, pre: &Value, out: &mut Vec<Value>) {
 	let (Value::Primitive(d), Value::Primitive(p)) = (declared, pre) else {
 		return;
@@ -901,6 +893,73 @@ mod tests {
 		assert!(!share_disclosed(&model(""), false));
 		assert!(!share_disclosed(&model(""), true));
 		assert!(share_disclosed(&model("leaks kmf_na\n"), false));
+	}
+
+	#[test]
+	fn an_authored_relay_discloses_nothing() {
+		let model = |leak: &str| {
+			format!(
+				"attacker[active]\n\
+				principal Alice[\n\
+				knows public ard_cl, ard_m\n\
+				generates ard_k, ard_n\n\
+				ard_s1, ard_s2 = THRESHOLD_SPLIT[2](ard_k)\n\
+				ard_p = THRESHOLD_SIGN[forgeable](ard_s1, ard_n, ard_cl, ard_m)\n\
+				leaks ard_n\n\
+				{leak}\
+				]\n\
+				principal Carol[\n\
+				generates ard_x\n\
+				]\n\
+				Carol -> Bob: ard_x\n\
+				principal Bob[\n\
+				_ = HASH(ard_x)\n\
+				]\n\
+				Bob -> Dave: ard_x\n\
+				principal Dave[\n\
+				_ = HASH(ard_x)\n\
+				]\n\
+				queries[\n\
+				confidentiality? ard_s1\n\
+				]\n"
+			)
+		};
+		for (leak, disclosed) in [("", false), ("leaks ard_p\n", true)] {
+			let _generation = crate::util::generation::GenerationGuard::enter();
+			let m = crate::syntax::parser::parse_string("ard.vp", &model(leak)).expect("parses");
+			let km = crate::protocol::sanity::sanity(&m).expect("sane");
+			let program = Program::of(&m, &km);
+			let cx = Context::new(&program, &km);
+			let slot = |name: &str| {
+				km.slots
+					.position(|s| s.constant.name.as_ref() == name)
+					.expect("declared")
+			};
+			let honest = |name: &str| {
+				crate::theory::reduce_once(&crate::protocol::trace::resolve_trace_constant(
+					&km.slots[slot(name)].constant,
+					&km,
+				))
+			};
+			let bob = program.runs.position(|r| r.name == "Bob").expect("run");
+			let ex = execute(
+				&cx,
+				&vec![Install::Value {
+					run: bob,
+					slot: slot("ard_x"),
+					value: honest("ard_p"),
+				}],
+			);
+			assert!(ex.stuck.is_empty());
+			assert_eq!(
+				obtainable(
+					&honest("ard_s1"),
+					ex.knowledge.capabilities(),
+					&ex.knowledge.state
+				),
+				disclosed
+			);
+		}
 	}
 
 	#[test]

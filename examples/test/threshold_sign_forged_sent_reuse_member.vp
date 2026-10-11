@@ -1,0 +1,26 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1 at one session and at two.
+//
+// The counterweight to threshold_sign_forged_unsent_reuse_member.vp: Alice
+// also sends p1, so the attacker holds her genuine partial. Its nonce,
+// commitment list and message are known, which opens k1 directly, and p1 and
+// p2 are a genuine reuse pair as well.
+attacker[passive]
+principal Alice[
+	generates k0, na, nb, m1, m2
+	k1, k2 = THRESHOLD_SPLIT[2](k0)
+	ca = PUBKEY(na)
+	cb = PUBKEY(nb)
+	p1 = THRESHOLD_SIGN[forgeable](k1, na, ca, m1)
+	p2 = THRESHOLD_SIGN(k1, na, cb, m2)
+	leaks na
+]
+Alice -> Bob: ca, m1, p1, p2
+principal Bob[
+	_ = HASH(p2)
+]
+queries[
+	confidentiality? k1
+]

@@ -1,11 +1,22 @@
 /* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
  * SPDX-License-Identifier: GPL-3.0-only */
 
+use super::control::attacker_authored;
 use super::symbolic::SymbolicState;
-use super::vars::{Substitution, apply, attacker_var_id, collect_free_vars, collect_vars, dedupe};
+use super::vars::{
+	Substitution, apply, attacker_var_id, collect_free_vars, collect_vars, dedupe, ground_free,
+	is_slot_var_id, slot_of_var_id,
+};
+use crate::protocol::ProtocolTrace;
 use crate::term::{Value, VariableId, value_nil};
 
-pub(crate) fn solve_divergent(a: &Value, b: &Value, s: &Substitution) -> Vec<Substitution> {
+pub(crate) fn solve_divergent(
+	km: &ProtocolTrace,
+	sym: &SymbolicState,
+	a: &Value,
+	b: &Value,
+	s: &Substitution,
+) -> Vec<Substitution> {
 	let mut a_vars = Vec::new();
 	let mut b_vars = Vec::new();
 	collect_vars(a, &mut a_vars);
@@ -16,7 +27,8 @@ pub(crate) fn solve_divergent(a: &Value, b: &Value, s: &Substitution) -> Vec<Sub
 	let nil_at = |ids: &[VariableId]| {
 		let mut out = s.clone();
 		for id in ids {
-			out.entry(id.clone()).or_insert_with(value_nil);
+			out.entry(id.clone())
+				.or_insert_with(|| divergent_filler(km, sym, id));
 		}
 		out
 	};
@@ -29,6 +41,24 @@ pub(crate) fn solve_divergent(a: &Value, b: &Value, s: &Substitution) -> Vec<Sub
 		.collect();
 	out.push(nil_at(&[a_vars.as_slice(), b_vars.as_slice()].concat()));
 	dedupe(out)
+}
+
+fn divergent_filler(km: &ProtocolTrace, sym: &SymbolicState, id: &VariableId) -> Value {
+	if !is_slot_var_id(id) {
+		return value_nil();
+	}
+	let slot = slot_of_var_id(id);
+	let Some(Some(term)) = sym.var_terms.get(slot) else {
+		return value_nil();
+	};
+	fillers()
+		.into_iter()
+		.find(|filler| {
+			let mut bound = Substitution::default();
+			bound.insert(id.clone(), filler.clone());
+			attacker_authored(&ground_free(&apply(term, &bound)), slot, km)
+		})
+		.unwrap_or_else(value_nil)
 }
 
 pub(crate) fn distinguish(sym: &SymbolicState, proposal: &Substitution) -> Option<Substitution> {

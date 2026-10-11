@@ -1,0 +1,42 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0 at one session and at two.
+//
+// solver_nested_hashed_oracle.vp with nc guarded: Bob decrypts only under
+// HASH(kb, nc), which opens none of Alice's ciphertexts.
+attacker[active]
+
+principal Carol[
+	knows private kb
+	generates mc, nc
+	xc = ENC(HASH(kb, nc), mc)
+]
+
+Carol -> Bob: [nc], xc
+
+principal Alice[
+	knows private kb
+	generates s, na
+	ca = ENC(HASH(kb, na), s)
+	hs = HASH(s)
+]
+
+Alice -> Dave: na, [ca]
+
+principal Dave[
+	knows private kb
+	sd = DEC(HASH(kb, na), ca)
+]
+
+principal Bob[
+	knows private kb
+	m = DEC(HASH(kb, nc), xc)
+	e = HASH(m)
+]
+
+Bob -> Carol: e
+
+queries[
+	confidentiality? hs
+]

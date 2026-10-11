@@ -1,0 +1,51 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: u1 at one session and at two.
+//
+// a = HASH(s, n1) and b = HASH(s, n2) share Alice's leaked s. b travels under
+// kb, which Carol2 returns to whoever proves s inside a PKE message. The
+// attacker installs PKE_ENC(gc, CONCAT(s, nil)) at Carol2, learns kb, opens
+// eb, and rebuilds both values from the one secret s.
+//
+// Witness rejection once collected the components of every install in the
+// execution, so the s the attacker fed Carol2's unrelated check counted as
+// "supplied" and the link was rejected. Only the installs the queried values
+// read now count. unlink_supplied_unrelated_oracle_guarded.vp is the
+// counterweight; unlink_forced_key_carries_no_secret.vp keeps rejecting an
+// install that does feed a queried value.
+attacker[active]
+principal Carol2[
+	knows private skc
+	gc = PUBKEY(skc)
+]
+Carol2 -> Carol: [gc]
+principal Alice[
+	knows private s, kb
+	generates n1, n2
+	a = HASH(s, n1)
+	b = HASH(s, n2)
+	eb = ENC(kb, b)
+	leaks s
+]
+Alice -> Dave: n1, n2, a, eb
+principal Carol[
+	knows private s
+	generates r
+	m = PKE_ENC(gc, CONCAT(s, r))
+]
+Carol -> Carol2: m
+principal Carol2[
+	knows private s, kb
+	d = PKE_DEC(skc, m)
+	ds, dr = SPLIT(d)
+	_ = ASSERT(ds, s)?
+	o = ENC(dr, kb)
+]
+Carol2 -> Dave: o
+principal Dave[
+	_ = HASH(n1, n2, a, eb, o)
+]
+queries[
+	unlinkability? a, b
+]

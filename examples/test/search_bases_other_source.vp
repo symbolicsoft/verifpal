@@ -1,0 +1,50 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1 at one and two sessions. Bob opens x under kb and leaks it.
+// Eve and Carol both re-encrypt under kb what they open under kc, so either
+// turns Alice's leaked ENC(kc, s) into ENC(kb, s). Eve then fails her MAC
+// check and never sends Bob the guarded gt he waits for, but Carol has no
+// such check: the attacker hands Carol ENC(kc, s) and Bob Carol's output,
+// and Bob leaks s.
+attacker[active]
+
+principal Alice[
+	knows private kc, km, s
+	generates ne, nc
+	z = ENC(kc, ne)
+	tz = MAC(km, z)
+	y = ENC(kc, nc)
+	w = ENC(kc, s)
+	leaks w
+]
+Alice -> Eve: z, [tz]
+Alice -> Carol: y
+
+principal Eve[
+	knows private kc, kb, km
+	generates gt, nx
+	ve = DEC(kc, z)
+	oute = ENC(kb, ve)
+	leaks oute
+	_ = ASSERT(MAC(km, z), tz)?
+	x = ENC(kb, nx)
+]
+Eve -> Bob: [gt], x
+
+principal Carol[
+	knows private kc, kb
+	vc = DEC(kc, y)
+	outc = ENC(kb, vc)
+	leaks outc
+]
+
+principal Bob[
+	knows private kb
+	d = DEC(kb, x)
+	leaks d
+]
+
+queries[
+	confidentiality? s
+]

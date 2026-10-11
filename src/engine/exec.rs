@@ -5,7 +5,6 @@ use std::sync::Arc;
 
 use super::knowledge::{Knowledge, Origin};
 use super::program::{DeliveryIdx, Event, Program, RunIdx, StepIdx};
-use crate::primitive::CapabilityIndex;
 use crate::protocol::ProtocolTrace;
 use crate::protocol::SlotIdx;
 use crate::syntax::{Declaration, Qualifier};
@@ -143,7 +142,7 @@ pub(crate) struct Context<'a> {
 
 impl<'a> Context<'a> {
 	pub(crate) fn new(program: &'a Program, km: &'a ProtocolTrace) -> Context<'a> {
-		let mut initial = Knowledge::new(0);
+		let mut initial = Knowledge::new(0).declaring(&km.capabilities);
 		initial.learn(&crate::term::value_nil(), Origin::Initial);
 		for slot in &km.slots {
 			let c = &slot.constant;
@@ -198,11 +197,8 @@ fn deliverable(v: &Value) -> bool {
 		})
 }
 
-fn installed_components(
-	value: &Value,
-	knowledge: &Knowledge,
-	capabilities: &CapabilityIndex,
-) -> Arc<[Value]> {
+fn installed_components(value: &Value, knowledge: &Knowledge) -> Arc<[Value]> {
+	let capabilities = knowledge.capabilities();
 	let _memo = crate::theory::DeductionMemo::scoped(capabilities, &knowledge.state);
 	let mut seen = crate::term::hashing::TermSet::default();
 	let mut pending = vec![value.clone()];
@@ -336,11 +332,11 @@ pub(crate) fn execute(cx: &Context, installs: &Installs) -> Execution {
 		}
 		freeze(cx, &mut ex, installs, phase);
 		if phase < km.max_phase {
-			ex.knowledge.close(&cx.km.capabilities);
+			ex.knowledge.close();
 			barriers.push(ex.clone());
 		}
 	}
-	ex.knowledge.close(&cx.km.capabilities);
+	ex.knowledge.close();
 	ex.barriers = barriers;
 	ex
 }
@@ -446,7 +442,7 @@ fn freeze(cx: &Context, ex: &mut Execution, installs: &Installs, phase: i32) {
 				}
 				if let Some(t) = delivered(installs, r, slot)
 					&& !ex.stuck.contains(&(r, slot))
-					&& !(deliverable(&t) && ex.knowledge.derivable(&t, &cx.km.capabilities))
+					&& !(deliverable(&t) && ex.knowledge.derivable(&t))
 				{
 					ex.stuck.push((r, slot))
 				}
@@ -455,30 +451,69 @@ fn freeze(cx: &Context, ex: &mut Execution, installs: &Installs, phase: i32) {
 	}
 }
 
+pub(crate) fn later_outputs(cx: &Context, r: RunIdx, at: StepIdx, slot: SlotIdx) -> Vec<SlotIdx> {
+	let km = cx.km;
+	let Value::Primitive(first) = &km.slots[slot].initial_value else {
+		return Vec::new();
+	};
+	if !first.instance_check {
+		return Vec::new();
+	}
+	let mut out = Vec::new();
+	for step in cx.program.runs[r].steps.iter().skip(at.index() + 1) {
+		let Event::Assign(next) = step.event else {
+			break;
+		};
+		let Value::Primitive(p) = &km.slots[next].initial_value else {
+			break;
+		};
+		if p.output != first.output + out.len() + 1
+			|| !crate::term::equivalence::equivalent_primitives(p, first, false)
+		{
+			break;
+		}
+		out.push(next);
+	}
+	out
+}
+
 fn assign(cx: &Context, ex: &mut Execution, r: RunIdx, slot: SlotIdx) {
 	let km = cx.km;
+	let later = later_outputs(cx, r, ex.runs[r].pc, slot);
 	let mut memo = IdMap::default();
-	let pre = resolve(
-		&km.slots[slot].initial_value,
-		&ex.runs[r].env,
-		km,
-		&mut memo,
-	);
-	let pre = crate::term::hashing::hashcons(&pre);
-	let (value, failed) = match &pre {
-		Value::Primitive(p) => {
-			let (ok, reduced) = can_rewrite(p);
-			(
-				crate::term::hashing::hashcons(&reduced),
-				!ok && p.instance_check,
-			)
-		}
-		Value::Constant(_) => (pre.clone(), false),
-		Value::Variable(_) => (pre.clone(), true),
+	let env = &ex.runs[r].env;
+	let mut evaluate = |s: SlotIdx| {
+		let pre = crate::term::hashing::hashcons(&resolve(
+			&km.slots[s].initial_value,
+			env,
+			km,
+			&mut memo,
+		));
+		let (value, failed) = match &pre {
+			Value::Primitive(p) => {
+				let (ok, reduced) = can_rewrite(p);
+				(
+					crate::term::hashing::hashcons(&reduced),
+					!ok && p.instance_check,
+				)
+			}
+			Value::Constant(_) => (pre.clone(), false),
+			Value::Variable(_) => (pre.clone(), true),
+		};
+		(s, pre, value, failed)
+	};
+	let first = evaluate(slot);
+	let (computed, pre, value, failed) = match first.3 {
+		true => first,
+		false => later
+			.into_iter()
+			.map(&mut evaluate)
+			.find(|&(_, _, _, failed)| failed)
+			.unwrap_or(first),
 	};
 	ex.knowledge.note_protocol(&value, &pre, true);
 	ex.knowledge
-		.note_computed(&km.slots[slot].initial_value, &pre, &value);
+		.note_computed(&km.slots[computed].initial_value, &pre, &value);
 	ex.runs[r].env[slot] = Some(Held {
 		value,
 		pre,
@@ -513,7 +548,7 @@ fn step_run(
 		}
 		Event::Assign(slot) => assign(cx, ex, r, slot),
 		Event::Leak(slot) => {
-			if let Some(h) = ex.runs[r].held(slot) {
+			if let Some(h) = ex.runs[r].held(slot).filter(|h| !h.authored) {
 				let v = h.value.clone();
 				ex.knowledge.learn(&v, Origin::Leak { run: r, slot });
 			}
@@ -522,10 +557,12 @@ fn step_run(
 			let delivery = &cx.program.deliveries[d];
 			let mut values = Vec::with_capacity(delivery.slots.len());
 			for &(slot, _) in &delivery.slots {
-				let v = ex.runs[r]
-					.held(slot)
-					.map_or_else(|| km.slots[slot].initial_value.clone(), |h| h.value.clone());
-				ex.knowledge.learn(&v, Origin::Wire { run: r, slot });
+				let held = ex.runs[r].held(slot);
+				let v =
+					held.map_or_else(|| km.slots[slot].initial_value.clone(), |h| h.value.clone());
+				if !held.is_some_and(|h| h.authored) {
+					ex.knowledge.learn(&v, Origin::Wire { run: r, slot });
+				}
 				values.push(v);
 			}
 			ex.sent[d] = Some(values);
@@ -550,7 +587,7 @@ fn step_run(
 							received.push((slot, t, false));
 							continue;
 						}
-						if !deliverable(&t) || !ex.knowledge.derivable(&t, &cx.km.capabilities) {
+						if !deliverable(&t) || !ex.knowledge.derivable(&t) {
 							return false;
 						}
 						received.push((slot, t, true));
@@ -560,8 +597,7 @@ fn step_run(
 				}
 			}
 			for (slot, value, installed) in received {
-				let components = installed
-					.then(|| installed_components(&value, &ex.knowledge, &cx.km.capabilities));
+				let components = installed.then(|| installed_components(&value, &ex.knowledge));
 				ex.knowledge.note_protocol(&value, &value, false);
 				let relayed = !installed
 					&& ex.runs[delivery.sender]

@@ -1,0 +1,25 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1 at one session and at two.
+//
+// The counterweight to cap_forgeable_unsent_reuse_member.vp: Alice also sends
+// e1. Both ciphertexts the encryption function produced under one key and
+// nonce are now on the wire, a genuine reuse pair whether or not e1 is
+// mintable, and m2 follows.
+attacker[passive]
+principal Alice[
+	knows private k
+	knows public ad
+	generates n, m1, m2
+	e1 = AEAD_ENC[forgeable](k, n, m1, ad)
+	e2 = AEAD_ENC(k, n, m2, ad)
+	leaks m1
+]
+Alice -> Bob: n, e1, e2
+principal Bob[
+	_ = HASH(e2)
+]
+queries[
+	confidentiality? m2
+]

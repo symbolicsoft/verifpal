@@ -80,6 +80,78 @@ fn reach(p: &Arc<Primitive>, seen: &mut IdMap<usize, Arc<Reach>>) -> Arc<Reach> 
 	out
 }
 
+fn reduces_over_variables(v: &Value) -> bool {
+	matches!(v, Value::Primitive(p) if (crate::primitive::rewrite_rule(p.id).is_some()
+		|| crate::primitive::is_projection(p.id))
+		&& contains_var(v))
+}
+
+fn bears_oracle(v: &Value) -> bool {
+	crate::term::subterms(v).any(|term| match term {
+		Value::Primitive(p) => {
+			(crate::primitive::is_projection(p.id) && p.arguments.first().is_some_and(contains_var))
+				|| crate::primitive::rewrite_rule(p.id)
+					.is_some_and(|rule| p.arguments.get(rule.from).is_some_and(contains_var))
+		}
+		Value::Constant(_) | Value::Variable(_) => false,
+	})
+}
+
+pub(super) fn inverts_through(v: &Value) -> bool {
+	crate::term::subterms(v).any(|term| match term {
+		Value::Primitive(p) => {
+			(crate::primitive::is_projection(p.id) && p.arguments.first().is_some_and(contains_var))
+				|| crate::primitive::rewrite_rule(p.id).is_some_and(|rule| {
+					matches!(p.arguments.get(rule.from), Some(from @ Value::Primitive(inner))
+						if inner.id != rule.id && contains_var(from))
+				})
+		}
+		Value::Constant(_) | Value::Variable(_) => false,
+	})
+}
+
+pub(super) fn revealed_oracles(wire_terms: &[Value]) -> Vec<(Value, Vec<Value>)> {
+	let mut out: Vec<(Value, Vec<Value>)> = Vec::new();
+	let mut seen: Vec<(Value, Vec<Value>)> = Vec::new();
+	let mut index: IdMap<u64, Vec<usize>> = IdMap::default();
+	let mut pending: Vec<(Value, Vec<Value>)> = wire_terms
+		.iter()
+		.filter(|term| contains_var(term))
+		.map(|term| (term.clone(), Vec::new()))
+		.collect();
+	while let Some((term, given)) = pending.pop() {
+		let Value::Primitive(p) = &term else {
+			continue;
+		};
+		let Some((revealed, needed)) = decomposition_targets(p) else {
+			continue;
+		};
+		for value in revealed {
+			if !contains_var(&value) {
+				continue;
+			}
+			let mut path = given.clone();
+			path.extend(needed.iter().cloned());
+			let bucket = index.entry(value.hash_value()).or_default();
+			if bucket.iter().any(|&at| {
+				let (held, route) = &seen[at];
+				held.equivalent(&value, true)
+					&& route.len() == path.len()
+					&& route.iter().zip(&path).all(|(a, b)| a.equivalent(b, true))
+			}) {
+				continue;
+			}
+			bucket.push(seen.len());
+			seen.push((value.clone(), path.clone()));
+			if reduces_over_variables(&value) || bears_oracle(&value) {
+				out.push((value.clone(), path.clone()));
+			}
+			pending.push((value, path));
+		}
+	}
+	out
+}
+
 pub(super) fn decomposition_targets(p: &Primitive) -> Option<(Vec<Value>, Vec<Value>)> {
 	if crate::primitive::core_reveals_arguments(p.id) {
 		return Some((p.arguments.clone(), Vec::new()));
@@ -181,19 +253,6 @@ impl<'a> Deducer<'a> {
 				}
 			}
 		}
-		if routes.is_empty() {
-			let mut out = Vec::new();
-			if blocked {
-				for (shaped, bound) in self.shape_for_decomposition(p, s) {
-					let shaped = Value::Primitive(shaped);
-					let mut memo = DecompositionMemo::default();
-					out.extend(self.solve_decomposition_from(&shaped, goal, &bound, &mut memo));
-				}
-				out = dedupe(out);
-			}
-			memo.insert(key, (Arc::clone(p), out.clone()));
-			return out;
-		}
 		let mut out = Vec::new();
 		for (revealed, given, annotated) in routes {
 			for value in revealed {
@@ -219,6 +278,13 @@ impl<'a> Deducer<'a> {
 					frontier = self.solve_each(required, &frontier);
 				}
 				out.extend(frontier);
+			}
+		}
+		if blocked {
+			for (shaped, bound) in self.shape_for_decomposition(p, s) {
+				let shaped = Value::Primitive(shaped);
+				let mut memo = DecompositionMemo::default();
+				out.extend(self.solve_decomposition_from(&shaped, goal, &bound, &mut memo));
 			}
 		}
 		let out = dedupe(out);

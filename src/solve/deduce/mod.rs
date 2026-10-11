@@ -55,6 +55,7 @@ struct Shared<'a> {
 	capabilities: &'a CapabilityIndex,
 	wire_terms: Vec<Value>,
 	wire_reach: std::sync::OnceLock<Vec<Option<Arc<Reach>>>>,
+	revealed_oracles: std::sync::OnceLock<Vec<(Value, Vec<Value>)>>,
 	slot_terms: Vec<(VariableId, Value)>,
 	honest: Substitution,
 	arities: Arities,
@@ -93,11 +94,19 @@ impl<'a> Deducer<'a> {
 		for held in attacker.known.iter() {
 			note_arities(held, &mut known);
 		}
-		Self::with_basis(km, attacker, sym, &known, Substitution::default())
+		Self::with_basis(
+			km,
+			&km.capabilities,
+			attacker,
+			sym,
+			&known,
+			Substitution::default(),
+		)
 	}
 
 	pub(crate) fn with_basis(
 		km: &'a ProtocolTrace,
+		capabilities: &'a CapabilityIndex,
 		attacker: &'a AttackerState,
 		sym: &'a SymbolicState,
 		known: &Arities,
@@ -128,9 +137,10 @@ impl<'a> Deducer<'a> {
 			}
 		}
 		let shared = Shared {
-			capabilities: &km.capabilities,
+			capabilities,
 			wire_terms,
 			wire_reach: std::sync::OnceLock::new(),
+			revealed_oracles: std::sync::OnceLock::new(),
 			slot_terms,
 			honest,
 			arities,
@@ -158,6 +168,10 @@ impl<'a> Deducer<'a> {
 			declined: AtomicBool::new(false),
 		}));
 		self
+	}
+
+	pub(crate) fn capabilities(&self) -> &'a CapabilityIndex {
+		self.shared.capabilities
 	}
 
 	pub(crate) fn declined_bound(&self) -> bool {
@@ -231,11 +245,14 @@ impl<'a> Deducer<'a> {
 			return;
 		}
 
-		let cycling = self
-			.active
-			.borrow()
-			.iter()
-			.position(|(seen, goal)| *seen == key && goal.equivalent(&g, true));
+		let cycling = self.active.borrow().iter().position(|(seen, goal)| {
+			if contains_var(goal) {
+				let now = apply(goal, s);
+				now.hash_value() == key && now.equivalent(&g, true)
+			} else {
+				*seen == key && goal.equivalent(&g, true)
+			}
+		});
 		if let Some(at) = cycling {
 			self.cut_at(at);
 			return;
@@ -364,6 +381,41 @@ impl<'a> Deducer<'a> {
 		}
 
 		self.solve_by_decomposition(g, s, out);
+	}
+
+	pub(crate) fn holds(&self, v: &Value) -> bool {
+		!contains_var(v) && (self.attacker.knows(v).is_some() || self.obtainable(v))
+	}
+
+	pub(crate) fn held_matches(&self, goal: &Value, s: &Substitution) -> Vec<Substitution> {
+		let g = apply(goal, s);
+		let Value::Primitive(pattern) = &g else {
+			return Vec::new();
+		};
+		let mut out = Vec::new();
+		for known in self.held_like(pattern) {
+			for bound in match_values(&g, known, s) {
+				out.extend(self.require_constructible(&bound, s, true));
+			}
+		}
+		let mut built = vec![s.clone()];
+		for argument in &pattern.arguments {
+			built = advance(&built, |bound, next| {
+				let argument = apply(argument, bound);
+				match &argument {
+					Value::Primitive(_) if contains_var(&argument) => {
+						next.extend(self.held_matches(&argument, bound));
+					}
+					_ if !contains_var(&argument) && !self.holds(&argument) => {}
+					_ => next.push(bound.clone()),
+				}
+			});
+			if built.is_empty() {
+				break;
+			}
+		}
+		out.extend(built);
+		dedupe(out)
 	}
 
 	fn require_constructible(

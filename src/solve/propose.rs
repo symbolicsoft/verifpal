@@ -9,6 +9,7 @@ use super::goals::{goals_for_query, oracle_input_goals};
 use super::symbolic::SymbolicState;
 use super::vars::Substitution;
 use super::{Pass, debugging, diverge, vars};
+use crate::primitive::CapabilityIndex;
 use crate::protocol::ProtocolTrace;
 use crate::protocol::SlotIdx;
 use crate::protocol::trace::resolve_trace_constant;
@@ -56,7 +57,15 @@ pub(crate) fn propose(
 	}
 
 	let equivalence = open.iter().any(|q| q.kind == QueryKind::Equivalence);
-	let proposals = with_free_positions(km, attacker, sym, protocol, proposals, equivalence);
+	let proposals = with_free_positions(
+		km,
+		deducer.capabilities(),
+		attacker,
+		sym,
+		protocol,
+		proposals,
+		equivalence,
+	);
 
 	if deducer.declined_bound() {
 		ctx.note_truncation(Truncation::TermDepth);
@@ -154,6 +163,7 @@ fn constructed(
 
 fn with_free_positions(
 	km: &ProtocolTrace,
+	capabilities: &CapabilityIndex,
 	attacker: &AttackerState,
 	sym: &SymbolicState,
 	protocol: &TermSet,
@@ -167,8 +177,8 @@ fn with_free_positions(
 			let proposal = &proposals[at];
 			[
 				keyed_free(&honest, sym, proposal),
-				preserved_free(&honest, sym, proposal, attacker, &km.capabilities),
-				rekeyed_free(&honest, sym, proposal, attacker, &km.capabilities),
+				preserved_free(&honest, sym, proposal, attacker, capabilities),
+				rekeyed_free(&honest, sym, proposal, attacker, capabilities),
 			]
 		})
 		.into_iter()

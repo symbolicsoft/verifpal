@@ -1,0 +1,41 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1 at one session and at two.
+//
+// Alice binds her malleable ciphertext to the key share she received and sends
+// it inside a Diffie-Hellman channel. A man-in-the-middle replaces gb at Alice
+// and ga at Bob with PUBKEY(nil), opens w and holds the ciphertext Alice's
+// annotated call computed: ENC(k, CONCAT(PUBKEY(nil), sec)). The annotation is
+// on the call, so that term is malleable: the attacker reshapes it into
+// ENC(k, CONCAT(nil, nil)), re-wraps it for Bob, and Bob encrypts s under nil.
+//
+// The honest ciphertext ENC(k, CONCAT(gb, sec)) is never disclosed, in any
+// execution, so `malleable` looked up only for the term the honest run
+// computes hid the attack, as `weak` once did (cap_weak_executed_term.vp).
+// cap_malleable_executed_term_strong.vp is the counterweight.
+attacker[active]
+principal Bob[
+	knows private k
+	generates b, s
+	gb = PUBKEY(b)
+]
+Bob -> Alice: gb
+principal Alice[
+	knows private k, sec
+	generates a
+	ga = PUBKEY(a)
+	c = ENC[malleable](k, CONCAT(gb, sec))
+	w = ENC(DH_KEX(gb, a), c)
+]
+Alice -> Bob: ga, w
+principal Bob[
+	cin = DEC(DH_KEX(ga, b), w)
+	y = DEC(k, cin)
+	p, q = SPLIT(y)
+	e = ENC(q, s)
+]
+Bob -> Alice: e
+queries[
+	confidentiality? s
+]

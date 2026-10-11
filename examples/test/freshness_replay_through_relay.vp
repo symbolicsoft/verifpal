@@ -1,0 +1,46 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: f0 at one session, f1 at two.
+//
+// Alice signs CONCAT(na, tag) for Carol over an open channel. Carol verifies,
+// splits, and forwards na_b to Bob on a guarded leg. The attacker replays
+// Alice#2's bundle and signature to Carol, so Bob and Bob#2 both hash na#2:
+// two runs of Bob accept one value. Carol computed na_b from her replayed
+// bundle, so it is replayed, and the guard only says that nobody altered it
+// on its way to Bob (forward_transitive_relay.vp).
+//
+// Replay status once stopped at the run that computed a value: Bob's copy
+// arrived unauthored and read as fresh, although the same attack fails
+// freshness when Bob splits the bundle himself
+// (freshness_replay_through_relay_bundle.vp). A received value is now replayed
+// when its sender's copy is, and a computed one when an input it mentions is.
+// freshness_replay_through_relay_bound.vp is the counterweight.
+attacker[active]
+
+principal Alice[
+	knows private ska
+	knows public tag
+	gka = PUBKEY(ska)
+	generates na
+	bundle = CONCAT(na, tag)
+	s1 = SIGN(ska, bundle)
+]
+
+Alice -> Carol: [gka], bundle, s1
+
+principal Carol[
+	knows public tag
+	_ = SIGNVERIF(gka, bundle, s1)?
+	na_b, tag_b = SPLIT(bundle)?
+]
+
+Carol -> Bob: [na_b]
+
+principal Bob[
+	u = HASH(na_b)
+]
+
+queries[
+	freshness? na_b
+]
