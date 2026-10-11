@@ -1,0 +1,39 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: a1 at one session and at two.
+//
+// aead_nonce_reuse_same_plaintext_retag.vp with Bob leaking k once he has
+// checked e3. At Bob's receive the attacker holds neither the key nor a
+// plaintext, so the re-tag of e1 under ad3 is the only ciphertext it can hand
+// him. Proposals read the knowledge at the end of the phase, where the leaked
+// key opens e1 and e2: the closure no longer pairs ciphertexts the attacker
+// can open itself, and the known plaintexts made the solver offer only chosen
+// ones, so the re-tag was never proposed and the attack was lost. The solver
+// now offers a re-tag of every held ciphertext that shares its key and nonce
+// with another, beside any keyed forgery.
+// aead_nonce_reuse_same_ciphertext_late_key.vp has no pair and holds at one
+// session.
+attacker[active]
+
+principal Alice[
+	knows private k, m
+	knows public n, ad1, ad2, ad3
+	generates n3, m3
+	e1 = AEAD_ENC(k, n, m, ad1)
+	e2 = AEAD_ENC(k, n, m, ad2)
+	e3 = AEAD_ENC(k, n3, m3, ad3)
+]
+
+Alice -> Bob: e1, e2, n3, e3
+
+principal Bob[
+	knows private k
+	knows public ad3
+	d3 = AEAD_DEC(k, n3, e3, ad3)?
+	h = HASH(d3)
+	leaks k
+]
+
+queries[
+	authentication? Alice -> Bob: e3
+]

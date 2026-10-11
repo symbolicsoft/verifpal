@@ -14,7 +14,7 @@ use crate::solve::vars::{
 	Substitution, apply, as_var, contains_var, dedupe, remove_local_bindings,
 };
 use crate::term::{Primitive, Value, VariableId};
-use crate::theory::{forgery, keystream, same_fixed};
+use crate::theory::{forgery, keystream, reused_pair, same_fixed};
 use crate::util::IdMap;
 
 fn shapes_a_variable(v: &Value) -> bool {
@@ -84,8 +84,14 @@ impl<'a> Deducer<'a> {
 		let supplied: Vec<usize> = (0..target.arguments.len())
 			.filter(|i| !rule.forgeable.contains(i))
 			.collect();
+		if let Some(at) = rule.masked {
+			let kept: Vec<usize> = rule.fixed.iter().copied().chain([at]).collect();
+			let open: Vec<usize> = supplied.iter().copied().filter(|&i| i != at).collect();
+			for member in self.retaggable(target) {
+				out.extend(self.reshape(target, member, &kept, &open, s));
+			}
+		}
 		let mut offered: Vec<&Value> = Vec::new();
-		let mut retagged: Vec<&Value> = Vec::new();
 		for pair in self.attacker.reused.iter() {
 			let Value::Primitive(held) = &pair[0] else {
 				continue;
@@ -96,25 +102,45 @@ impl<'a> Deducer<'a> {
 			if self.attacker.knows(&pair[0]).is_none() || self.attacker.knows(&pair[1]).is_none() {
 				continue;
 			}
-			match rule.masked {
-				Some(at) if keystream(held, self.attacker).is_none() => {
-					if retagged.iter().any(|seen| seen.equivalent(&pair[0], true)) {
-						continue;
-					}
-					retagged.push(&pair[0]);
-					let kept: Vec<usize> = rule.fixed.iter().copied().chain([at]).collect();
-					let open: Vec<usize> = supplied.iter().copied().filter(|&i| i != at).collect();
-					out.extend(self.reshape(target, held, &kept, &open, s));
-				}
-				_ => {
-					if offered.iter().any(|seen| same_fixed(seen, &pair[0])) {
-						continue;
-					}
-					offered.push(&pair[0]);
-					out.extend(self.reshape(target, held, &rule.fixed, &supplied, s));
-				}
+			if (rule.masked.is_none() || keystream(held, self.attacker).is_some())
+				&& !offered.iter().any(|seen| same_fixed(seen, &pair[0]))
+			{
+				offered.push(&pair[0]);
+				out.extend(self.reshape(target, held, &rule.fixed, &supplied, s));
 			}
 		}
+	}
+
+	fn retaggable(&self, target: &Primitive) -> impl Iterator<Item = &Primitive> {
+		let known = &self.attacker.known;
+		self.shared
+			.retaggable
+			.get_or_init(|| {
+				let mut members: Vec<usize> =
+					self.shared
+						.by_head
+						.iter()
+						.filter(|((id, _), _)| {
+							reuse_rule(*id).is_some_and(|rule| rule.masked.is_some())
+						})
+						.flat_map(|(_, bucket)| {
+							bucket.iter().copied().filter(|&i| {
+								bucket.iter().any(|&j| reused_pair(&known[i], &known[j]))
+							})
+						})
+						.collect();
+				members.sort_unstable();
+				members
+			})
+			.iter()
+			.filter_map(|&i| match known.get(i) {
+				Some(Value::Primitive(p))
+					if p.id == target.id && p.arguments.len() == target.arguments.len() =>
+				{
+					Some(p.as_ref())
+				}
+				_ => None,
+			})
 	}
 
 	pub(super) fn solve_by_malleability(

@@ -1,0 +1,40 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: u1 at one session and at two.
+//
+// unlink_forced_equality.vp with Bob's first tag forgeable under ufe_k. The
+// attacker can now mint MAC(ufe_k, nil) itself, but it is Bob who computes
+// both tags, and they are equal only because one key made both. The judge
+// rejects a witness the attacker could build from public values and what it
+// installed; it once counted a forgery under ufe_k as such a construction and
+// reported u0, so declaring the weakness lost the link.
+// unlink_forced_equality_two_keys_forgeable.vp tags under two keys and holds.
+attacker[active]
+
+principal Alice[
+	generates ufe_na
+]
+
+principal Carol[
+	generates ufe_nc
+]
+
+Alice -> Bob: ufe_na
+Carol -> Bob: ufe_nc
+
+principal Bob[
+	knows private ufe_k
+	ufe_p = MAC[forgeable](ufe_k, ufe_na)
+	ufe_q = MAC(ufe_k, ufe_nc)
+]
+
+Bob -> Dave: ufe_p, ufe_q
+
+principal Dave[
+	_ = HASH(ufe_p)
+	_ = HASH(ufe_q)
+]
+
+queries[
+	unlinkability? ufe_p, ufe_q
+]

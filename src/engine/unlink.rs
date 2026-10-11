@@ -113,7 +113,7 @@ fn link<'s>(
 	let supplied = supplied();
 	let valid = |w: &Value, kind: LinkKind| {
 		scope.secret(w)
-			&& !obtainable(w, supplied.capabilities(), &supplied.state)
+			&& !obtainable(w, &CapabilityIndex::default(), &supplied.state)
 			&& ((same && matches!(kind, LinkKind::ObservedEquality))
 				|| w.constant_leaves().any(|c| shared.contains(&c.id)))
 	};

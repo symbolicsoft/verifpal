@@ -3173,6 +3173,10 @@ fn aead_nonce_reuse_models() {
 	run_model_sessions("aead_nonce_reuse_same_plaintext_retag.vp", 1, "a1");
 	run_model_sessions("aead_nonce_reuse_same_ciphertext_no_retag.vp", 1, "a0");
 	run_model_sessions("aead_nonce_reuse_same_ciphertext_no_retag.vp", 2, "a1");
+	run_model("aead_nonce_reuse_retag_late_key.vp", "a1");
+	run_model_sessions("aead_nonce_reuse_retag_late_key.vp", 1, "a1");
+	run_model_sessions("aead_nonce_reuse_same_ciphertext_late_key.vp", 1, "a0");
+	run_model_sessions("aead_nonce_reuse_same_ciphertext_late_key.vp", 2, "a1");
 	run_model_sessions("aead_nonce_reuse_same_message_twice.vp", 1, "c0");
 	run_model_sessions("aead_nonce_reuse_same_message_twice.vp", 2, "c0");
 	run_model("aead_nonce_reuse_other_nonce_holds.vp", "c1c0");
@@ -4089,6 +4093,10 @@ fn test_unlink_forced_equality() {
 	run_model_sessions("unlink_forced_equality.vp", 1, "u1");
 	run_model("unlink_forced_equality_two_keys.vp", "u0");
 	run_model_sessions("unlink_forced_equality_two_keys.vp", 1, "u0");
+	run_model("unlink_forced_equality_forgeable.vp", "u1");
+	run_model_sessions("unlink_forced_equality_forgeable.vp", 1, "u1");
+	run_model("unlink_forced_equality_two_keys_forgeable.vp", "u0");
+	run_model_sessions("unlink_forced_equality_two_keys_forgeable.vp", 1, "u0");
 }
 #[test]
 fn test_unlink_rfid_mac_tag() {
