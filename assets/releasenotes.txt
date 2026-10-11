@@ -1,4 +1,11 @@
-Verifpal 1.6.5
+Verifpal 1.6.6
+
+Changes since v1.6.5:
+
+- More precise AEAD and forgery semantics
+- Engine: Additional fixes and regression tests
+- Expand search coverage, rule out more missed attacks
+- Fix unlinkability regression reported by Heba Ajjour
 
 Changes since v1.6.4:
 
@@ -46,27 +53,3 @@ Changes since v1.6.0:
 - LaTeX rendering improvements
 - Fix #32, #33, #34, #35, #36
 - Improvements for Verifpal Workbench
-
-Changes since v1.5.2:
-
-- Replace the gate-based engine with joint execution
-- Performance pass with five engine improvements
-
-Changes since v1.5.1:
-
-- Fix: guarded downstream forward lost a duplicate acceptance
-  Found by Heba Ajjour, University College of Applied Sciences, Gaza, Palestine.
-- Performance audit + minor bug fixes
-
-Changes since v1.5.0:
-
-- Performance optimization pass
-- Validate concrete replay witnesses and preserve execution constraints [ci]
-
-Changes since v1.4.12:
-
-- Verifpal 1.5 focuses on the correctness of the verifier itself.
-  We used frontier AI models to audit the engine, reproduce errors
-  in small protocol models, and develop fixes.
-  Read the full blog post:
-  https://symbolic.software/blog/2026-09-20-verifpal-1-5/
