@@ -1,0 +1,65 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a1 at one session and at two.
+//
+// Unauthenticated Diffie-Hellman with MACs in both directions. The attacker
+// replaces ga and gb with its own key, forges every MAC under the key it
+// shares with each side, and gives Alice a c14 that Bob never sent.
+//
+// Alice's flight forging c14 makes Bob halt at his MAC check, so the search
+// places it again with a node in which Bob sends c14. The nodes that do also
+// carry fills of h12 rebuilt from honest values the attacker cannot derive;
+// merged with Alice's flight such a node is stuck, Bob is stuck rather than
+// halted, and the stuck merge was accepted as unblocking Alice, so no other
+// node was tried. Only a settled merge now counts.
+// search_unblock_settled_source_guarded.vp is the counterweight.
+attacker[active]
+
+principal Alice[
+	knows private a
+	ga = PUBKEY(a)
+]
+principal Bob[
+	knows private b
+	gb = PUBKEY(b)
+]
+Alice -> Bob: ga
+Bob -> Alice: gb
+principal Alice[
+	ssa = DH_KEX(gb, a)
+	generates n1
+	t2 = MAC(ssa, n1)
+]
+Alice -> Bob: [n1], t2
+principal Bob[
+	ssb = DH_KEX(ga, b)
+	_ = ASSERT(MAC(ssb, n1), t2)?
+	generates n3
+	t4 = MAC(ssb, n3)
+]
+Bob -> Alice: n3, t4
+principal Alice[
+	_ = ASSERT(MAC(ssa, n3), t4)?
+	generates n7
+	t8 = MAC(ssa, n7)
+	generates n11
+	h12 = HASH(n11, t2)
+]
+Alice -> Bob: n7, t8, h12
+principal Bob[
+	_ = ASSERT(MAC(ssb, n7), t8)?
+	generates n13
+	generates nn15
+	c14 = AEAD_ENC(ssb, nn15, n13, nil)
+	generates n16
+	leaks n16
+	h17 = HASH(n16, n3)
+]
+Bob -> Alice: nn15, c14, [h17]
+principal Alice[
+	d20 = AEAD_DEC(ssa, nn15, c14, nil)?
+]
+queries[
+	authentication? Bob -> Alice: c14
+]

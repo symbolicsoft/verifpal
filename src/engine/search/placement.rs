@@ -3,10 +3,12 @@
 
 use std::sync::Arc;
 
-use super::{Cheapest, Family, HONEST_NODE, NodeIdx, Search, normalize, runs_of};
+use super::{
+	AttemptIdx, Cheapest, Family, HONEST_NODE, NodeIdx, Search, normalize, runs_of, same_installs,
+};
 use crate::engine::exec::{Install, Installs, install_at};
 use crate::engine::knowledge::{Knowledge, Origin};
-use crate::engine::program::RunIdx;
+use crate::engine::program::{Event, RunIdx};
 use crate::protocol::SlotIdx;
 use crate::term::Value;
 use crate::theory::obtainable;
@@ -194,6 +196,7 @@ impl<'a, 'b> Search<'a, 'b> {
 		signature: Vec<(SlotIdx, Value)>,
 		addressed: bool,
 		chained: &[Value],
+		targeted: bool,
 	) -> Option<SlotIdx> {
 		let signature: Vec<(SlotIdx, Value, Vec<RunIdx>)> = signature
 			.into_iter()
@@ -252,7 +255,7 @@ impl<'a, 'b> Search<'a, 'b> {
 			everywhere
 		});
 		let merged = self.merged(&bases, installs.clone());
-		let at = self.consider(merged);
+		let mut at = self.consider(merged);
 		if self.outcome(at).is_some_and(|outcome| !outcome.settled)
 			&& !self.done()
 			&& let Some(sourced) = self
@@ -261,6 +264,12 @@ impl<'a, 'b> Search<'a, 'b> {
 		{
 			let merged = self.merged(&sourced, installs);
 			self.consider(merged);
+		}
+		if targeted
+			&& !self.done()
+			&& let Some(unblocked) = self.unblocking(r, at)
+		{
+			at = unblocked;
 		}
 		if let Some(everywhere) = everywhere
 			&& !self.done()
@@ -275,6 +284,63 @@ impl<'a, 'b> Search<'a, 'b> {
 			.chain(&outcome.waits)
 			.find(|(run, _)| *run == r)
 			.map(|(_, slot)| *slot)
+	}
+
+	fn unblocking(&mut self, r: RunIdx, at: AttemptIdx) -> Option<AttemptIdx> {
+		let d = self
+			.outcome(at)?
+			.blocked
+			.iter()
+			.find(|(run, _)| *run == r)?
+			.1;
+		let plan = self.attempts.tried.entries[at].0.clone();
+		let sender = self.cx.program.deliveries[d].sender;
+		let mut cone = Vec::new();
+		for step in self.cx.program.runs[sender].steps.iter() {
+			match step.event {
+				Event::Send(sent) if sent == d => break,
+				Event::Recv(received) => {
+					for &(slot, _) in &self.cx.program.deliveries[received].slots {
+						self.cone(sender, slot, &mut cone);
+					}
+				}
+				_ => {}
+			}
+		}
+		let mut sources: Vec<NodeIdx> = self
+			.nodes
+			.indices()
+			.filter(|&n| n != HONEST_NODE && self.nodes[n].sent[d].is_some())
+			.collect();
+		sources.sort_by_key(|&n| self.nodes[n].installs.len());
+		let mut merges: Vec<Installs> = Vec::new();
+		for n in sources {
+			if self.done() {
+				break;
+			}
+			let mut merged = plan.clone();
+			for install in &self.nodes[n].installs {
+				if let Some(slot) = install.slot()
+					&& cone.contains(&(install.run(), slot))
+					&& !merged.iter().any(|held| held.same_input(install))
+				{
+					merged.push(install.clone());
+				}
+			}
+			let merged = self.project(normalize(merged));
+			if same_installs(&merged, &plan) || merges.iter().any(|m| same_installs(m, &merged)) {
+				continue;
+			}
+			merges.push(merged.clone());
+			let at = self.as_family(Family::Unblocked, |search| search.consider(merged));
+			if self
+				.outcome(at)
+				.is_some_and(|outcome| outcome.settled && !outcome.blocked.contains(&(r, d)))
+			{
+				return Some(at);
+			}
+		}
+		None
 	}
 
 	fn probe(&mut self, installs: Installs, droppable: &[RunIdx]) {

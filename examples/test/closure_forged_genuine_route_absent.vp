@@ -1,0 +1,26 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0 at one session and at two.
+//
+// closure_forged_genuine_route_early.vp without cfr_hz. cfr_hk is reachable
+// only by opening cfr_f under the forged partial, which is no genuine copy, so
+// the share stays hidden.
+attacker[passive]
+principal Alice[
+	generates cfr_k, cfr_na, cfr_m, cfr_z, cfr_hk
+	cfr_s1, cfr_s2 = THRESHOLD_SPLIT[2](cfr_k)
+	cfr_ca = PUBKEY(cfr_na)
+	cfr_x = THRESHOLD_SIGN[forgeable](cfr_s1, cfr_na, cfr_ca, cfr_m)
+	cfr_f = ENC(HASH(cfr_x), cfr_hk)
+	cfr_e = ENC(cfr_hk, cfr_x)
+	cfr_hz = CONCAT(cfr_hk, cfr_z)
+	leaks cfr_na
+]
+Alice -> Bob: cfr_ca, cfr_m, cfr_f, cfr_e
+principal Bob[
+	_ = HASH(cfr_ca, cfr_m, cfr_f, cfr_e)
+]
+queries[
+	confidentiality? cfr_s1
+]

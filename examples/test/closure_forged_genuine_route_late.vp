@@ -1,0 +1,32 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1 at one session and at two.
+//
+// closure_forged_genuine_route_early.vp with cfr_hz leaked after the send, so
+// the closure first records cfr_hk as opened from cfr_f under the forged
+// partial. That one recorded route decided whether the partial had a genuine
+// copy, and the attack was missed. A value the attacker could mint now counts
+// as genuine when the closure of what was disclosed derives it with that one
+// value unforgeable, whatever route was recorded first.
+attacker[passive]
+principal Alice[
+	generates cfr_k, cfr_na, cfr_m, cfr_z, cfr_hk
+	cfr_s1, cfr_s2 = THRESHOLD_SPLIT[2](cfr_k)
+	cfr_ca = PUBKEY(cfr_na)
+	cfr_x = THRESHOLD_SIGN[forgeable](cfr_s1, cfr_na, cfr_ca, cfr_m)
+	cfr_f = ENC(HASH(cfr_x), cfr_hk)
+	cfr_e = ENC(cfr_hk, cfr_x)
+	cfr_hz = CONCAT(cfr_hk, cfr_z)
+	leaks cfr_na
+]
+Alice -> Bob: cfr_ca, cfr_m, cfr_f, cfr_e
+principal Bob[
+	_ = HASH(cfr_ca, cfr_m, cfr_f, cfr_e)
+]
+principal Alice[
+	leaks cfr_hz
+]
+queries[
+	confidentiality? cfr_s1
+]

@@ -1,0 +1,43 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1u1 at one session and at two.
+//
+// Client hashes p1 and p2, the same value, with the exchanged public keys under
+// a weak HASH, and seals each hash under the DH key. The attacker replaces gb,
+// derives the key, opens both boxes and breaks the hashes Client actually
+// computed, which bind the attacker's key, so p1 and p2 are disclosed and equal.
+// Observability read weak only on honest terms and missed the link, as the
+// closure does not. unlink_weak_executed_term_strong.vp is the
+// counterweight.
+attacker[active]
+principal Client[
+	generates uwe_a, uwe_s
+	uwe_ga = PUBKEY(uwe_a)
+	uwe_p1 = PUBKEY(uwe_s)
+	uwe_p2 = PUBKEY(uwe_s)
+]
+Client -> Server: uwe_ga
+principal Server[
+	generates uwe_b
+	uwe_gb = PUBKEY(uwe_b)
+]
+Server -> Client: uwe_gb
+principal Client[
+	uwe_k = DH_KEX(uwe_gb, uwe_a)
+	uwe_h1 = HASH[weak](uwe_p1, uwe_ga, uwe_gb)
+	uwe_h2 = HASH[weak](uwe_p2, uwe_ga, uwe_gb)
+	generates uwe_n1, uwe_n2
+	uwe_e1 = AEAD_ENC(uwe_k, uwe_n1, uwe_h1, nil)
+	uwe_e2 = AEAD_ENC(uwe_k, uwe_n2, uwe_h2, nil)
+]
+Client -> Server: uwe_n1, uwe_n2, uwe_e1, uwe_e2
+principal Server[
+	uwe_ks = DH_KEX(uwe_ga, uwe_b)
+	uwe_d1 = AEAD_DEC(uwe_ks, uwe_n1, uwe_e1, nil)?
+	uwe_d2 = AEAD_DEC(uwe_ks, uwe_n2, uwe_e2, nil)?
+]
+queries[
+	confidentiality? uwe_p1
+	unlinkability? uwe_p1, uwe_p2
+]

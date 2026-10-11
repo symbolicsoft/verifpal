@@ -1,0 +1,28 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0 at one session and at two.
+//
+// cfs_e encrypts the forgeable partial cfs_x under HASH(cfs_x, cfs_y), with
+// cfs_y leaked. The only way to open cfs_e is the key built from a forged
+// cfs_x, so the cfs_x it yields is the forgery's own product and reveals
+// nothing. The closure opened cfs_e in the same pass that first minted cfs_x
+// and took the result as genuine. closure_forged_key_leaked.vp is the
+// counterweight.
+attacker[passive]
+principal Alice[
+	generates cfs_k, cfs_na, cfs_m, cfs_y
+	cfs_s1, cfs_s2 = THRESHOLD_SPLIT[2](cfs_k)
+	cfs_ca = PUBKEY(cfs_na)
+	cfs_x = THRESHOLD_SIGN[forgeable](cfs_s1, cfs_na, cfs_ca, cfs_m)
+	cfs_hk = HASH(cfs_x, cfs_y)
+	cfs_e = ENC(cfs_hk, cfs_x)
+	leaks cfs_na, cfs_y
+]
+Alice -> Bob: cfs_ca, cfs_m, cfs_e
+principal Bob[
+	_ = HASH(cfs_ca, cfs_m, cfs_e)
+]
+queries[
+	confidentiality? cfs_s1
+]

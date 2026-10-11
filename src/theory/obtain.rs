@@ -268,19 +268,19 @@ fn can_reconstruct_primitive_directly(
 		capabilities.forgeable_secret_position(rewritten_prim, attacker.current_phase);
 	let reused = reused(rewritten_prim, attacker);
 	let by_reuse: &[usize] = match reuse_rule(rewritten_prim.id) {
-		Some(rule) if reused.is_some() => &rule.forgeable,
+		Some(rule) if reused.is_some() && !capabilities.forgery_denied(rewritten_prim) => {
+			&rule.forgeable
+		}
 		_ => &[],
 	};
 	let exempt = |i: usize| Some(i) == forgeable_secret || by_reuse.contains(&i);
 	let mut has = Vec::new();
 	let mut skipped = 0usize;
 	for (i, a) in rewritten_prim.arguments.iter().enumerate() {
-		if exempt(i) {
-			skipped += 1;
-			continue;
-		}
 		if obtainable(a, capabilities, attacker) {
 			has.push(a.clone());
+		} else if exempt(i) {
+			skipped += 1;
 		}
 	}
 	if has.len() + skipped < rewritten_prim.arguments.len() {

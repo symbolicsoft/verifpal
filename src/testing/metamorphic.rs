@@ -6,8 +6,8 @@ use std::sync::Arc;
 use crate::console::InfoQuiet;
 use crate::primitive::Capability;
 use crate::syntax::{
-	AttackerKind, Block, Declaration, Expression, LineComments, Message, Model, Qualifier,
-	QueryKind, QueryOption, QueryOptionKind, Scenario, Span,
+	AttackerKind, Block, Declaration, Expression, LineComments, Message, Model, Principal,
+	PrincipalId, Qualifier, QueryKind, QueryOption, QueryOptionKind, Scenario, Span,
 };
 use crate::term::{Constant, Value, ValueId};
 use crate::verify::VerifyResult;
@@ -87,8 +87,34 @@ fn code_of(model: &Model, sessions: u8) -> Outcome {
 	}
 }
 
+fn external_corpus() -> Option<std::path::PathBuf> {
+	std::env::var_os("VERIFPAL_METAMORPHIC_CORPUS").map(std::path::PathBuf::from)
+}
+
 fn corpus() -> Vec<(String, Model)> {
-	crate::testing::model_tests::swept_models()
+	let models = match external_corpus() {
+		Some(dir) => {
+			let mut found: Vec<(String, String)> = std::fs::read_dir(&dir)
+				.expect("read VERIFPAL_METAMORPHIC_CORPUS")
+				.flatten()
+				.map(|e| e.path())
+				.filter(|p| p.extension().is_some_and(|x| x == "vp"))
+				.map(|p| {
+					(
+						p.file_name()
+							.unwrap_or_default()
+							.to_string_lossy()
+							.into_owned(),
+						p.to_string_lossy().into_owned(),
+					)
+				})
+				.collect();
+			found.sort();
+			found
+		}
+		None => crate::testing::model_tests::swept_models(),
+	};
+	models
 		.into_iter()
 		.filter_map(|(name, path)| {
 			let source = std::fs::read_to_string(&path).ok()?;
@@ -574,6 +600,250 @@ fn variants_restricted(model: &Model) -> Vec<Model> {
 	vec![variant]
 }
 
+fn variants_permuted(model: &Model) -> Vec<Model> {
+	let mut lists = model.clone();
+	let mut lists_changed = false;
+	for block in &mut lists.blocks {
+		if let Block::Principal(p) = block {
+			for e in &mut p.expressions {
+				if e.kind != Declaration::Assignment && e.constants.len() > 1 {
+					e.constants.reverse();
+					lists_changed = true;
+				}
+			}
+		}
+	}
+	let mut messages = model.clone();
+	let mut messages_changed = false;
+	for block in &mut messages.blocks {
+		if let Block::Message(m) = block
+			&& m.constants.len() > 1
+		{
+			m.constants.reverse();
+			messages_changed = true;
+		}
+	}
+	let mut queries = model.clone();
+	let mut queries_changed = false;
+	for q in &mut queries.queries {
+		if matches!(q.kind, QueryKind::Unlinkability | QueryKind::Equivalence)
+			&& q.constants.len() > 1
+		{
+			q.constants.reverse();
+			queries_changed = true;
+		}
+	}
+	[
+		(lists, lists_changed),
+		(messages, messages_changed),
+		(queries, queries_changed),
+	]
+	.into_iter()
+	.filter_map(|(variant, changed)| changed.then_some(variant))
+	.collect()
+}
+
+fn split_leaks(model: &Model) -> Model {
+	let mut out = model.clone();
+	for block in &mut out.blocks {
+		if let Block::Principal(p) = block {
+			p.expressions = p
+				.expressions
+				.iter()
+				.flat_map(|e| {
+					if e.kind == Declaration::Leaks {
+						e.constants
+							.iter()
+							.map(|c| Expression {
+								constants: vec![c.clone()],
+								..e.clone()
+							})
+							.collect()
+					} else {
+						vec![e.clone()]
+					}
+				})
+				.collect();
+		}
+	}
+	out
+}
+
+fn variant_split(model: &Model) -> Option<Model> {
+	let mut changed = model.blocks.iter().any(|b| {
+		matches!(b, Block::Principal(p) if p
+			.expressions
+			.iter()
+			.any(|e| e.kind == Declaration::Leaks && e.constants.len() > 1))
+	});
+	let mut blocks = Vec::new();
+	for block in split_leaks(model).blocks {
+		match block {
+			Block::Message(m) if m.constants.len() > 1 => {
+				changed = true;
+				blocks.extend(m.constants.iter().map(|c| {
+					Block::Message(Message {
+						constants: vec![c.clone()],
+						..m.clone()
+					})
+				}));
+			}
+			_ => blocks.push(block),
+		}
+	}
+	changed.then(|| Model {
+		blocks,
+		..model.clone()
+	})
+}
+
+fn variant_swapped(model: &Model) -> Option<Model> {
+	let mut out = model.clone();
+	let mut changed = false;
+	let mut at = 0;
+	while at + 1 < out.blocks.len() {
+		if let (Block::Principal(a), Block::Principal(b)) = (&out.blocks[at], &out.blocks[at + 1])
+			&& a.id != b.id
+		{
+			out.blocks.swap(at, at + 1);
+			changed = true;
+			at += 2;
+		} else {
+			at += 1;
+		}
+	}
+	changed.then_some(out)
+}
+
+fn variant_delayed(model: &Model) -> Option<Model> {
+	let mut blocks = Vec::new();
+	let mut pending: Vec<Principal> = Vec::new();
+	let mut moved = false;
+	for block in &model.blocks {
+		match block {
+			Block::Phase(_) => {
+				blocks.extend(pending.drain(..).map(Block::Principal));
+				blocks.push(block.clone());
+			}
+			Block::Principal(p) => {
+				let (leaks, kept): (Vec<Expression>, Vec<Expression>) = p
+					.expressions
+					.iter()
+					.cloned()
+					.partition(|e| e.kind == Declaration::Leaks);
+				if !leaks.is_empty() {
+					moved = true;
+					match pending.iter_mut().find(|q| q.id == p.id) {
+						Some(q) => q.expressions.extend(leaks),
+						None => pending.push(Principal {
+							expressions: leaks,
+							..p.clone()
+						}),
+					}
+				}
+				blocks.push(Block::Principal(Principal {
+					expressions: kept,
+					..p.clone()
+				}));
+			}
+			Block::Message(_) => blocks.push(block.clone()),
+		}
+	}
+	blocks.extend(pending.drain(..).map(Block::Principal));
+	moved.then(|| Model {
+		blocks,
+		..model.clone()
+	})
+}
+
+fn variant_hoisted(model: &Model) -> Option<Model> {
+	let model = &split_leaks(model);
+	let mut known: Vec<(PrincipalId, Vec<ValueId>)> = Vec::new();
+	let mut points: Vec<(PrincipalId, usize, usize, Vec<ValueId>)> = Vec::new();
+	let mut moves: Vec<((usize, usize), (usize, usize))> = Vec::new();
+	fn held(known: &mut Vec<(PrincipalId, Vec<ValueId>)>, who: PrincipalId) -> &mut Vec<ValueId> {
+		let at = match known.iter().position(|(p, _)| *p == who) {
+			Some(at) => at,
+			None => {
+				known.push((who, Vec::new()));
+				known.len() - 1
+			}
+		};
+		&mut known[at].1
+	}
+	for (bi, block) in model.blocks.iter().enumerate() {
+		match block {
+			Block::Phase(_) => points.clear(),
+			Block::Message(m) => {
+				held(&mut known, m.recipient).extend(m.constants.iter().map(|c| c.id));
+			}
+			Block::Principal(p) => {
+				for (ei, e) in p.expressions.iter().enumerate() {
+					let before = held(&mut known, p.id).clone();
+					points.push((p.id, bi, ei, before));
+					if e.kind == Declaration::Leaks {
+						let target = points
+							.iter()
+							.find(|(who, _, _, before)| {
+								*who == p.id && e.constants.iter().all(|c| before.contains(&c.id))
+							})
+							.map(|&(_, b, i, _)| (b, i));
+						if let Some(target) = target
+							&& target != (bi, ei)
+						{
+							moves.push(((bi, ei), target));
+						}
+					} else {
+						held(&mut known, p.id).extend(e.constants.iter().map(|c| c.id));
+					}
+				}
+				let after = held(&mut known, p.id).clone();
+				points.push((p.id, bi, p.expressions.len(), after));
+			}
+		}
+	}
+	if moves.is_empty() {
+		return None;
+	}
+	let leak = |(bi, ei): (usize, usize)| match &model.blocks[bi] {
+		Block::Principal(p) => p.expressions[ei].clone(),
+		_ => unreachable!("a leak sits in a principal block"),
+	};
+	let mut out = model.clone();
+	for (bi, block) in model.blocks.iter().enumerate() {
+		let Block::Principal(p) = block else {
+			continue;
+		};
+		let mut expressions = Vec::new();
+		for ei in 0..=p.expressions.len() {
+			expressions.extend(
+				moves
+					.iter()
+					.filter(|(_, target)| *target == (bi, ei))
+					.map(|&(from, _)| leak(from)),
+			);
+			if ei < p.expressions.len() && !moves.iter().any(|(from, _)| *from == (bi, ei)) {
+				expressions.push(p.expressions[ei].clone());
+			}
+		}
+		out.blocks[bi] = Block::Principal(Principal {
+			expressions,
+			..p.clone()
+		});
+	}
+	Some(out)
+}
+
+fn under(
+	model: &Model,
+	attacker: AttackerKind,
+	variant: fn(&Model) -> Option<Model>,
+) -> Option<Model> {
+	(model.attacker == attacker)
+		.then(|| variant(model))
+		.flatten()
+}
+
 fn check(
 	property: &str,
 	floor: usize,
@@ -684,7 +954,7 @@ fn settle(property: &str, report: Report, floor: usize, sweep: Sweep) {
 		report.compared
 	);
 	assert!(
-		report.compared >= floor,
+		report.compared >= floor || external_corpus().is_some(),
 		"the `{property}` property compared only {} pairs against a floor of {floor}, so it \
 		 is passing vacuously rather than holding",
 		report.compared
@@ -1043,6 +1313,94 @@ mod tests {
 			Change::Weaker,
 			200,
 			Sweep::Exhaustive,
+		);
+	}
+
+	#[test]
+	fn reordering_a_list_changes_no_verdict() {
+		check_variants(
+			"permute",
+			variants_permuted,
+			Change::Invariant(str::to_string),
+			1100,
+			Sweep::Fast,
+		);
+	}
+
+	#[test]
+	fn splitting_a_passive_message_or_leak_changes_no_verdict() {
+		check_variants(
+			"split_passive",
+			|model| under(model, AttackerKind::Passive, variant_split),
+			Change::Invariant(str::to_string),
+			120,
+			Sweep::Fast,
+		);
+	}
+
+	#[test]
+	fn splitting_an_active_message_or_leak_never_loses_an_attack() {
+		check_variants(
+			"split_active",
+			|model| under(model, AttackerKind::Active, variant_split),
+			Change::Stronger,
+			280,
+			Sweep::Fast,
+		);
+	}
+
+	#[test]
+	fn swapping_adjacent_principal_blocks_changes_no_verdict() {
+		check_variants(
+			"swap",
+			variant_swapped,
+			Change::Invariant(str::to_string),
+			340,
+			Sweep::Fast,
+		);
+	}
+
+	#[test]
+	fn delaying_a_passive_leak_within_its_phase_changes_no_verdict() {
+		check_variants(
+			"delay_passive",
+			|model| under(model, AttackerKind::Passive, variant_delayed),
+			Change::Invariant(str::to_string),
+			90,
+			Sweep::Fast,
+		);
+	}
+
+	#[test]
+	fn delaying_an_active_leak_within_its_phase_never_adds_an_attack() {
+		check_variants(
+			"delay_active",
+			|model| under(model, AttackerKind::Active, variant_delayed),
+			Change::Weaker,
+			180,
+			Sweep::Fast,
+		);
+	}
+
+	#[test]
+	fn hoisting_a_passive_leak_within_its_phase_changes_no_verdict() {
+		check_variants(
+			"hoist_passive",
+			|model| under(model, AttackerKind::Passive, variant_hoisted),
+			Change::Invariant(str::to_string),
+			65,
+			Sweep::Fast,
+		);
+	}
+
+	#[test]
+	fn hoisting_an_active_leak_within_its_phase_never_loses_an_attack() {
+		check_variants(
+			"hoist_active",
+			|model| under(model, AttackerKind::Active, variant_hoisted),
+			Change::Stronger,
+			65,
+			Sweep::Fast,
 		);
 	}
 

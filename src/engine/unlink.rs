@@ -351,7 +351,7 @@ fn observed(scope: &Scope, cx: &Context, ex: &Execution) -> TermSet {
 		if let Some(opened) = crate::theory::can_decompose(p, &scope.km.capabilities, attacker) {
 			pending.extend(opened.revealed);
 		}
-		if let Some(revealed) = crate::theory::can_break_weak(p, &scope.km.capabilities, attacker) {
+		if let Some(revealed) = scope.knowledge.breaks(p, &scope.km.capabilities) {
 			pending.extend(revealed);
 		}
 		if let Some(rule) = crate::primitive::reuse_rule(p.id)

@@ -5409,6 +5409,39 @@ fn test_threshold_secret_reveals_no_share() {
 }
 
 #[test]
+fn test_unlink_weak_executed_term() {
+	for sessions in [1, 2] {
+		run_model_sessions("unlink_weak_executed_term.vp", sessions, "c1u1");
+		run_model_sessions("unlink_weak_executed_term_strong.vp", sessions, "c0u0");
+	}
+}
+
+#[test]
+fn test_cap_forgeable_known_key_links() {
+	for sessions in [1, 2] {
+		run_model_sessions("cap_forgeable_known_key_links.vp", sessions, "u1");
+		run_model_sessions("cap_forgeable_known_key_links_unleaked.vp", sessions, "u0");
+	}
+}
+
+#[test]
+fn test_closure_forged_genuine_route() {
+	for sessions in [1, 2] {
+		run_model_sessions("closure_forged_genuine_route_early.vp", sessions, "c1");
+		run_model_sessions("closure_forged_genuine_route_late.vp", sessions, "c1");
+		run_model_sessions("closure_forged_genuine_route_absent.vp", sessions, "c0");
+		run_model_sessions("closure_forged_key_opens_itself.vp", sessions, "c0");
+		run_model_sessions("closure_forged_key_leaked.vp", sessions, "c1");
+		run_model_sessions("closure_forged_reuse_bypass.vp", sessions, "c0");
+		run_model_sessions("closure_forged_reuse_genuine.vp", sessions, "c1");
+		run_model_sessions("closure_forged_container_rebuilt.vp", sessions, "c1");
+		run_model_sessions("closure_forged_container_rebuilt_sealed.vp", sessions, "c0");
+		run_model_sessions("closure_forged_cyclic_records.vp", sessions, "c1");
+		run_model_sessions("closure_forged_cyclic_records_sealed.vp", sessions, "c0");
+	}
+}
+
+#[test]
 fn test_closure_forged_then_opened_later() {
 	for sessions in [1, 2] {
 		run_model_sessions("closure_forged_then_opened_later.vp", sessions, "c1");
@@ -5443,9 +5476,33 @@ fn test_spore_x509_three_way() {
 }
 
 #[test]
+fn test_search_fill_split_reply() {
+	for sessions in [1, 2] {
+		run_model_sessions("search_fill_split_reply.vp", sessions, "a1");
+	}
+	run_model_sessions("search_fill_split_reply_tagged.vp", 1, "a0");
+	run_model_sessions("search_fill_split_reply_tagged.vp", 2, "a1");
+}
+
+#[test]
+fn test_search_unblock_halted_sender() {
+	for sessions in [1, 2] {
+		run_model_sessions("search_unblock_halted_sender.vp", sessions, "a1");
+	}
+	run_model_sessions("search_unblock_halted_sender_guarded.vp", 1, "a0");
+	run_model_sessions("search_unblock_halted_sender_guarded.vp", 2, "a1");
+	for sessions in [1, 2] {
+		run_model_sessions("search_unblock_settled_source.vp", sessions, "a1");
+	}
+	run_model_sessions("search_unblock_settled_source_guarded.vp", 1, "a0");
+	run_model_sessions("search_unblock_settled_source_guarded.vp", 2, "a1");
+}
+
+#[test]
 fn test_search_starved_oracle_repair() {
 	for sessions in [1, 2] {
 		run_model_sessions("search_starved_oracle_repair.vp", sessions, "a1a0");
+		run_model_sessions("search_starved_oracle_repair_split.vp", sessions, "a1a0");
 	}
 	run_model_sessions("search_starved_oracle_repair_tagged.vp", 1, "a0a0");
 	run_model_sessions("search_starved_oracle_repair_tagged.vp", 2, "a1a0");

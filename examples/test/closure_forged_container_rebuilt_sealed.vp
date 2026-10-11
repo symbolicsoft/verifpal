@@ -1,0 +1,25 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0 at one session and at two.
+//
+// closure_forged_container_rebuilt.vp without the phase 1 leak. The container
+// exists only rebuilt from the forgery, so the share stays hidden.
+attacker[passive]
+principal Alice[
+	generates cfc_k, cfc_na, cfc_m, cfc_nx
+	knows private cfc_kx
+	cfc_s1, cfc_s2 = THRESHOLD_SPLIT[2](cfc_k)
+	cfc_ca = PUBKEY(cfc_na)
+	cfc_x = THRESHOLD_SIGN[forgeable](cfc_s1, cfc_na, cfc_ca, cfc_m)
+	cfc_e = AEAD_ENC(cfc_kx, cfc_nx, CONCAT(cfc_x, nil), nil)
+	leaks cfc_na
+]
+Alice -> Bob: cfc_ca, cfc_m, cfc_nx, cfc_e
+principal Bob[
+	knows private cfc_kx
+	_ = AEAD_DEC(cfc_kx, cfc_nx, cfc_e, nil)
+]
+queries[
+	confidentiality? cfc_s1
+]

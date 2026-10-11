@@ -275,7 +275,7 @@ impl<'a, 'b> Search<'a, 'b> {
 			if self.done() {
 				break;
 			}
-			let halted = self.try_flight(r, signature, addressed, &chained);
+			let halted = self.try_flight(r, signature, addressed, &chained, pass == Pass::Targeted);
 			if let Some(check) = halted.filter(|_| pass == Pass::Targeted) {
 				self.repair(r, attacker, sym, addressed, (check, variant), &mut repairer);
 			}
@@ -343,7 +343,7 @@ impl<'a, 'b> Search<'a, 'b> {
 				}
 				let emitted = crate::solve::emissions_under(km, sym, &solution);
 				let halt = self.as_family(Family::Repair, |search| {
-					search.try_flight(r, signature, addressed, &emitted)
+					search.try_flight(r, signature, addressed, &emitted, true)
 				});
 				if let Some(later) = halt
 					&& later > check

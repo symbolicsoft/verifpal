@@ -1,0 +1,76 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a1a0 at one session and at two.
+//
+// search_starved_oracle_repair.vp with every message cut into one message per
+// value. The attack is the same: Bob@2's nb@2 and s2@2 are replaced so that
+// Alice@2 signs CONCAT(nil, gb) as s3@2, which Bob accepts as s1 with na
+// replaced by nil.
+//
+// Bob@2 never sends nb@2 or s2@2. Honest Alice@2 waits at the nb@2 message,
+// so only nb@2 was counted as withheld by the honest execution; with nb@2
+// installed, her wait on s2@2 did not count as starvation and her check was
+// never repaired, so the one-session attack was missed. A slot now counts
+// when the honest execution never sends its message, wherever the run waits.
+// search_starved_oracle_repair_tagged.vp is the counterweight.
+attacker[active]
+
+principal Alice[
+	knows private a
+	knows public gpeer
+	ga = PUBKEY(a)
+	generates na
+]
+
+principal Bob[
+	knows private b
+	gb = PUBKEY(b)
+	generates nb
+]
+
+principal Mallory[
+	knows private mk
+	gm = PUBKEY(mk)
+	leaks mk
+]
+
+Alice -> Bob: [ga]
+Bob -> Alice: [gb]
+Mallory -> Alice: [gm]
+
+principal Alice[
+	s1 = SIGN(a, CONCAT(na, gpeer))
+]
+
+Alice -> Bob: na
+Alice -> Bob: s1
+
+principal Bob[
+	_ = SIGNVERIF(ga, CONCAT(na, gb), s1)?
+	s2 = SIGN(b, CONCAT(nb, ga, na))
+]
+
+Bob -> Alice: nb
+Bob -> Alice: s2
+
+principal Alice[
+	_ = SIGNVERIF(gpeer, CONCAT(nb, ga, na), s2)?
+	s3 = SIGN(a, nb)
+]
+
+Alice -> Bob: s3
+
+principal Bob[
+	_ = SIGNVERIF(ga, nb, s3)?
+]
+
+scenarios[
+	Alice[gpeer = gb]
+	Alice[gpeer = gm]
+]
+
+queries[
+	authentication? Alice -> Bob: s1
+	authentication? Alice -> Bob: s3
+]

@@ -1,0 +1,33 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: u1 at one session and at two.
+//
+// unlink_opened_fresh_content.vp with both nonces also leaked inside one
+// concatenation. The attacker splits it, re-encrypts each nonce under the
+// leaked key and gets each ciphertext back: content known without the
+// ciphertexts confirms the key, as the public tag does in
+// unlink_opened_known_content.vp, so both ciphertexts are linked to it.
+//
+// unlink_opened_content_leaked_after.vp leaks the concatenation after the
+// ciphertexts are sent, leaving the attacker the same knowledge.
+attacker[passive]
+
+principal Alice[
+	knows private uolb_k
+	generates uolb_n1, uolb_n2
+	uolb_c1 = ENC(uolb_k, uolb_n1)
+	uolb_c2 = ENC(uolb_k, uolb_n2)
+	uolb_n = CONCAT(uolb_n1, uolb_n2)
+	leaks uolb_k, uolb_n
+]
+
+Alice -> Bob: uolb_c1, uolb_c2
+
+principal Bob[
+	_ = HASH(uolb_c1, uolb_c2)
+]
+
+queries[
+	unlinkability? uolb_c1, uolb_c2
+]

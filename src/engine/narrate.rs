@@ -5,14 +5,14 @@ use std::sync::Arc;
 
 use super::exec::{Context, Execution, Taken};
 use super::judgment::Violation;
-use super::knowledge::Origin;
+use super::knowledge::{Knowledge, Origin};
 use super::program::{DeliveryIdx, Event, RunIdx};
 use crate::primitive::Capability;
 use crate::protocol::{ProtocolTrace, SlotIdx};
 use crate::syntax::names::copy_base_name;
 use crate::syntax::{PrincipalId, Query, Span};
 use crate::term::{Constant, Primitive, Value, ValueId};
-use crate::theory::{AttackerState, DerivationRecord};
+use crate::theory::DerivationRecord;
 use crate::util::IdMap;
 use crate::verify::{Subtype, TraceStep, TraceValue};
 
@@ -24,9 +24,11 @@ pub(crate) struct Narrator<'a, 'b> {
 	unshaped: Names,
 	honest_names: Names,
 	cutoff: usize,
+	within: Option<Knowledge>,
 	gated: Vec<(RunIdx, SlotIdx)>,
 	pub(crate) steps: Vec<TraceStep>,
 	explained: crate::term::hashing::TermSet,
+	pending: Vec<Value>,
 }
 
 struct Names {
@@ -133,9 +135,11 @@ impl<'a, 'b> Narrator<'a, 'b> {
 			names,
 			honest_names: Names::of(cx, honest, honest),
 			cutoff: ex.order.len(),
+			within: None,
 			gated: Vec::new(),
 			steps: Vec::new(),
 			explained: crate::term::hashing::TermSet::default(),
+			pending: Vec::new(),
 		}
 	}
 
@@ -144,6 +148,13 @@ impl<'a, 'b> Narrator<'a, 'b> {
 			.order
 			.get(self.cutoff)
 			.map_or(self.ex.knowledge.len(), |taken| taken.known)
+	}
+
+	fn view(&self) -> (&Knowledge, usize) {
+		match &self.within {
+			Some(world) => (world, world.len()),
+			None => (&self.ex.knowledge, self.prefix()),
+		}
 	}
 
 	fn disclosure(&self, v: &Value) -> Option<Origin> {
@@ -171,12 +182,8 @@ impl<'a, 'b> Narrator<'a, 'b> {
 	}
 
 	fn available(&self, v: &Value) -> bool {
-		if self
-			.ex
-			.knowledge
-			.knows(v)
-			.is_some_and(|i| i < self.prefix())
-		{
+		let (knowledge, len) = self.view();
+		if knowledge.knows(v).is_some_and(|i| i < len) {
 			return true;
 		}
 		match v {
@@ -295,17 +302,29 @@ impl<'a, 'b> Narrator<'a, 'b> {
 	}
 
 	fn visit(&mut self, v: &Value) {
+		if self.pending.iter().any(|p| p.equivalent(v, true)) {
+			self.build(v);
+			return;
+		}
 		if self.explained.insert(v.clone()) {
+			self.pending.push(v.clone());
 			self.narrate(v);
+			self.pending.pop();
 		}
 	}
 
-	fn narrate(&mut self, v: &Value) {
-		let len = self.prefix();
-		let knowledge = &self.ex.knowledge;
-		let known = knowledge.knows(v).filter(|&i| i < len);
-		if known.is_none()
-			&& let Value::Primitive(p) = v
+	fn proving(&self, knowledge: &Knowledge, len: usize, v: &Value) -> Option<Knowledge> {
+		let nested = self.within.is_some();
+		knowledge.proving(v, &self.cx.km.capabilities, |at, known| {
+			at < len
+				&& (nested
+					|| !matches!(knowledge.origin(at), Origin::Derived(_))
+					|| self.disclosure(known).is_some())
+		})
+	}
+
+	fn build(&mut self, v: &Value) {
+		if let Value::Primitive(p) = v
 			&& let Some(built) = self.oriented(p)
 		{
 			for argument in &built.arguments {
@@ -314,42 +333,47 @@ impl<'a, 'b> Narrator<'a, 'b> {
 			self.constructs(v);
 			return;
 		}
-		let Some(i) = known else {
-			let keep: Vec<bool> = (0..knowledge.len()).map(|k| k < len).collect();
-			let restricted = knowledge.state.retaining(&keep);
-			let state: &AttackerState = &restricted;
-			if let Value::Primitive(p) = v
-				&& let Some(built) =
-					crate::theory::can_reconstruct_primitive(p, &self.cx.km.capabilities, state)
-			{
-				for ingredient in built.recipe() {
-					self.visit(ingredient);
-				}
-				self.derives(&built, v);
-				return;
+		let (knowledge, len) = self.view();
+		let keep: Vec<bool> = (0..knowledge.len()).map(|k| k < len).collect();
+		let restricted = knowledge.state.retaining(&keep).into_owned();
+		if let Value::Primitive(p) = v
+			&& let Some(built) =
+				crate::theory::can_reconstruct_primitive(p, &self.cx.km.capabilities, &restricted)
+		{
+			for ingredient in built.recipe() {
+				self.visit(ingredient);
 			}
-			let mut inputs = crate::theory::KnowledgeInputs::new(&self.cx.km.capabilities, state);
-			for idx in inputs.of_value(v).unwrap_or_default() {
-				let ingredient = state.known[idx.get()].clone();
-				self.visit(&ingredient);
-			}
-			if matches!(v, Value::Primitive(_)) {
-				self.constructs(v);
-			}
+			self.derives(&built, v);
+			return;
+		}
+		let mut inputs = crate::theory::KnowledgeInputs::new(&self.cx.km.capabilities, &restricted);
+		for idx in inputs.of_value(v).unwrap_or_default() {
+			let ingredient = restricted.known[idx.get()].clone();
+			self.visit(&ingredient);
+		}
+		if matches!(v, Value::Primitive(_)) {
+			self.constructs(v);
+		}
+	}
+
+	fn narrate(&mut self, v: &Value) {
+		let (knowledge, len) = self.view();
+		let Some(i) = knowledge.knows(v).filter(|&i| i < len) else {
+			self.build(v);
 			return;
 		};
+		if knowledge.proven(v)
+			&& let Some(world) = self.proving(knowledge, len, v)
+		{
+			let outer = self.within.replace(world);
+			self.narrate(v);
+			self.within = outer;
+			return;
+		}
 		let origin = match knowledge.origin(i) {
-			Origin::Derived(first) => self.disclosure(v).unwrap_or_else(|| {
-				let upgraded = &knowledge.state.derivations[i];
-				let settled = upgraded
-					.ingredients()
-					.all(|ingredient| knowledge.knows(ingredient).is_some_and(|at| at < len));
-				if first.forged() && !upgraded.forged() && settled {
-					Origin::Derived(upgraded.clone())
-				} else {
-					Origin::Derived(first.clone())
-				}
-			}),
+			Origin::Derived(first) => self
+				.disclosure(v)
+				.unwrap_or_else(|| Origin::Derived(first.clone())),
 			origin => origin.clone(),
 		};
 		match origin {

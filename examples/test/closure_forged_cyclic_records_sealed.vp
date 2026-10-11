@@ -1,0 +1,36 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0 at one session and at two.
+//
+// closure_forged_cyclic_records.vp with private hash inputs. The cycle alone
+// yields neither key, so cfy_ep stays sealed and the share hidden.
+attacker[passive]
+principal Alice[
+	knows private cfy_sk
+	knows private cfy_mx, cfy_my
+	generates cfy_k, cfy_na, cfy_m
+	cfy_s1, cfy_s2 = THRESHOLD_SPLIT[2](cfy_k)
+	cfy_ca = PUBKEY(cfy_na)
+	cfy_p = THRESHOLD_SIGN[forgeable](cfy_s1, cfy_na, cfy_ca, cfy_m)
+	cfy_x = HASH(cfy_mx)
+	cfy_y = HASH(cfy_my)
+	cfy_e1 = ENC(cfy_y, cfy_x)
+	cfy_e2 = ENC(cfy_x, cfy_y)
+	leaks cfy_na
+]
+Alice -> Bob: cfy_ca, cfy_m, cfy_e1, cfy_e2
+principal Bob[
+	_ = HASH(cfy_ca, cfy_m, cfy_e1, cfy_e2)
+]
+phase[1]
+principal Alice[
+	cfy_ep = ENC(cfy_x, cfy_p)
+]
+Alice -> Bob: cfy_ep
+principal Bob[
+	_ = HASH(cfy_ep)
+]
+queries[
+	confidentiality? cfy_s1
+]

@@ -221,6 +221,7 @@ pub(crate) enum Reach {
 pub(crate) struct CapabilityIndex {
 	buckets: IdMap<u64, Vec<(Value, Capabilities)>>,
 	secrets: IdMap<(PrimitiveId, u64), Vec<(Value, Capabilities)>>,
+	unforgeable: Vec<Value>,
 }
 
 impl CapabilityIndex {
@@ -278,9 +279,22 @@ impl CapabilityIndex {
 		bucket.push((secret.clone(), p.capabilities));
 	}
 
+	pub(crate) fn without_forging(&self, v: &Value) -> CapabilityIndex {
+		let mut out = self.clone();
+		out.unforgeable.push(v.clone());
+		out
+	}
+
+	pub(crate) fn forgery_denied(&self, p: &Primitive) -> bool {
+		self.unforgeable.iter().any(|v| {
+			v.as_primitive()
+				.is_some_and(|q| crate::term::equivalence::equivalent_primitives(q, p, true))
+		})
+	}
+
 	pub(crate) fn forgeable_secret_position(&self, p: &Primitive, phase: i32) -> Option<usize> {
 		let position = spec(p.id).ok()?.forgeable_secret?;
-		if self.secrets.is_empty() {
+		if self.secrets.is_empty() || self.forgery_denied(p) {
 			return None;
 		}
 		let secret = p.arguments.get(position)?;

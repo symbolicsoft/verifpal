@@ -209,6 +209,7 @@ impl Default for Holders {
 struct Outcome {
 	halts: Vec<(RunIdx, SlotIdx)>,
 	waits: Vec<(RunIdx, SlotIdx)>,
+	blocked: Vec<(RunIdx, DeliveryIdx)>,
 	settled: bool,
 }
 
@@ -245,6 +246,7 @@ enum Family {
 	Unshaped,
 	Shared,
 	Rerouted,
+	Unblocked,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -258,7 +260,7 @@ impl Family {
 	fn derived(self) -> bool {
 		matches!(
 			self,
-			Family::Fill | Family::Stuck | Family::Cleared | Family::Admitted
+			Family::Fill | Family::Stuck | Family::Cleared | Family::Admitted | Family::Unblocked
 		)
 	}
 }

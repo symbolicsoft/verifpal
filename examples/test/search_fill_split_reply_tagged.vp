@@ -1,0 +1,41 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a0 at one session, a1 at two.
+//
+// search_fill_split_reply.vp with each signature tagged by its role, so the
+// second cannot stand in for the first. At two sessions Bob accepts Alice's
+// sg5 from the other session as well, so agreement is not injective.
+attacker[active]
+
+principal Alice[
+	knows private a
+	knows public tag1, tag2
+	ga = PUBKEY(a)
+]
+Alice -> Bob: [ga]
+principal Alice[
+	generates n4
+	sg5 = SIGN(a, CONCAT(tag1, n4))
+]
+Alice -> Bob: n4
+Alice -> Bob: sg5
+principal Bob[
+	knows public tag1, tag2
+	_ = SIGNVERIF(ga, CONCAT(tag1, n4), sg5)?
+	generates n7, n8
+]
+Bob -> Alice: n7
+Bob -> Alice: n8
+principal Alice[
+	generates n9
+	sg10 = SIGN(a, CONCAT(tag2, n9))
+]
+Alice -> Bob: n9
+Alice -> Bob: sg10
+principal Bob[
+	_ = SIGNVERIF(ga, CONCAT(tag2, n9), sg10)?
+]
+queries[
+	authentication? Alice -> Bob: sg5
+]

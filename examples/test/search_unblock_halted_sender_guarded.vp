@@ -1,0 +1,42 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a0 at one session, a1 at two.
+//
+// search_unblock_halted_sender.vp with both public keys guarded. Without a
+// man in the middle, Alice accepts only Bob's own c7 at one session. At two,
+// the long-term keys give both sessions the same Diffie-Hellman key, so Bob's
+// c7 from the other session is accepted as a replay.
+attacker[active]
+
+principal Alice[
+	knows private a
+	ga = PUBKEY(a)
+]
+Alice -> Bob: [ga]
+principal Bob[
+	knows private b
+	gb = PUBKEY(b)
+]
+Bob -> Alice: [gb]
+principal Alice[
+	ssa = DH_KEX(gb, a)
+	generates n1
+	t2 = MAC(ssa, n1)
+]
+Alice -> Bob: n1, t2
+principal Bob[
+	ssb = DH_KEX(ga, b)
+	_ = ASSERT(MAC(ssb, n1), t2)?
+	generates n4, n6, nn8
+	sg5 = SIGN(b, n4)
+	c7 = AEAD_ENC(ssb, nn8, n6, nil)
+]
+Bob -> Alice: [n4], sg5, nn8, c7
+principal Alice[
+	_ = SIGNVERIF(gb, n4, sg5)?
+	d11 = AEAD_DEC(ssa, nn8, c7, nil)?
+]
+queries[
+	authentication? Bob -> Alice: c7
+]

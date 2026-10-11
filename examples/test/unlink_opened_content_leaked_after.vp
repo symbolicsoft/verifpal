@@ -1,0 +1,39 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: u1 at one session and at two.
+//
+// unlink_opened_content_leaked_before.vp with the concatenation leaked after
+// the ciphertexts are sent. The attacker ends with the same knowledge and
+// links the ciphertexts via the key in the same way.
+//
+// This link was missed. The closure walks held values in disclosure order and
+// records one route to each value, so each nonce was recorded as opened from
+// its ciphertext rather than split from the concatenation. Withholding a
+// ciphertext then also withheld its nonce, the rebuild under the key failed,
+// and the ciphertext counted only as tied to its contents. Withholding a
+// value now closes what was disclosed without it, whatever route was recorded.
+attacker[passive]
+
+principal Alice[
+	knows private uola_k
+	generates uola_n1, uola_n2
+	uola_c1 = ENC(uola_k, uola_n1)
+	uola_c2 = ENC(uola_k, uola_n2)
+	uola_n = CONCAT(uola_n1, uola_n2)
+	leaks uola_k
+]
+
+Alice -> Bob: uola_c1, uola_c2
+
+principal Alice[
+	leaks uola_n
+]
+
+principal Bob[
+	_ = HASH(uola_c1, uola_c2)
+]
+
+queries[
+	unlinkability? uola_c1, uola_c2
+]

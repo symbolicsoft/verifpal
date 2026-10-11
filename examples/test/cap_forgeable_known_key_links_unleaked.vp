@@ -1,0 +1,25 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: u0 at one session and at two.
+//
+// cap_forgeable_known_key_links.vp without the leaked key. The attacker can
+// forge either tag but never rebuild one from the key, so nothing ties them.
+attacker[passive]
+
+principal Alice[
+	knows private cfk_k
+	generates cfk_x1, cfk_x2
+	cfk_t1 = MAC[forgeable](cfk_k, cfk_x1)
+	cfk_t2 = MAC(cfk_k, cfk_x2)
+]
+
+Alice -> Bob: cfk_x1, cfk_x2, cfk_t1, cfk_t2
+
+principal Bob[
+	_ = HASH(cfk_t1, cfk_t2)
+]
+
+queries[
+	unlinkability? cfk_t1, cfk_t2
+]

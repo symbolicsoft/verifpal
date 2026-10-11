@@ -1,0 +1,30 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: u1 at one session and at two.
+//
+// Alice leaks the MAC key and sends two MACs under it. The attacker holds the
+// key, so it rebuilds both tags and links them via the key, exactly as it does
+// without the annotation. A forgeable capability only adds an option: its
+// exemption applies to a secret the attacker cannot obtain. The exemption used
+// to replace the genuine recipe, so the link dropped the key and was missed.
+// cap_forgeable_known_key_links_unleaked.vp is the counterweight.
+attacker[passive]
+
+principal Alice[
+	knows private cfk_k
+	generates cfk_x1, cfk_x2
+	cfk_t1 = MAC[forgeable](cfk_k, cfk_x1)
+	cfk_t2 = MAC(cfk_k, cfk_x2)
+	leaks cfk_k
+]
+
+Alice -> Bob: cfk_x1, cfk_x2, cfk_t1, cfk_t2
+
+principal Bob[
+	_ = HASH(cfk_t1, cfk_t2)
+]
+
+queries[
+	unlinkability? cfk_t1, cfk_t2
+]

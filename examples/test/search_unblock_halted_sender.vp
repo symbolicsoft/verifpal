@@ -1,0 +1,49 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a1 at one session and at two.
+//
+// Unauthenticated Diffie-Hellman: the attacker replaces ga and gb with its own
+// key, forges Bob's MAC input, and then forges Alice's copy of Bob's reply: a
+// signature over the guarded n4 under its own key, and c7 under the key it
+// shares with Alice. Alice accepts a c7 that Bob never sent.
+//
+// A flight forging Bob's reply alone makes Bob halt at his MAC check, so Alice
+// waits on the guarded n4, which only Bob can send, and no check of hers ever
+// halts to be repaired. The search now places such a flight again with the
+// cheapest node in which Bob does send that reply, so the attack was found
+// only at two sessions before. search_unblock_halted_sender_guarded.vp is the
+// counterweight.
+attacker[active]
+
+principal Alice[
+	knows private a
+	ga = PUBKEY(a)
+]
+Alice -> Bob: ga
+principal Bob[
+	knows private b
+	gb = PUBKEY(b)
+]
+Bob -> Alice: gb
+principal Alice[
+	ssa = DH_KEX(gb, a)
+	generates n1
+	t2 = MAC(ssa, n1)
+]
+Alice -> Bob: n1, t2
+principal Bob[
+	ssb = DH_KEX(ga, b)
+	_ = ASSERT(MAC(ssb, n1), t2)?
+	generates n4, n6, nn8
+	sg5 = SIGN(b, n4)
+	c7 = AEAD_ENC(ssb, nn8, n6, nil)
+]
+Bob -> Alice: [n4], sg5, nn8, c7
+principal Alice[
+	_ = SIGNVERIF(gb, n4, sg5)?
+	d11 = AEAD_DEC(ssa, nn8, c7, nil)?
+]
+queries[
+	authentication? Bob -> Alice: c7
+]

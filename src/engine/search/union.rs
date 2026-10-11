@@ -10,7 +10,7 @@ use crate::protocol::ProtocolTrace;
 use crate::solve::control::Controllable;
 use crate::syntax::PrincipalId;
 use crate::term::Value;
-use crate::theory::{AttackerState, obtainable};
+use crate::theory::{AttackerState, DerivationRecord, obtainable};
 use crate::util::IdMap;
 
 impl Union {
@@ -84,8 +84,8 @@ impl<'a, 'b> Search<'a, 'b> {
 			.enumerate()
 			.filter(|(i, v)| {
 				let emitted = matches!(
-					knowledge.origin(*i),
-					Origin::Wire { .. } | Origin::Leak { .. }
+					knowledge.state.derivations[*i],
+					DerivationRecord::Obtained | DerivationRecord::Leaked
 				);
 				union.knows(v).is_none()
 					&& ((emitted && produced(v) && crate::solve::control::term_depth(v) <= depth)

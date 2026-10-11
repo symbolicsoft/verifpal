@@ -116,6 +116,7 @@ pub(crate) struct Knowledge {
 	candidates: Arc<Candidates>,
 	pools: Arc<IdMap<(usize, usize), usize>>,
 	settled: Arc<Vec<u8>>,
+	genuine: Arc<TermSet>,
 	closed: bool,
 }
 
@@ -139,6 +140,7 @@ impl Knowledge {
 			candidates: Arc::new(Candidates::default()),
 			pools: Arc::new(IdMap::default()),
 			settled: Arc::new(Vec::new()),
+			genuine: Arc::new(TermSet::default()),
 			closed: true,
 		}
 	}
@@ -166,11 +168,8 @@ impl Knowledge {
 
 	pub(crate) fn learn(&mut self, v: &Value, origin: Origin) -> bool {
 		if let Some(at) = self.state.knows(v) {
-			let current = &self.state.derivations[at.get()];
-			let replaces = match &origin {
-				Origin::Derived(record) => current.forged() && !record.forged(),
-				_ => current.ingredients().next().is_some(),
-			};
+			let replaces = !matches!(origin, Origin::Derived(_))
+				&& !disclosure(&self.state.derivations[at.get()]);
 			if replaces {
 				let state = Arc::make_mut(&mut self.state);
 				Arc::make_mut(&mut state.derivations)[at.get()] = origin.record();
@@ -198,7 +197,11 @@ impl Knowledge {
 		self.closed = false;
 	}
 
-	pub(crate) fn withholding(&self, v: &Value, capabilities: &CapabilityIndex) -> Knowledge {
+	fn disclosed(&self, without: Option<&Value>) -> Knowledge {
+		self.disclosed_where(|_, known| without.is_none_or(|w| !known.equivalent(w, true)))
+	}
+
+	fn disclosed_where(&self, keep: impl Fn(usize, &Value) -> bool) -> Knowledge {
 		let mut out = Knowledge {
 			protocol: Arc::clone(&self.protocol),
 			built: Arc::clone(&self.built),
@@ -206,23 +209,59 @@ impl Knowledge {
 			candidates: Arc::clone(&self.candidates),
 			..Knowledge::new(self.state.current_phase)
 		};
-		for ((known, record), origin) in self
+		for (at, ((known, record), origin)) in self
 			.state
 			.known
 			.iter()
 			.zip(self.state.derivations.iter())
 			.zip(self.origins.iter())
+			.enumerate()
 		{
-			if matches!(
-				record,
-				DerivationRecord::Initial | DerivationRecord::Leaked | DerivationRecord::Obtained
-			) && !known.equivalent(v, true)
-			{
+			if disclosure(record) && keep(at, known) {
 				out.push(known, origin.clone(), record.clone());
 			}
 		}
+		out
+	}
+
+	pub(crate) fn breaks(
+		&self,
+		p: &Primitive,
+		capabilities: &CapabilityIndex,
+	) -> Option<Vec<Value>> {
+		broken(p, capabilities, &self.annotated, &self.state)
+	}
+
+	pub(crate) fn withholding(&self, v: &Value, capabilities: &CapabilityIndex) -> Knowledge {
+		let mut out = self.disclosed(Some(v));
 		out.closing(capabilities, Some(v));
 		out
+	}
+
+	fn unforged(
+		&self,
+		v: &Value,
+		capabilities: &CapabilityIndex,
+		withheld: Option<&Value>,
+	) -> bool {
+		let mut world = self.disclosed(withheld);
+		world.closing(&capabilities.without_forging(v), withheld);
+		world.state.knows(v).is_some()
+	}
+
+	pub(crate) fn proven(&self, v: &Value) -> bool {
+		self.genuine.contains(v)
+	}
+
+	pub(crate) fn proving(
+		&self,
+		v: &Value,
+		capabilities: &CapabilityIndex,
+		disclosed: impl Fn(usize, &Value) -> bool,
+	) -> Option<Knowledge> {
+		let mut world = self.disclosed_where(disclosed);
+		world.closing(&capabilities.without_forging(v), None);
+		world.state.knows(v).is_some().then_some(world)
 	}
 
 	pub(crate) fn has_reused(&self, pair: &[Value; 2]) -> bool {
@@ -288,11 +327,13 @@ impl Knowledge {
 			return;
 		}
 		let admitted = |v: &Value| withheld.is_none_or(|w| !w.equivalent(v, true));
+		let mut refuted: Vec<Value> = Vec::new();
 		loop {
 			let Found {
 				learned,
 				grown,
 				settling,
+				unproven,
 				..
 			} = {
 				let snapshot = Arc::clone(&self.state);
@@ -303,6 +344,7 @@ impl Knowledge {
 					attacker: &snapshot,
 					built: &self.built,
 					pools: &self.pools,
+					genuine: &self.genuine,
 				}
 				.run(&self.candidates, &self.settled)
 			};
@@ -346,12 +388,45 @@ impl Knowledge {
 					);
 				}
 			}
-			if self.state.chain == chain {
+			if self.state.chain != chain {
+				continue;
+			}
+			let mut proven = false;
+			for at in unproven {
+				let v = self.state.known[at].clone();
+				if refuted.iter().any(|r| r.equivalent(&v, true)) {
+					continue;
+				}
+				if !self.unforged(&v, capabilities, withheld) {
+					refuted.push(v);
+					continue;
+				}
+				Arc::make_mut(&mut self.genuine).insert(v);
+				Arc::make_mut(&mut self.state).chain = next_chain();
+				proven = true;
+			}
+			if !proven {
 				break;
 			}
 		}
 		self.closed = true;
 	}
+}
+
+fn broken(
+	p: &Primitive,
+	capabilities: &CapabilityIndex,
+	annotated: &CapabilityIndex,
+	attacker: &AttackerState,
+) -> Option<Vec<Value>> {
+	can_break_weak(p, capabilities, attacker).or_else(|| can_break_weak(p, annotated, attacker))
+}
+
+fn disclosure(record: &DerivationRecord) -> bool {
+	matches!(
+		record,
+		DerivationRecord::Initial | DerivationRecord::Leaked | DerivationRecord::Obtained
+	)
 }
 
 type Pools = Vec<((usize, usize), usize)>;
@@ -362,6 +437,7 @@ struct Pass<'s> {
 	attacker: &'s AttackerState,
 	built: &'s TermSet,
 	pools: &'s IdMap<(usize, usize), usize>,
+	genuine: &'s TermSet,
 }
 
 #[derive(Default)]
@@ -369,69 +445,20 @@ struct Found {
 	learned: Vec<(Value, DerivationRecord)>,
 	grown: Pools,
 	settling: Vec<(usize, u8)>,
+	unproven: Vec<usize>,
 	seen: TermSet,
 }
 
 impl Found {
 	fn push(&mut self, attacker: &AttackerState, v: Value, d: DerivationRecord) {
-		let fresh = attacker.knows(&v).is_none_or(|at| {
-			attacker.derivations[at.get()].forged()
-				&& !d.forged()
-				&& d.ingredients().all(|ingredient| {
-					avoids(ingredient, at.get(), attacker, &mut Provenance::default())
-				})
-		});
-		if fresh && self.seen.insert(v.clone()) {
+		if attacker.knows(&v).is_none() && self.seen.insert(v.clone()) {
 			self.learned.push((v, d));
 		}
 	}
 }
 
-#[derive(Default)]
-struct Provenance {
-	held: IdMap<usize, bool>,
-	built: IdMap<usize, bool>,
-}
-
-fn avoids(v: &Value, target: usize, attacker: &AttackerState, memo: &mut Provenance) -> bool {
-	let Some(at) = attacker.knows(v) else {
-		let Value::Primitive(p) = v else {
-			return true;
-		};
-		let key = Arc::as_ptr(p) as usize;
-		if let Some(&known) = memo.built.get(&key) {
-			return known;
-		}
-		memo.built.insert(key, false);
-		let found = p
-			.arguments
-			.iter()
-			.all(|argument| avoids(argument, target, attacker, memo));
-		memo.built.insert(key, found);
-		return found;
-	};
-	if at.get() == target {
-		return false;
-	}
-	if let Some(&known) = memo.held.get(&at.get()) {
-		return known;
-	}
-	memo.held.insert(at.get(), false);
-	let found = attacker.derivations[at.get()]
-		.ingredients()
-		.all(|ingredient| avoids(ingredient, target, attacker, memo));
-	memo.held.insert(at.get(), found);
-	found
-}
-
 fn settled_now(p: &Primitive, attacker: &AttackerState) -> u8 {
-	let held = |values: &[Value]| {
-		values.iter().all(|v| {
-			attacker
-				.knows(v)
-				.is_some_and(|at| !attacker.derivations[at.get()].forged())
-		})
-	};
+	let held = |values: &[Value]| values.iter().all(|v| attacker.knows(v).is_some());
 	let mut now = 0;
 	let reveals = crate::theory::decomposition_reveals(p);
 	if reveals.as_deref().is_none_or(held) {
@@ -478,8 +505,7 @@ impl Pass<'_> {
 		if flags & DECOMPOSED == 0
 			&& now & DECOMPOSED == 0
 			&& let Some(result) = can_decompose(p, capabilities, attacker)
-			&& !forged(at, attacker)
-			&& !minted(p, known, capabilities, attacker, self.built)
+			&& self.openable(found, at, p, known)
 		{
 			for revealed in result.revealed {
 				found.push(
@@ -494,8 +520,7 @@ impl Pass<'_> {
 		}
 		if flags & BROKEN == 0
 			&& now & BROKEN == 0
-			&& let Some(revealed) = can_break_weak(p, capabilities, attacker)
-				.or_else(|| can_break_weak(p, self.annotated, attacker))
+			&& let Some(revealed) = broken(p, capabilities, self.annotated, attacker)
 		{
 			for r in revealed {
 				found.push(
@@ -532,6 +557,21 @@ impl Pass<'_> {
 				);
 			}
 		}
+	}
+
+	fn openable(&self, found: &mut Found, at: usize, p: &Arc<Primitive>, known: &Value) -> bool {
+		let attacker = self.attacker;
+		if !can_reconstruct_primitive(p, self.capabilities, attacker).is_some_and(|b| b.forged()) {
+			return true;
+		}
+		if !self.built.contains(known) {
+			return false;
+		}
+		if disclosure(&attacker.derivations[at]) || self.genuine.contains(known) {
+			return true;
+		}
+		found.unproven.push(at);
+		false
 	}
 
 	fn reconstructions(&self, found: &mut Found, candidates: &Candidates) {
@@ -694,18 +734,6 @@ fn advance(choice: &mut [usize], base: usize) -> bool {
 		*digit = 0;
 	}
 	false
-}
-
-fn forged(at: usize, attacker: &AttackerState) -> bool {
-	matches!(
-		attacker.derivations.get(at),
-		Some(
-			DerivationRecord::Broken {
-				capability: Capability::Forgeable,
-				..
-			} | DerivationRecord::ReusedForge { .. }
-		)
-	)
 }
 
 fn minted(

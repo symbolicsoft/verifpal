@@ -1,0 +1,32 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0 at one session and at two.
+//
+// cfu_c1 seals the forgeable partial cfu_x and sits inside cfu_outer under
+// HASH(cfu_x); cfu_c2 reuses its key and nonce. cfu_c1 is reachable only with
+// the key built from a forged partial, so recovering cfu_x from the nonce reuse
+// is the forgery's own product. Reuse reveals skipped the provenance check
+// that decryption applied. closure_forged_reuse_genuine.vp is the
+// counterweight.
+attacker[passive]
+principal Alice[
+	generates cfu_k0, cfu_na, cfu_m, cfu_n, cfu_m2
+	knows private cfu_kae
+	knows public cfu_ad
+	cfu_s1, cfu_s2 = THRESHOLD_SPLIT[2](cfu_k0)
+	cfu_ca = PUBKEY(cfu_na)
+	cfu_x = THRESHOLD_SIGN[forgeable](cfu_s1, cfu_na, cfu_ca, cfu_m)
+	cfu_hk = HASH(cfu_x)
+	cfu_c1 = AEAD_ENC(cfu_kae, cfu_n, cfu_x, cfu_ad)
+	cfu_c2 = AEAD_ENC(cfu_kae, cfu_n, cfu_m2, cfu_ad)
+	cfu_outer = ENC(cfu_hk, cfu_c1)
+	leaks cfu_na
+]
+Alice -> Bob: cfu_ca, cfu_m, cfu_n, cfu_outer, cfu_c2
+principal Bob[
+	_ = HASH(cfu_ca, cfu_m, cfu_n, cfu_outer, cfu_c2)
+]
+queries[
+	confidentiality? cfu_s1
+]

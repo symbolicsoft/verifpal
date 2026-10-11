@@ -8,7 +8,7 @@ use super::{
 	normalize, runs_of,
 };
 use crate::engine::exec::{Execution, Install, Installs, execute};
-use crate::engine::program::{Event, RunIdx};
+use crate::engine::program::{DeliveryIdx, Event, RunIdx};
 use crate::protocol::{ProtocolTrace, SlotIdx};
 use crate::syntax::PrincipalId;
 use crate::term::Value;
@@ -174,6 +174,20 @@ impl<'a, 'b> Search<'a, 'b> {
 	pub(super) fn enqueue(&mut self, installs: Installs) -> (AttemptIdx, bool) {
 		let installs = self.project(installs);
 		if let Some(at) = self.attempts.tried.position(&installs) {
+			let family = self.attempts.family;
+			let attempt = &mut self.attempts.tried.entries[at].1;
+			if attempt.family.derived()
+				&& !family.derived()
+				&& attempt
+					.outcome
+					.as_ref()
+					.is_some_and(|outcome| !outcome.settled)
+			{
+				attempt.family = family;
+				attempt.outcome = None;
+				self.attempts.pending.push(at);
+				return (at, true);
+			}
 			return (at, false);
 		}
 		let at = self.attempts.tried.entries.next_index();
@@ -200,6 +214,7 @@ impl<'a, 'b> Search<'a, 'b> {
 			search.attempts.tried.entries[at].1.outcome = Some(Outcome {
 				halts: halts_of(&ex),
 				waits: search.waits_of(&ex),
+				blocked: search.blocked_of(&ex),
 				settled: !stuck,
 			});
 			if stuck && family.derived() {
@@ -229,13 +244,36 @@ impl<'a, 'b> Search<'a, 'b> {
 		});
 	}
 
+	fn blocked_of(&self, ex: &Execution) -> Vec<(RunIdx, DeliveryIdx)> {
+		let program = self.cx.program;
+		ex.runs
+			.iter_enumerated()
+			.filter(|(_, state)| state.frozen && state.halted.is_none())
+			.filter_map(|(run, state)| {
+				let Event::Recv(d) = program.runs[run].steps.get(state.pc)?.event else {
+					return None;
+				};
+				let sender = program.deliveries[d].sender;
+				(ex.sent[d].is_none()
+					&& ex.runs[sender].halted.is_some()
+					&& self.honest.runs[sender].halted.is_none())
+				.then_some((run, d))
+			})
+			.collect()
+	}
+
 	fn waits_of(&self, ex: &Execution) -> Vec<(RunIdx, SlotIdx)> {
 		let km = self.cx.km;
 		let mut waits: Vec<(RunIdx, SlotIdx)> = Vec::new();
 		let starved: Vec<(RunIdx, SlotIdx)> = ex
 			.withheld
 			.iter()
-			.filter(|at| self.honest.withheld.contains(at))
+			.filter(|&&(run, slot)| {
+				let program = &self.cx.program.runs[run];
+				program.step_of_slot.get(&slot).is_some_and(
+					|&step| matches!(program.steps[step].event, Event::Recv(d) if self.honest.sent[d].is_none()),
+				)
+			})
 			.copied()
 			.collect();
 		for &(run, _) in &starved {

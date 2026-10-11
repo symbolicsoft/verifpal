@@ -410,14 +410,25 @@ fn freeze(cx: &Context, ex: &mut Execution, installs: &Installs, phase: i32) {
 		if lacking {
 			continue;
 		}
-		if let Event::Recv(d) = step.event {
-			for &(slot, guarded) in &program.deliveries[d].slots {
-				if !guarded
-					&& install_at(installs, r, slot).is_none()
-					&& !dropped(installs, r, slot)
-					&& ex.sent[d].is_none()
-				{
-					ex.withheld.push((r, slot));
+		if let Event::Recv(_) = step.event {
+			for later in program.runs[r].steps.indices_from(pc) {
+				let step = program.runs[r].steps[later];
+				if step.phase > phase {
+					break;
+				}
+				let d = match step.event {
+					Event::Send(_) | Event::Leak(_) => break,
+					Event::Recv(d) => d,
+					_ => continue,
+				};
+				for &(slot, guarded) in &program.deliveries[d].slots {
+					if !guarded
+						&& install_at(installs, r, slot).is_none()
+						&& !dropped(installs, r, slot)
+						&& ex.sent[d].is_none()
+					{
+						ex.withheld.push((r, slot));
+					}
 				}
 			}
 		}

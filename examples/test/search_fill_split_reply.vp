@@ -1,0 +1,47 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a1 at one session and at two.
+//
+// Alice signs bare nonces in two flights. The attacker hands Alice an
+// invented reply before Bob has sent his, takes her second signature and
+// gives it to Bob as her first: Bob accepts sg5 = SIGN(a, n9), which Alice
+// never sent as sg5.
+//
+// Bob's reply is cut into one message per value. Alice waited on n7 only, so
+// only n7 counted as withheld; filling it left her waiting on n8, the fill was
+// stuck and dropped, and the attack was found only when the reply was one
+// message or at two sessions. A frozen run's withheld slots now cover every
+// unsent message it receives before its next send or leak.
+// search_fill_split_reply_tagged.vp is the counterweight.
+attacker[active]
+
+principal Alice[
+	knows private a
+	ga = PUBKEY(a)
+]
+Alice -> Bob: [ga]
+principal Alice[
+	generates n4
+	sg5 = SIGN(a, n4)
+]
+Alice -> Bob: n4
+Alice -> Bob: sg5
+principal Bob[
+	_ = SIGNVERIF(ga, n4, sg5)?
+	generates n7, n8
+]
+Bob -> Alice: n7
+Bob -> Alice: n8
+principal Alice[
+	generates n9
+	sg10 = SIGN(a, n9)
+]
+Alice -> Bob: n9
+Alice -> Bob: sg10
+principal Bob[
+	_ = SIGNVERIF(ga, n9, sg10)?
+]
+queries[
+	authentication? Alice -> Bob: sg5
+]
