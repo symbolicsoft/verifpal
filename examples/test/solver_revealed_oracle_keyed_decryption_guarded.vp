@@ -1,0 +1,47 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0 at one session and at two.
+//
+// solver_revealed_oracle_keyed_decryption.vp with the share guarded. Bob
+// still decrypts ca when the attacker sends it, but seals s under a key
+// derived from Carol's share, which the attacker cannot compute.
+attacker[active]
+
+principal Alice[
+	knows private kab
+	generates s
+	ca = ENC(kab, s)
+]
+
+Alice -> Dave: [ca]
+
+principal Dave[
+	knows private kab
+	sd = DEC(kab, ca)
+]
+
+principal Carol[
+	knows private kab
+	generates mc, x
+	gx = PUBKEY(x)
+	xc = ENC(kab, mc)
+]
+
+Carol -> Bob: [gx], xc
+
+principal Bob[
+	knows private kab
+	knows public ad
+	generates y, n
+	gy = PUBKEY(y)
+	m = DEC(kab, xc)
+	r = HKDF(nil, DH_KEX(gx, y), nil)
+	e = AEAD_ENC(r, n, m, ad)
+]
+
+Bob -> Carol: gy, n, e
+
+queries[
+	confidentiality? s
+]

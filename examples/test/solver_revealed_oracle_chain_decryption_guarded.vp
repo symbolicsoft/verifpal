@@ -1,0 +1,56 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0 at one session and at two.
+//
+// solver_revealed_oracle_chain_decryption.vp with g2 guarded. Bob still
+// decrypts ca2 when the attacker sends it, but seals kk under a key derived
+// from Carol's share, so the attacker cannot complete k1.
+attacker[active]
+
+principal Alice[
+	knows private kb, kc
+	knows private kk
+	generates s
+	ca2 = ENC(kb, kk)
+	ca1 = ENC(kc, s)
+]
+
+Alice -> Dave: [ca2], [ca1]
+
+principal Dave[
+	knows private kb, kc
+	sd2 = DEC(kb, ca2)
+	sd1 = DEC(kc, ca1)
+]
+
+principal Carol[
+	knows private kb, kc
+	generates x2, x1, m2, m1
+	g2 = PUBKEY(x2)
+	g1 = PUBKEY(x1)
+	c2 = ENC(kb, m2)
+	c1 = ENC(kc, m1)
+]
+
+Carol -> Bob: [g2], c2, g1, c1
+
+principal Bob[
+	knows private kb, kc, kk
+	knows public ad
+	generates y2, n2, y1, n1
+	gy2 = PUBKEY(y2)
+	gy1 = PUBKEY(y1)
+	d2 = DEC(kb, c2)
+	k2 = HKDF(nil, DH_KEX(g2, y2), nil)
+	e2 = AEAD_ENC(k2, n2, d2, ad)
+	d1 = DEC(kc, c1)
+	k1 = HKDF(kk, DH_KEX(g1, y1), nil)
+	e1 = AEAD_ENC(k1, n1, d1, ad)
+]
+
+Bob -> Carol: gy2, n2, e2, gy1, n1, e1
+
+queries[
+	confidentiality? s
+]

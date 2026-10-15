@@ -222,13 +222,18 @@ impl<'a> Deducer<'a> {
 			if !may_yield(term, &apply(goal, s)) {
 				continue;
 			}
+			if self.opening.get() && !given.iter().all(|key| self.holds(&apply(key, s))) {
+				continue;
+			}
 			let mut opened = vec![s.clone()];
+			let opening = self.opening.replace(true);
 			for required in given {
 				if opened.is_empty() {
 					break;
 				}
 				opened = self.solve_each(required, &opened);
 			}
+			self.opening.set(opening);
 			for candidate in &opened {
 				self.solve_by_oracles(term, goal, candidate, out);
 			}

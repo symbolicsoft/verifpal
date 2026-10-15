@@ -1,0 +1,57 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1 at one session and at two.
+//
+// The server encrypts s under the hash of its own signature over
+// CONCAT(c_a, c_b). Bob signs whatever q arrives under the same key and seals
+// the signature under a key derived from the DH share beside it. The
+// attacker sends PUBKEY(nil) and CONCAT(c_a, c_b), opens Bob's reply, hashes
+// the signature into kd and opens es. The statement it needs has another
+// constructor than the honest q, a fresh constant, and no principal checks
+// it.
+//
+// A signature over attacker input is a constructor, not a revealed value the
+// deducer has to invert: decomposing Bob's reply, the deducer solves the key
+// that opens it, shaping the share, and matches the signature inside against
+// the goal. This pins that route for a signing oracle behind a key the
+// attacker must first make derivable.
+//
+// solver_revealed_oracle_keyed_signature_guarded.vp guards the share and
+// holds.
+attacker[active]
+
+principal Server[
+	knows private ssk
+	knows public c_a, c_b
+	generates s
+	kd = HASH(SIGN(ssk, CONCAT(c_a, c_b)))
+	es = ENC(kd, s)
+]
+
+Server -> Archive: [es]
+
+principal Archive[]
+
+principal Client[
+	generates x, q
+	gk = PUBKEY(x)
+]
+
+Client -> Bob: gk, q
+
+principal Bob[
+	knows private ssk
+	knows public ad
+	generates y, n
+	gy = PUBKEY(y)
+	sig = SIGN(ssk, q)
+	k = HKDF(nil, DH_KEX(gk, y), nil)
+	e = AEAD_ENC(k, n, sig, ad)
+]
+
+Bob -> Client: gy, n, e
+
+queries[
+	confidentiality? s
+]

@@ -15,7 +15,7 @@
 // matched against the goal, which a decryption over variables never
 // matches. The same model sending m in clear failed, and this one held.
 // Revealed values that still reduce over variables are now inverted like
-// wire terms, once the keys that open them are solved.
+// wire terms, once the attacker holds the keys that open them.
 //
 // solver_nested_oracle_guarded.vp guards the nonce and holds.
 attacker[active]

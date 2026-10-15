@@ -1,0 +1,59 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1 at one session and at two.
+//
+// Bob decrypts whatever arrives under kab and returns the plaintext sealed
+// under a key derived from the DH share that arrives beside it. The attacker
+// replaces the share with PUBKEY(nil) and the ciphertext with Alice's ca, so
+// Bob seals s under HKDF(nil, DH_KEX(gy, nil), nil), which the attacker
+// computes from gy.
+//
+// The decryption oracle is revealed only under a key the attacker makes
+// derivable by its own install, so the deducer must solve that key, shaping
+// the share, before it can invert the decryption. Trying the oracle only
+// once its key was already held left this attack to the rest of the search,
+// which lost it under an unrelated leak
+// (solver_revealed_oracle_keyed_tuple_leaked.vp).
+//
+// solver_revealed_oracle_keyed_decryption_guarded.vp guards the share and
+// holds.
+attacker[active]
+
+principal Alice[
+	knows private kab
+	generates s
+	ca = ENC(kab, s)
+]
+
+Alice -> Dave: [ca]
+
+principal Dave[
+	knows private kab
+	sd = DEC(kab, ca)
+]
+
+principal Carol[
+	knows private kab
+	generates mc, x
+	gx = PUBKEY(x)
+	xc = ENC(kab, mc)
+]
+
+Carol -> Bob: gx, xc
+
+principal Bob[
+	knows private kab
+	knows public ad
+	generates y, n
+	gy = PUBKEY(y)
+	m = DEC(kab, xc)
+	r = HKDF(nil, DH_KEX(gx, y), nil)
+	e = AEAD_ENC(r, n, m, ad)
+]
+
+Bob -> Carol: gy, n, e
+
+queries[
+	confidentiality? s
+]

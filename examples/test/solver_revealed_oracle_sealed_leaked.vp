@@ -1,0 +1,75 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1 at one session and at two.
+//
+// solver_revealed_oracle_sealed.vp with symkey leaked. The attacker replaces
+// the dapp's request with one sealed under symkey whose share is PUBKEY(nil),
+// so the wallet's key is HKDF(nil, DH_KEX(gy, nil), nil), which the attacker
+// computes from gy. It opens resp and takes cs.
+//
+// The signing oracle inside resp sits behind that same key, which the
+// attacker holds only once it has chosen the request; the deducer solves the
+// key by shaping the request.
+attacker[active]
+
+principal Wallet[
+	knows private wsk
+	gw = PUBKEY(wsk)
+]
+
+Wallet -> Dapp: [gw]
+
+principal Evil[
+	knows private esym
+	knows public c_ad, c_auth, c_edom
+	generates ex, enonce, ereq_iv
+	gex = PUBKEY(ex)
+	ereq = AEAD_ENC(esym, ereq_iv, CONCAT(c_auth, gex, enonce, c_edom), c_ad)
+]
+
+Evil -> Wallet: ereq_iv, ereq
+
+principal Wallet[
+	knows private esym
+	knows public c_ad, c_res
+	generates ey, eresp_iv
+	gey = PUBKEY(ey)
+	de_w = AEAD_DEC(esym, ereq_iv, ereq, c_ad)?
+	etag, gex_w, enonce_w, edom_w = SPLIT(de_w)?
+	ecp = CONCAT(gw, edom_w, enonce_w, c_res)
+	ecs = SIGN(wsk, ecp)
+	er = HKDF(nil, DH_KEX(gex_w, ey), nil)
+	eresp = AEAD_ENC(er, eresp_iv, CONCAT(ecp, ecs, gey), c_ad)
+]
+
+Wallet -> Evil: gey, eresp_iv, eresp
+
+principal Dapp[
+	knows private symkey
+	knows public c_ad, c_auth, c_dom
+	generates x, nonce, req_iv
+	gx = PUBKEY(x)
+	req = AEAD_ENC(symkey, req_iv, CONCAT(c_auth, gx, nonce, c_dom), c_ad)
+	leaks symkey
+]
+
+Dapp -> Wallet: req_iv, req
+
+principal Wallet[
+	knows private symkey
+	generates y, resp_iv
+	gy = PUBKEY(y)
+	d_w = AEAD_DEC(symkey, req_iv, req, c_ad)?
+	tag_w, gx_w, nonce_w, dom_w = SPLIT(d_w)?
+	cp = CONCAT(gw, dom_w, nonce_w, c_res)
+	cs = SIGN(wsk, cp)
+	r = HKDF(nil, DH_KEX(gx_w, y), nil)
+	resp = AEAD_ENC(r, resp_iv, CONCAT(cp, cs, gy), c_ad)
+]
+
+Wallet -> Dapp: gy, resp_iv, resp
+
+queries[
+	confidentiality? cs
+]

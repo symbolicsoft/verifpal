@@ -5711,6 +5711,67 @@ fn test_solver_nested_oracle() {
 }
 
 #[test]
+fn test_solver_revealed_oracle_sealed() {
+	for sessions in [1, 2] {
+		run_model_sessions("solver_revealed_oracle_sealed.vp", sessions, "c0");
+		run_model_sessions("solver_revealed_oracle_sealed_leaked.vp", sessions, "c1");
+	}
+}
+
+#[test]
+fn test_solver_revealed_oracle_chain() {
+	for sessions in [1, 2] {
+		run_model_sessions("solver_revealed_oracle_chain_encryption.vp", sessions, "c1");
+		run_model_sessions(
+			"solver_revealed_oracle_chain_encryption_guarded.vp",
+			sessions,
+			"c0",
+		);
+		run_model_sessions("solver_revealed_oracle_chain_decryption.vp", sessions, "c1");
+		run_model_sessions(
+			"solver_revealed_oracle_chain_decryption_guarded.vp",
+			sessions,
+			"c0",
+		);
+	}
+}
+
+#[test]
+fn test_solver_revealed_oracle_keyed() {
+	for sessions in [1, 2] {
+		run_model_sessions("solver_revealed_oracle_keyed_decryption.vp", sessions, "c1");
+		run_model_sessions(
+			"solver_revealed_oracle_keyed_decryption_guarded.vp",
+			sessions,
+			"c0",
+		);
+		run_model_sessions("solver_revealed_oracle_keyed_signature.vp", sessions, "c1");
+		run_model_sessions(
+			"solver_revealed_oracle_keyed_signature_guarded.vp",
+			sessions,
+			"c0",
+		);
+		run_model_sessions("solver_revealed_oracle_keyed_tuple.vp", sessions, "c1");
+		run_model_sessions(
+			"solver_revealed_oracle_keyed_tuple_guarded.vp",
+			sessions,
+			"c0",
+		);
+		run_model_sessions(
+			"solver_revealed_oracle_keyed_tuple_leaked.vp",
+			sessions,
+			"c1",
+		);
+		run_model_sessions("solver_revealed_oracle_keyed_request.vp", sessions, "c1");
+		run_model_sessions(
+			"solver_revealed_oracle_keyed_request_guarded.vp",
+			sessions,
+			"c0",
+		);
+	}
+}
+
+#[test]
 fn test_solver_onion_oracle() {
 	for sessions in [1, 2] {
 		run_model_sessions("solver_onion_oracle.vp", sessions, "c1");

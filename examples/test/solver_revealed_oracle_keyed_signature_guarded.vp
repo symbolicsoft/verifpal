@@ -1,0 +1,45 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0 at one session and at two.
+//
+// solver_revealed_oracle_keyed_signature.vp with the share guarded. Bob
+// still signs CONCAT(c_a, c_b) when the attacker sends it, but seals the
+// signature under a key derived from the client's share, which the attacker
+// cannot compute.
+attacker[active]
+
+principal Server[
+	knows private ssk
+	knows public c_a, c_b
+	generates s
+	kd = HASH(SIGN(ssk, CONCAT(c_a, c_b)))
+	es = ENC(kd, s)
+]
+
+Server -> Archive: [es]
+
+principal Archive[]
+
+principal Client[
+	generates x, q
+	gk = PUBKEY(x)
+]
+
+Client -> Bob: [gk], q
+
+principal Bob[
+	knows private ssk
+	knows public ad
+	generates y, n
+	gy = PUBKEY(y)
+	sig = SIGN(ssk, q)
+	k = HKDF(nil, DH_KEX(gk, y), nil)
+	e = AEAD_ENC(k, n, sig, ad)
+]
+
+Bob -> Client: gy, n, e
+
+queries[
+	confidentiality? s
+]

@@ -1,0 +1,60 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1 at one session and at two.
+//
+// solver_revealed_oracle_keyed_decryption.vp with Bob's ciphertext arriving
+// as the first field of a tuple, so the input the oracle needs,
+// CONCAT(ca, nil), is no protocol term the attacker could replay whole. The
+// attacker replaces the share with PUBKEY(nil) and the tuple with
+// CONCAT(ca, nil) in one flight, and opens Bob's reply.
+//
+// The decryption oracle is revealed only under a key the attacker makes
+// derivable by its own install, so the deducer must solve that key, shaping
+// the share, before it can invert the decryption. Trying the oracle only
+// once its key was already held left this attack to the rest of the search,
+// which lost it under an unrelated leak
+// (solver_revealed_oracle_keyed_tuple_leaked.vp).
+//
+// solver_revealed_oracle_keyed_tuple_guarded.vp guards the share and holds.
+attacker[active]
+
+principal Alice[
+	knows private kab
+	generates s
+	ca = ENC(kab, s)
+]
+
+Alice -> Dave: [ca]
+
+principal Dave[
+	knows private kab
+	sd = DEC(kab, ca)
+]
+
+principal Carol[
+	knows private kab
+	knows public c_t
+	generates mc, x
+	gx = PUBKEY(x)
+	xc = CONCAT(ENC(kab, mc), c_t)
+]
+
+Carol -> Bob: gx, xc
+
+principal Bob[
+	knows private kab
+	knows public ad
+	generates y, n
+	gy = PUBKEY(y)
+	c1, t1 = SPLIT(xc)
+	m = DEC(kab, c1)
+	r = HKDF(nil, DH_KEX(gx, y), nil)
+	e = AEAD_ENC(r, n, m, ad)
+]
+
+Bob -> Carol: gy, n, e
+
+queries[
+	confidentiality? s
+]

@@ -1,0 +1,77 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1 at one session and at two.
+//
+// Bob encrypts whatever z arrives under kb and seals it under a key from the
+// share g3. Later he takes the share for his second reply's key from the
+// first field of whatever he decrypts under kb, and seals in that reply the
+// decryption of c1 under kc. The attacker sends PUBKEY(nil) and
+// CONCAT(PUBKEY(nil), nil) first, opens e3 to get
+// ENC(kb, CONCAT(PUBKEY(nil), nil)), returns it as c2 with Alice's ca1 as
+// c1, and opens e1 to take s.
+//
+// The second oracle's key needs a value only the first oracle yields, and
+// both oracles sit behind keys the attacker makes derivable by its own
+// installs. The encryption oracle is a constructor, so the deducer reaches it
+// by decomposing e3 while it solves the second key.
+//
+// solver_revealed_oracle_chain_encryption_guarded.vp guards g3 and holds.
+attacker[active]
+
+principal Alice[
+	knows private kc
+	generates s
+	ca1 = ENC(kc, s)
+]
+
+Alice -> Dave: [ca1]
+
+principal Dave[
+	knows private kc
+	sd = DEC(kc, ca1)
+]
+
+principal Carol[
+	knows private kb, kc
+	knows public c_t
+	generates x3, z, x1, mc
+	g3 = PUBKEY(x3)
+]
+
+Carol -> Bob: g3, z
+
+principal Bob[
+	knows private kb, kc
+	knows public ad
+	generates y3, n3, y1, n1
+	gy3 = PUBKEY(y3)
+	gy1 = PUBKEY(y1)
+	w = ENC(kb, z)
+	k3 = HKDF(nil, DH_KEX(g3, y3), nil)
+	e3 = AEAD_ENC(k3, n3, w, ad)
+]
+
+Bob -> Carol: gy3, n3, e3
+
+principal Carol[
+	g1 = PUBKEY(x1)
+	c2 = ENC(kb, CONCAT(g1, c_t))
+	c1 = ENC(kc, mc)
+]
+
+Carol -> Bob: c2, c1
+
+principal Bob[
+	d2 = DEC(kb, c2)
+	g1_b, t_b = SPLIT(d2)
+	k1 = HKDF(nil, DH_KEX(g1_b, y1), nil)
+	m1 = DEC(kc, c1)
+	e1 = AEAD_ENC(k1, n1, m1, ad)
+]
+
+Bob -> Carol: gy1, n1, e1
+
+queries[
+	confidentiality? s
+]

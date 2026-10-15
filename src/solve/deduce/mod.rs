@@ -12,7 +12,7 @@ mod tests;
 
 pub(crate) use shapes::rewrite_shapes_from;
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -34,6 +34,7 @@ struct SolvedGoal {
 	bindings: Substitution,
 	solutions: Vec<Substitution>,
 	cut: Vec<(u64, Value)>,
+	opening: bool,
 }
 
 type GoalMemo = IdMap<(u64, u64), Vec<SolvedGoal>>;
@@ -74,6 +75,7 @@ pub(crate) struct Deducer<'a> {
 	memo: RefCell<GoalMemo>,
 	active: RefCell<Vec<(u64, Value)>>,
 	cuts: RefCell<Vec<usize>>,
+	opening: Cell<bool>,
 	variables: RefCell<FreshVariables>,
 	bound: Option<Arc<Bound>>,
 	saved: RefCell<crate::theory::SavedMemo>,
@@ -158,6 +160,7 @@ impl<'a> Deducer<'a> {
 			memo: RefCell::default(),
 			active: RefCell::default(),
 			cuts: RefCell::default(),
+			opening: Cell::new(false),
 			variables: RefCell::new(FreshVariables::new(scope)),
 			bound: None,
 			saved: RefCell::default(),
@@ -265,7 +268,8 @@ impl<'a> Deducer<'a> {
 			let memo = self.memo.borrow();
 			let reused = memo.get(&memo_key).and_then(|bucket| {
 				bucket.iter().find_map(|entry| {
-					if !entry.goal.equivalent(&g, true)
+					if entry.opening != self.opening.get()
+						|| !entry.goal.equivalent(&g, true)
 						|| !same_substitution(&entry.bindings, &relevant)
 					{
 						return None;
@@ -317,6 +321,7 @@ impl<'a> Deducer<'a> {
 					bindings: relevant,
 					solutions: deltas,
 					cut,
+					opening: self.opening.get(),
 				});
 		}
 		out.extend(local);

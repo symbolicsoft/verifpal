@@ -1,0 +1,56 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1 at one session and at two.
+//
+// solver_revealed_oracle_keyed_tuple.vp with Carol's mc leaked, which changes
+// nothing about the attack: the attacker still replaces the share with
+// PUBKEY(nil) and the tuple with CONCAT(ca, nil), and opens Bob's reply.
+//
+// The metamorphic `leaks` property found this one. With the decryption oracle
+// tried only once the attacker already held its key, leaking mc changed what
+// the rest of the search kept and merged, and the attack was lost at both
+// session counts. Route keys are solved again, so the deducer proposes the
+// substitution itself.
+attacker[active]
+
+principal Alice[
+	knows private kab
+	generates s
+	ca = ENC(kab, s)
+]
+
+Alice -> Dave: [ca]
+
+principal Dave[
+	knows private kab
+	sd = DEC(kab, ca)
+]
+
+principal Carol[
+	knows private kab
+	knows public c_t
+	generates mc, x
+	gx = PUBKEY(x)
+	xc = CONCAT(ENC(kab, mc), c_t)
+	leaks mc
+]
+
+Carol -> Bob: gx, xc
+
+principal Bob[
+	knows private kab
+	knows public ad
+	generates y, n
+	gy = PUBKEY(y)
+	c1, t1 = SPLIT(xc)
+	m = DEC(kab, c1)
+	r = HKDF(nil, DH_KEX(gx, y), nil)
+	e = AEAD_ENC(r, n, m, ad)
+]
+
+Bob -> Carol: gy, n, e
+
+queries[
+	confidentiality? s
+]

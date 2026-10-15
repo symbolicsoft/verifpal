@@ -1,0 +1,52 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0 at one session and at two.
+//
+// solver_revealed_oracle_keyed_request.vp with the request guarded. The
+// attacker still opens it with the leaked symkey and learns Carol's share
+// and ciphertext, but cannot make Bob decrypt ca or seal anything under a
+// key it can compute.
+attacker[active]
+
+principal Alice[
+	knows private kb
+	generates s
+	ca = ENC(kb, s)
+]
+
+Alice -> Dave: [ca]
+
+principal Dave[
+	knows private kb
+	sd = DEC(kb, ca)
+]
+
+principal Carol[
+	knows private symkey, kb
+	knows public ad
+	generates x, mc, n0
+	gx = PUBKEY(x)
+	req = AEAD_ENC(symkey, n0, CONCAT(gx, ENC(kb, mc)), ad)
+	leaks symkey
+]
+
+Carol -> Bob: n0, [req]
+
+principal Bob[
+	knows private symkey, kb
+	knows public ad
+	generates y, n
+	gy = PUBKEY(y)
+	d = AEAD_DEC(symkey, n0, req, ad)?
+	gx_b, c_b = SPLIT(d)?
+	m = DEC(kb, c_b)
+	r = HKDF(nil, DH_KEX(gx_b, y), nil)
+	e = AEAD_ENC(r, n, m, ad)
+]
+
+Bob -> Carol: gy, n, e
+
+queries[
+	confidentiality? s
+]

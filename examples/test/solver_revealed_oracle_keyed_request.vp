@@ -1,0 +1,63 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1 at one session and at two.
+//
+// The share Bob derives his reply key from and the ciphertext he decrypts
+// both travel inside one request sealed under symkey, which Carol leaks. The
+// attacker seals CONCAT(PUBKEY(nil), ca) under symkey itself, Bob decrypts s
+// from the second field and seals it under HKDF(nil, DH_KEX(gy, nil), nil),
+// which the attacker computes from gy.
+//
+// The decryption oracle is revealed only under a key the attacker makes
+// derivable by its own install, so the deducer must solve that key, shaping
+// the share, before it can invert the decryption. Trying the oracle only
+// once its key was already held left this attack to the rest of the search,
+// which lost it under an unrelated leak
+// (solver_revealed_oracle_keyed_tuple_leaked.vp).
+//
+// solver_revealed_oracle_keyed_request_guarded.vp guards the request and
+// holds.
+attacker[active]
+
+principal Alice[
+	knows private kb
+	generates s
+	ca = ENC(kb, s)
+]
+
+Alice -> Dave: [ca]
+
+principal Dave[
+	knows private kb
+	sd = DEC(kb, ca)
+]
+
+principal Carol[
+	knows private symkey, kb
+	knows public ad
+	generates x, mc, n0
+	gx = PUBKEY(x)
+	req = AEAD_ENC(symkey, n0, CONCAT(gx, ENC(kb, mc)), ad)
+	leaks symkey
+]
+
+Carol -> Bob: n0, req
+
+principal Bob[
+	knows private symkey, kb
+	knows public ad
+	generates y, n
+	gy = PUBKEY(y)
+	d = AEAD_DEC(symkey, n0, req, ad)?
+	gx_b, c_b = SPLIT(d)?
+	m = DEC(kb, c_b)
+	r = HKDF(nil, DH_KEX(gx_b, y), nil)
+	e = AEAD_ENC(r, n, m, ad)
+]
+
+Bob -> Carol: gy, n, e
+
+queries[
+	confidentiality? s
+]
