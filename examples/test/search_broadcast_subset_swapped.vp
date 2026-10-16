@@ -8,7 +8,7 @@
 // frozen only because he waits on Dave's ack; the retry once dropped every
 // run that halted or froze in one step, tried Carol alone, and never Carol
 // with Bob. It now drops the runs that halted, and frozen runs only when none
-// did. search_broadcast_subset_guarded_swapped.vp is the counterweight.
+// did. search_broadcast_subset_guarded.vp is the counterweight.
 attacker[active]
 
 principal Alice[

@@ -6,11 +6,11 @@
 // proper public identifier and produces a key that anyone holding the device,
 // or the manufacturing spreadsheet, can recompute.
 //
-// This is flawed_key_from_public_data.vp's sibling in the field rather than in
-// the session: there the mistake is in the handshake, here it is in
-// provisioning, and the engine cannot tell the difference — which is the
-// point. A key is secret if the values it is computed from are secret, and the
-// serial number is on the box.
+// A session key hashed from a public username, a timestamp sent in the clear
+// and a printed device identifier is the same mistake made in the handshake;
+// here it is made in provisioning, and the engine cannot tell the difference —
+// which is the point. A key is secret if the values it is computed from are
+// secret, and the serial number is on the box.
 
 attacker[active]
 

@@ -3,13 +3,14 @@
 //
 // Expected: a0 at one session, a1 at two.
 //
-// cap_malleable_enc.vp without the `malleable` annotation. ENC is
+// Alice sends ENC(k, CONCAT(lo, lo)) with no `malleable` annotation, and Bob
+// opens it with a checked SPLIT and MACs a half of it. ENC is
 // unauthenticated, but without the assumption the attacker cannot maul
 // ENC(k, CONCAT(lo, lo)) into a ciphertext of its own under k. Bob reaches c
 // only through the checked SPLIT, so every substitution fails that check and
-// halts him before c is used at all: a0, where the annotated model is a1.
-// The pair keeps `malleable` from being either a no-op or a blanket
-// authenticity break.
+// halts him before c is used at all: a0, where the annotated form is a1
+// (cap_malleable_key_scoped.vp holds both under one attacker). The pair keeps
+// `malleable` from being either a no-op or a blanket authenticity break.
 //
 // At two sessions c fails without any mauling: it is built from knows
 // constants and is the same in every session, so the attacker leaves Alice

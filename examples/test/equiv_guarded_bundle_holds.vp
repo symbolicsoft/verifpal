@@ -1,13 +1,14 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
 //
-// Expected: e0 — equiv_forged_bundle_projections.vp with the wire guarded.
-// The bundle Bob projects is the bundle Alice packed, so its halves agree.
+// Expected: e0 — Alice packs one nonce twice into a bundle and Bob splits it,
+// over a guarded wire. The bundle Bob projects is the bundle Alice packed, so
+// its halves agree.
 //
-// The two models differ by one pair of brackets and by one bit of result
-// code, which is the cheapest available check that the divergence search is
-// still asking whether the attacker may touch the slot before asking what it
-// would put there.
+// With the wire open the attacker sends a bundle whose fields differ, as
+// equiv_forged_bundle_far_fields.vp shows at five fields. This model checks
+// that the divergence search is still asking whether the attacker may touch the
+// slot before asking what it would put there.
 
 attacker[active]
 

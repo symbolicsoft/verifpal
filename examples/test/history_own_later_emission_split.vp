@@ -11,8 +11,8 @@
 // installs only at that receive, so the one waiting at box1 was never recorded
 // as stuck and its only source, the reflection, was never tried for it. A
 // frozen run is now stuck at every remaining receive of the phase whose
-// install it cannot deliver. history_own_later_emission_directional_split.vp
-// is the counterweight.
+// install it cannot deliver. history_own_later_emission_directional.vp is
+// the counterweight.
 
 attacker[active]
 

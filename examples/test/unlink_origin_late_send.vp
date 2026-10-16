@@ -2,10 +2,14 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Expected: c1u1 at one session and at two.
 //
-// unlink_origin_late_leak.vp with secret sent in the clear in phase 1 rather
-// than leaked. The attacker has recomposed secret from share_a and share_b
-// at the phase-0 barrier; observing it on the wire in phase 1 is a disclosure
-// independent of both shares, so the split ties the shares to it: u1.
+// Two shares of a 2-of-3 sharing travel in the clear, and secret itself is
+// sent in the clear in phase 1. The attacker has recomposed secret from
+// share_a and share_b at the phase-0 barrier; observing it on the wire in
+// phase 1 is a disclosure independent of both shares, so the split ties the
+// shares to it: u1. Knowledge used to keep only the first way it obtained a
+// value, so a later disclosure left secret recorded as recomposed from the
+// two queried shares, and withholding either one dropped it: u0 (GitHub issue
+// #38, reported for a phase-1 leak).
 attacker[passive]
 
 principal Alice[

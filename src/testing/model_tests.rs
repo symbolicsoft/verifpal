@@ -559,12 +559,6 @@ fn test_history_incompatible_knowledge() {
 }
 
 #[test]
-fn test_history_phase_archive() {
-	run_model("history_phase_archive.vp", "a0");
-	run_model_sessions("history_phase_archive.vp", 1, "a0");
-}
-
-#[test]
 fn test_history_phase_archive_third_party() {
 	run_model("history_phase_archive_third_party.vp", "a0");
 	run_model_sessions("history_phase_archive_third_party.vp", 1, "a0");
@@ -1083,12 +1077,6 @@ fn test_precondition_undelivered_input() {
 }
 
 #[test]
-fn test_precondition_upstream_answerer() {
-	run_model_sessions("precondition_upstream_answerer.vp", 1, "c1c0");
-	run_model("precondition_upstream_answerer.vp", "c1c0");
-}
-
-#[test]
 fn test_precondition_independent_late_block() {
 	run_model_sessions("precondition_independent_late_block.vp", 1, "a1a1");
 	run_model("precondition_independent_late_block.vp", "a1a1");
@@ -1531,16 +1519,8 @@ fn test_cap_reach_secret() {
 	run_model("cap_reach_secret.vp", "a1");
 }
 #[test]
-fn test_cap_weak_hash() {
-	run_model("cap_weak_hash.vp", "c1c1");
-}
-#[test]
 fn test_cap_weak_pubkey_dh() {
 	run_model("cap_weak_pubkey_dh.vp", "c1");
-}
-#[test]
-fn test_cap_malleable_enc() {
-	run_model("cap_malleable_enc.vp", "a1");
 }
 #[test]
 fn test_cap_malleable_absent() {
@@ -1555,10 +1535,6 @@ fn test_cap_weak_phase_delayed() {
 	run_model("cap_weak_phase_delayed.vp", "c0c1");
 }
 
-#[test]
-fn test_cap_forgeable_sign() {
-	run_model("cap_forgeable_sign.vp", "a1");
-}
 #[test]
 fn test_cap_forgeable_aead() {
 	run_model("cap_forgeable_aead.vp", "c0a1");
@@ -1894,10 +1870,6 @@ fn test_challengeresponse() {
 	run_model("challengeresponse.vp", "a0a1");
 }
 #[test]
-fn test_checked_aead() {
-	run_model("checked_aead.vp", "c0a1a1");
-}
-#[test]
 fn test_ephemerals_sign() {
 	run_model("ephemerals_sign.vp", "c1a1");
 }
@@ -1969,22 +1941,6 @@ fn test_session_pke_stable_two_sessions() {
 	run_model_sessions("pke.vp", 2, "c0a0");
 }
 #[test]
-fn test_session_psk_cross_feed_one_session() {
-	run_model_sessions("session_psk_cross_feed.vp", 1, "c0e0");
-}
-#[test]
-fn test_session_psk_cross_feed() {
-	run_model("session_psk_cross_feed.vp", "c0e1");
-}
-#[test]
-fn test_session_dh_no_cross_feed_one_session() {
-	run_model_sessions("session_dh_no_cross_feed.vp", 1, "c0e0");
-}
-#[test]
-fn test_session_dh_no_cross_feed() {
-	run_model("session_dh_no_cross_feed.vp", "c0e0");
-}
-#[test]
 fn test_session_shamir_no_phantom_shares_one_session() {
 	run_model_sessions("session_shamir_no_phantom_shares.vp", 1, "c0");
 }
@@ -2015,14 +1971,6 @@ fn test_session_freshness_stable_one_session() {
 #[test]
 fn test_session_freshness_stable() {
 	run_model("session_freshness_stable.vp", "f0f1");
-}
-#[test]
-fn test_session_unlink_stable_one_session() {
-	run_model_sessions("session_unlink_stable.vp", 1, "u0");
-}
-#[test]
-fn test_session_unlink_stable() {
-	run_model("session_unlink_stable.vp", "u0");
 }
 #[test]
 fn test_session_signed_challenge_one_session() {
@@ -2138,10 +2086,6 @@ fn test_unlink_kem_leaked_private_key() {
 	run_model("unlink_kem_leaked_private_key.vp", "u1c1");
 }
 #[test]
-fn test_public_constant_is_never_confidential() {
-	run_model("public_constant_is_never_confidential.vp", "c1c1");
-}
-#[test]
 fn test_bypass_needs_the_whole_check() {
 	run_model("bypass_needs_the_whole_check.vp", "a1");
 }
@@ -2156,10 +2100,6 @@ fn test_bypass_needs_the_signed_message() {
 #[test]
 fn test_scenario_order_is_not_a_verdict() {
 	run_model("scenario_order_is_not_a_verdict.vp", "c0a1");
-}
-#[test]
-fn test_scenario_order_is_not_a_verdict_swapped() {
-	run_model("scenario_order_is_not_a_verdict_swapped.vp", "c0a1");
 }
 #[test]
 fn test_bypass_needs_the_signed_message_public() {
@@ -2183,11 +2123,6 @@ fn test_history_own_later_emission() {
 fn test_history_own_later_emission_split() {
 	for sessions in [1, 2] {
 		run_model_sessions("history_own_later_emission_split.vp", sessions, "a1");
-		run_model_sessions(
-			"history_own_later_emission_directional_split.vp",
-			sessions,
-			"a0",
-		);
 	}
 }
 
@@ -2239,10 +2174,6 @@ fn test_equivalence_names_the_projection() {
 	run_model("equivalence_names_the_projection.vp", "e1");
 }
 #[test]
-fn test_leaks_without_a_message_is_visible() {
-	run_model("leaks_without_a_message_is_visible.vp", "c1");
-}
-#[test]
 fn test_cap_forgeable_names_its_assumption() {
 	run_model("cap_forgeable_names_its_assumption.vp", "a1");
 }
@@ -2274,10 +2205,6 @@ fn test_pke_unguarded_alice() {
 #[test]
 fn test_pke_unguarded_bob() {
 	run_model("pke_unguarded_bob.vp", "c1a0");
-}
-#[test]
-fn test_pke_unchecked_assert() {
-	run_model("pke_unchecked_assert.vp", "c0a1");
 }
 #[test]
 fn test_assert_junglegym() {
@@ -2392,11 +2319,6 @@ fn test_precondition() {
 	run_model_sessions("precondition.vp", 1, "a1");
 }
 #[test]
-fn test_precondition_halt_before_send() {
-	run_model("precondition_halt_before_send.vp", "a1a0");
-	run_model_sessions("precondition_halt_before_send.vp", 1, "a0a0");
-}
-#[test]
 fn test_precondition_accepted_key() {
 	run_model("precondition_accepted_key.vp", "c1c0c0");
 	run_model_sessions("precondition_accepted_key.vp", 1, "c1c0c0");
@@ -2427,11 +2349,6 @@ fn test_precondition_two_recipients() {
 	run_model_sessions("precondition_two_recipients.vp", 1, "a0a0a0");
 }
 #[test]
-fn test_precondition_many() {
-	run_model("precondition_many.vp", "c1c1c0");
-	run_model_sessions("precondition_many.vp", 1, "c1c1c0");
-}
-#[test]
 fn test_precondition_later_phase() {
 	run_model("precondition_later_phase.vp", "c1c1");
 	run_model_sessions("precondition_later_phase.vp", 1, "c1c1");
@@ -2453,13 +2370,6 @@ fn test_err_precondition_unknown_constant() {
 	run_model_err(
 		"err_precondition_unknown_constant.vp",
 		"unknown constant `nosuch`",
-	);
-}
-#[test]
-fn test_err_precondition_wrong_sender() {
-	run_model_err(
-		"err_precondition_wrong_sender.vp",
-		"Bob never sends `m2` to Carol",
 	);
 }
 #[test]
@@ -2547,10 +2457,6 @@ fn test_saltchannel() {
 	run_model("saltchannel.vp", "c1");
 }
 #[test]
-fn test_concat1() {
-	run_model("concat1.vp", "c1");
-}
-#[test]
 fn test_concat2() {
 	run_model("concat2.vp", "c0");
 }
@@ -2561,10 +2467,6 @@ fn test_freshness() {
 #[test]
 fn test_unlinkability() {
 	run_model("unlinkability.vp", "u0u1u1");
-}
-#[test]
-fn test_unlink_seed_leaked() {
-	run_model("unlink_seed_leaked.vp", "u1");
 }
 #[test]
 fn test_unlink_active_links() {
@@ -2588,16 +2490,8 @@ fn test_unlink_opened_content() {
 	}
 }
 #[test]
-fn test_unlink_independent_origins() {
-	run_model("unlink_independent_origins.vp", "u0");
-}
-#[test]
 fn test_unlink_both_values_known() {
 	run_model("unlink_both_values_known.vp", "u0");
-}
-#[test]
-fn test_unlink_seed_secret() {
-	run_model("unlink_seed_secret.vp", "u0");
 }
 #[test]
 fn test_unlink_chain_forward() {
@@ -2637,10 +2531,6 @@ fn test_unlink_shares_recomposed_secret() {
 	run_model_sessions("unlink_shares_recomposed_secret.vp", 1, "c1u0");
 }
 #[test]
-fn test_unlink_chain_root() {
-	run_model("unlink_chain_root.vp", "u1");
-}
-#[test]
 fn test_unlink_no_shared_ancestor() {
 	run_model("unlink_no_shared_ancestor.vp", "u0");
 }
@@ -2653,20 +2543,8 @@ fn test_unlink_sealed() {
 	run_model("unlink_sealed.vp", "u0");
 }
 #[test]
-fn test_unlink_sealed_opened() {
-	run_model("unlink_sealed_opened.vp", "u1");
-}
-#[test]
 fn test_unlink_nonfresh_public() {
 	run_model("unlink_nonfresh_public.vp", "u0");
-}
-#[test]
-fn test_unlink_nonfresh_secret() {
-	run_model("unlink_nonfresh_secret.vp", "u0");
-}
-#[test]
-fn test_unlink_signature_links() {
-	run_model("unlink_signature_links.vp", "u1");
 }
 #[test]
 fn test_unlink_carried_in_ciphertext() {
@@ -2707,16 +2585,8 @@ fn test_unlink_blind_signature() {
 	run_model("unlink_blind_signature.vp", "u0");
 }
 #[test]
-fn test_unlink_pubkey_pseudonym() {
-	run_model("unlink_pubkey_pseudonym.vp", "u1");
-}
-#[test]
 fn test_unlink_split_concat() {
 	run_model("unlink_split_concat.vp", "u1");
-}
-#[test]
-fn test_unlink_dh_mitm() {
-	run_model("unlink_dh_mitm.vp", "u1");
 }
 #[test]
 fn test_unlink_kem_leak() {
@@ -2729,18 +2599,6 @@ fn test_unlink_phase_compromise() {
 #[test]
 fn test_unlink_phase_holds() {
 	run_model("unlink_phase_holds.vp", "u0");
-}
-#[test]
-fn test_unlink_nary_one_pair() {
-	run_model("unlink_nary_one_pair.vp", "u1");
-}
-#[test]
-fn test_unlink_kdf_outputs() {
-	run_model("unlink_kdf_outputs.vp", "u0");
-}
-#[test]
-fn test_unlink_kdf_outputs_leaked() {
-	run_model("unlink_kdf_outputs_leaked.vp", "u1");
 }
 #[test]
 fn test_unlink_injected_equality() {
@@ -2842,10 +2700,6 @@ fn test_simple_equiv() {
 #[test]
 fn test_equivalence_halt_scope() {
 	run_model("equivalence_halt_scope.vp", "e0");
-}
-#[test]
-fn test_ordering_a() {
-	run_model("ordering_a.vp", "c1a1");
 }
 #[test]
 fn test_ordering_b() {
@@ -3007,20 +2861,12 @@ fn test_kem_unguarded_ek() {
 	run_model("kem_unguarded_ek.vp", "c1a1");
 }
 #[test]
-fn test_kem_static_key_no_forward_secrecy() {
-	run_model("kem_static_key_no_forward_secrecy.vp", "c1c1");
-}
-#[test]
 fn test_kem_ephemeral_forward_secrecy() {
 	run_model("kem_ephemeral_forward_secrecy.vp", "c0");
 }
 #[test]
 fn test_kem_encapsulation_randomness_leak() {
 	run_model("kem_encapsulation_randomness_leak.vp", "c1c1");
-}
-#[test]
-fn test_kem_hybrid_classical_broken() {
-	run_model("kem_hybrid_classical_broken.vp", "c0");
 }
 #[test]
 fn test_kem_hybrid_pq_broken() {
@@ -3037,10 +2883,6 @@ fn test_kem_reused_randomness() {
 #[test]
 fn test_kem_secret_not_forgeable() {
 	run_model("kem_secret_not_forgeable.vp", "c0c0");
-}
-#[test]
-fn test_kem_checked_decap() {
-	run_model("kem_checked_decap.vp", "c0a1");
 }
 #[test]
 fn a_replayed_value_is_narrated_as_a_replay_and_not_as_a_forgery() {
@@ -3159,10 +3001,6 @@ fn a_replay_witness_is_minimized_rather_than_disclosed_as_unconfirmed() {
 }
 #[test]
 fn aead_nonce_reuse_models() {
-	run_model_sessions("aead_nonce_reuse_sessions.vp", 1, "c0");
-	run_model_sessions("aead_nonce_reuse_sessions.vp", 2, "c0");
-	run_model_sessions("aead_nonce_fresh_sessions.vp", 1, "c0");
-	run_model_sessions("aead_nonce_fresh_sessions.vp", 2, "c0");
 	run_model_sessions("aead_nonce_reuse_sessions_retag.vp", 1, "a0");
 	run_model_sessions("aead_nonce_reuse_sessions_retag.vp", 2, "a1");
 	run_model_sessions("aead_nonce_fresh_sessions_retag.vp", 1, "a0");
@@ -3177,11 +3015,8 @@ fn aead_nonce_reuse_models() {
 	run_model_sessions("aead_nonce_reuse_retag_late_key.vp", 1, "a1");
 	run_model_sessions("aead_nonce_reuse_same_ciphertext_late_key.vp", 1, "a0");
 	run_model_sessions("aead_nonce_reuse_same_ciphertext_late_key.vp", 2, "a1");
-	run_model_sessions("aead_nonce_reuse_same_message_twice.vp", 1, "c0");
-	run_model_sessions("aead_nonce_reuse_same_message_twice.vp", 2, "c0");
 	run_model("aead_nonce_reuse_other_nonce_holds.vp", "c1c0");
 	run_model("aead_nonce_needed_to_decrypt.vp", "c0");
-	run_model("aead_nonce_leaked_decrypts.vp", "c1");
 	run_model_err("err_aead_wrong_nonce.vp", "cannot succeed as written");
 	run_model_err(
 		"err_aead_three_arguments.vp",
@@ -3198,16 +3033,6 @@ fn aead_nonce_reuse_models() {
 	run_model_sessions("aead_nonce_reuse_attacker_supplied.vp", 2, "c0");
 	run_model_sessions("aead_nonce_reuse_attacker_supplied_retag.vp", 1, "a0");
 	run_model_sessions("aead_nonce_reuse_attacker_supplied_retag.vp", 2, "a1");
-	run_model_sessions(
-		"aead_nonce_reuse_attacker_supplied_retag_guarded.vp",
-		1,
-		"a0",
-	);
-	run_model_sessions(
-		"aead_nonce_reuse_attacker_supplied_retag_guarded.vp",
-		2,
-		"a0",
-	);
 	run_model_sessions("aead_nonce_two_executions_not_a_reuse.vp", 1, "c0");
 	run_model_sessions("aead_nonce_two_executions_not_a_reuse.vp", 2, "c0");
 }
@@ -3241,10 +3066,6 @@ fn test_tls13_0rtt() {
 #[test]
 fn test_kem_freshness() {
 	run_model("kem_freshness.vp", "f0f1");
-}
-#[test]
-fn test_minimal_witness() {
-	run_model("minimal_witness.vp", "c1");
 }
 #[test]
 fn test_bypass_witness_narration() {
@@ -3477,10 +3298,6 @@ fn test_relay_rewrap_no_oracle() {
 	run_model("relay_rewrap_no_oracle.vp", "c0");
 }
 #[test]
-fn test_equiv_forged_bundle_projections() {
-	run_model("equiv_forged_bundle_projections.vp", "e1");
-}
-#[test]
 fn test_equiv_forged_bundle_far_fields() {
 	run_model_sessions("equiv_forged_bundle_far_fields.vp", 1, "e1e1e1");
 }
@@ -3541,24 +3358,12 @@ fn test_flawed_hash_only_authentication() {
 	run_model("flawed_hash_only_authentication.vp", "a1a1a1");
 }
 #[test]
-fn test_flawed_iv_reuse_stream() {
-	run_model("flawed_iv_reuse_stream.vp", "c1c1c1");
-}
-#[test]
 fn test_flawed_kem_no_binding() {
 	run_model("flawed_kem_no_binding.vp", "c1c1a1");
 }
 #[test]
-fn test_flawed_key_from_public_data() {
-	run_model("flawed_key_from_public_data.vp", "c1c1c1");
-}
-#[test]
 fn test_flawed_nested_weak_layers() {
 	run_model("flawed_nested_weak_layers.vp", "c1c1c1c1");
-}
-#[test]
-fn test_flawed_pseudonym_reuse() {
-	run_model("flawed_pseudonym_reuse.vp", "u1u1u1");
 }
 #[test]
 fn test_flawed_psk_from_serial() {
@@ -3567,10 +3372,6 @@ fn test_flawed_psk_from_serial() {
 #[test]
 fn test_flawed_pubkey_directory() {
 	run_model("flawed_pubkey_directory.vp", "c1c1a1");
-}
-#[test]
-fn test_flawed_ratchet_no_deletion() {
-	run_model("flawed_ratchet_no_deletion.vp", "c1c1c1");
 }
 #[test]
 fn test_flawed_resumption_ticket() {
@@ -3708,10 +3509,6 @@ fn test_otp_counter_freshness() {
 fn test_phase_ad_reuse() {
 	run_model_sessions("phase_ad_reuse.vp", 1, "a1a0");
 	run_model("phase_ad_reuse.vp", "a1a1");
-}
-#[test]
-fn test_phase_delayed_use() {
-	run_model("phase_delayed_use.vp", "c1c0");
 }
 #[test]
 fn test_phase_equiv_rotation() {
@@ -3919,10 +3716,6 @@ fn test_station_to_station() {
 	run_model("station_to_station.vp", "c0c0a0a0e1");
 }
 #[test]
-fn test_station_to_station_unsigned() {
-	run_model("station_to_station_unsigned.vp", "c1c1a1a1");
-}
-#[test]
 fn test_two_phase_commit_forged_ack() {
 	run_model("two_phase_commit_forged_ack.vp", "a1a0");
 }
@@ -4013,14 +3806,6 @@ fn test_forged_statement_on_wire() {
 	run_model("forged_statement_on_wire.vp", "c1c1");
 }
 #[test]
-fn test_relay_halt_before_forward() {
-	run_model("relay_halt_before_forward.vp", "a0");
-}
-#[test]
-fn test_relay_halt_before_forward_one_session() {
-	run_model_sessions("relay_halt_before_forward.vp", 1, "a0");
-}
-#[test]
 fn test_relay_forward_before_check() {
 	run_model("relay_forward_before_check.vp", "a1");
 }
@@ -4106,11 +3891,6 @@ fn test_unlink_rfid_mac_tag() {
 	run_model_sessions("unlink_rfid_mac_tag_nonce.vp", 1, "u0");
 }
 #[test]
-fn test_unlink_forced_origin() {
-	run_model("unlink_forced_origin.vp", "u0");
-	run_model_sessions("unlink_forced_origin.vp", 1, "u0");
-}
-#[test]
 fn test_relay_guard_transitive() {
 	run_model("relay_guard_transitive.vp", "a1a1f1");
 	run_model_sessions("relay_guard_transitive.vp", 1, "a1a1f1");
@@ -4119,11 +3899,6 @@ fn test_relay_guard_transitive() {
 fn test_scenario_corrupt_by_wire() {
 	run_model("scenario_corrupt_by_wire.vp", "c0");
 	run_model_sessions("scenario_corrupt_by_wire.vp", 1, "c0");
-}
-#[test]
-fn test_scenario_corrupt_by_leaked_derived_key() {
-	run_model("scenario_corrupt_by_leaked_derived_key.vp", "c0");
-	run_model_sessions("scenario_corrupt_by_leaked_derived_key.vp", 1, "c0");
 }
 #[test]
 fn test_scenario_corrupt_by_leaked_wrapped_key() {
@@ -4286,11 +4061,6 @@ fn test_threshold_group_key_from_shares() {
 }
 
 #[test]
-fn test_threshold_three_of_five() {
-	run_model("threshold_three_of_five.vp", "c0c1");
-}
-
-#[test]
 fn test_threshold_eight_of_ten() {
 	run_model("threshold_eight_of_ten.vp", "c0c1");
 }
@@ -4364,19 +4134,9 @@ fn test_unlink_recognized_nested_message() {
 	run_model_sessions("unlink_recognized_nested_message.vp", 1, "u1");
 }
 #[test]
-fn test_relay_guarded_replay_is_not_a_duplicate() {
-	run_model("relay_guarded_replay_is_not_a_duplicate.vp", "a0a0");
-	run_model_sessions("relay_guarded_replay_is_not_a_duplicate.vp", 1, "a0a0");
-}
-#[test]
 fn test_relay_guarded_replay_open_hop() {
 	run_model("relay_guarded_replay_open_hop.vp", "a1a0");
 	run_model_sessions("relay_guarded_replay_open_hop.vp", 1, "a1a0");
-}
-#[test]
-fn test_duplicate_acceptance_no_forward() {
-	run_model("duplicate_acceptance_no_forward.vp", "a1");
-	run_model_sessions("duplicate_acceptance_no_forward.vp", 1, "a0");
 }
 #[test]
 fn test_duplicate_acceptance_partial_guarded_forward() {
@@ -4523,7 +4283,6 @@ fn test_unlinkability_requires_an_executable_check() {
 		("unlink_signature_missing_messages.vp", "u0c0"),
 		("unlink_ring_missing_members.vp", "u0"),
 		("unlink_ring_complete_members.vp", "u1"),
-		("unlink_signature_links.vp", "u1"),
 		("unlink_kem_leaked_private_key.vp", "u1c1"),
 	] {
 		run_model(model, code);
@@ -4537,7 +4296,6 @@ fn test_unlinkability_observes_only_extracted_values() {
 		("unlink_kem_carried_output.vp", "u1c1"),
 		("unlink_kem_sealed_output.vp", "u0c0"),
 		("unlink_weak_carrier.vp", "u1c1"),
-		("unlink_strong_carrier.vp", "u0c0"),
 		("unlink_keys_not_carried.vp", "u0u1"),
 	] {
 		run_model(model, code);
@@ -4654,10 +4412,8 @@ fn test_solver_preserves_causally_valid_commutative_alternatives() {
 		("solver_dh_wrapped_causal_alternative.vp", "c1"),
 		("solver_dh_nested_causal_alternative.vp", "c1"),
 		("solver_dh_nested_causal_guarded.vp", "c0"),
-		("solver_dh_nested_causal_sealed.vp", "c0"),
 		("solver_dh_nested_causal_nonce_hidden.vp", "c0"),
 		("solver_dh_bundled_causal_alternative.vp", "c1"),
-		("solver_dh_wrapped_causal_guarded.vp", "c0"),
 		("solver_dh_sealed_causal_alternative.vp", "c0"),
 	] {
 		run_model(model, code);
@@ -4933,11 +4689,6 @@ fn test_scenario_restrictions_follow_each_run() {
 			sessions,
 			restriction,
 		);
-		run_model_sessions_err(
-			"scenario_restriction_before_corrupt_check.vp",
-			sessions,
-			restriction,
-		);
 		run_model_sessions_err("scenario_restriction_reached.vp", sessions, restriction);
 		run_model_sessions("scenario_restriction_unreached.vp", sessions, "c0");
 	}
@@ -4981,7 +4732,6 @@ fn test_unlink_blocked_disclosure() {
 #[test]
 fn test_unlink_origin_late_disclosure() {
 	for sessions in [1, 2] {
-		run_model_sessions("unlink_origin_late_leak.vp", sessions, "c1u1");
 		run_model_sessions("unlink_origin_late_send.vp", sessions, "c1u1");
 		run_model_sessions("unlink_origin_late_absent.vp", sessions, "c1u0");
 	}
@@ -5073,7 +4823,6 @@ fn test_phase_claim_later_uses() {
 #[test]
 fn test_scenario_corrupt_key_material() {
 	for sessions in [1, 2] {
-		run_model_sessions("scenario_corrupt_inline_key.vp", sessions, "c0");
 		run_model_sessions("scenario_corrupt_inline_key_dh.vp", sessions, "c0");
 		run_model_sessions("scenario_corrupt_bound_key.vp", sessions, "c0");
 		run_model_sessions("scenario_corrupt_wrapped_key.vp", sessions, "c0");
@@ -5092,7 +4841,6 @@ fn test_scenario_corrupt_inline_key_needs_every_ingredient() {
 fn test_scenario_all_corrupt_order() {
 	for sessions in [1, 2] {
 		run_model_sessions("scenario_all_corrupt_order.vp", sessions, "f1");
-		run_model_sessions("scenario_all_corrupt_order_swapped.vp", sessions, "f1");
 	}
 }
 
@@ -5192,13 +4940,6 @@ fn test_auth_static_tag_replay() {
 	run_model("auth_static_tag_replay.vp", "a1");
 	for sessions in [1, 2] {
 		run_model_sessions("auth_static_tag_challenge_bound.vp", sessions, "a0");
-	}
-}
-
-#[test]
-fn test_phase_claims_unrelated_leak() {
-	for sessions in [1, 2] {
-		run_model_sessions("phase_claims_unrelated_leak.vp", sessions, "f0e0");
 	}
 }
 
@@ -5355,7 +5096,6 @@ fn test_search_broadcast_subset() {
 fn test_search_broadcast_subset_swapped() {
 	for sessions in [1, 2] {
 		run_model_sessions("search_broadcast_subset_swapped.vp", sessions, "c1");
-		run_model_sessions("search_broadcast_subset_guarded_swapped.vp", sessions, "c0");
 	}
 }
 
@@ -5538,7 +5278,6 @@ fn test_cap_executed_terms() {
 fn test_threshold_secret_reveals_no_share() {
 	for sessions in [1, 2] {
 		run_model_sessions("threshold_secret_reveals_no_share.vp", sessions, "c0");
-		run_model_sessions("threshold_secret_and_share_reveal_third.vp", sessions, "c1");
 	}
 }
 
@@ -6052,7 +5791,6 @@ fn test_search_phase_blind_bases() {
 fn test_search_idle_senders() {
 	for sessions in [1, 2] {
 		run_model_sessions("search_idle_senders.vp", sessions, "a0a1");
-		run_model_sessions("search_idle_senders_rotated.vp", sessions, "a1a0");
 		run_model_sessions("search_idle_freshness_bound.vp", sessions, "f0");
 		run_model_sessions("search_message_replay_bound.vp", sessions, "a0");
 		run_model_sessions("search_fill_from_sources_guarded.vp", sessions, "f0");

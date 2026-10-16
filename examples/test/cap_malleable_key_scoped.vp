@@ -1,10 +1,10 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
 //
-// Expected: a1a0 at one session, a1a1 at two — cap_malleable_enc.vp and
-// cap_malleable_absent.vp say this across two files; saying it in one, under
-// one attacker, with two ciphertexts of IDENTICAL shape differing only in
-// their key and their annotation, closes the gap those two leave open.
+// Expected: a1a0 at one session, a1a1 at two. cap_malleable_absent.vp pins
+// the unannotated half on its own; saying both halves in one file, under one
+// attacker, with two ciphertexts of IDENTICAL shape differing only in their
+// key and their annotation, closes the gap a pair of files leaves open.
 // Mauling is licensed per call site, so holding one maulable ciphertext must
 // not license reshaping a structurally identical one under a different key.
 //

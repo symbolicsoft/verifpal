@@ -11,7 +11,7 @@
 // The MAC key is long-term too, and that is what makes this a session problem
 // rather than a modelling accident. Nothing here is forged, nothing leaks, and
 // both principals follow the protocol exactly; they simply end up disagreeing
-// about which message was sent. session_psk_cross_feed.vp makes the same point
+// about which message was sent. session_hkdf_cross_feed.vp makes the same point
 // for symmetric AEAD; this one shows that moving to public keys changes
 // nothing, because the property that fails is freshness of the binding and not
 // secrecy of the key.

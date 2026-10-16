@@ -1,13 +1,14 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
 //
-// Expected: a1 — `relay_halt_before_forward` with Alice's signing key leaked.
-// Bob still checks the signature before forwarding, but now the attacker can
-// sign a substitute m of its own, so Bob's check passes, Bob forwards the
-// substitute to Carol under the guard, and Carol uses it. This is the second
-// counterweight: the refusal in the sibling model has to be about Bob halting,
-// not about Bob checking, or a forwarder that checks anything would shield
-// every guarded hop behind it.
+// Expected: a1 — Carol receives m guarded from Bob, and Bob received it
+// unguarded from Alice and checks her signature over it before forwarding.
+// With Alice's signing key safe, a substituted m halts Bob at the check and
+// never reaches Carol. Here the key is leaked, so the attacker can sign a
+// substitute m of its own, Bob's check passes, Bob forwards the substitute to
+// Carol under the guard, and Carol uses it. The refusal with the key safe has
+// to be about Bob halting, not about Bob checking, or a forwarder that checks
+// anything would shield every guarded hop behind it.
 
 attacker[active]
 

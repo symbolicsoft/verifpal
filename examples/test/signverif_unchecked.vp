@@ -4,10 +4,10 @@
 // Expected: a0a1 — a signature nobody acts on verifies nothing. Bob runs two
 // SIGNVERIFs; only one carries `?`, and only that one survives.
 //
-// unchecked_aead.vp, hmac_unchecked_assert.vp and pke_unchecked_assert.vp make
-// this point for decryption and for MACs. Signatures are the case most likely
-// to be written without the `?` in a real model, because SIGNVERIF reads like
-// an assertion already — its name contains the word — and it is not one.
+// unchecked_aead.vp and hmac_unchecked_assert.vp make this point for decryption
+// and for MACs. Signatures are the case most likely to be written without the
+// `?` in a real model, because SIGNVERIF reads like an assertion already — its
+// name contains the word — and it is not one.
 //
 // Two details keep the pair sharp. The signers are different, so the attacker
 // cannot simply present one flight's (message, signature) pair as the other's.

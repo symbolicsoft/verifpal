@@ -10,8 +10,7 @@
 // change that: the derivability proof for a slot delivered in phase 0 is made
 // against the phase-0 archive, and that archive has to pass through the same
 // history-coherence restriction as the current knowledge does. This is the
-// execution_agrees route of the rule; history_phase_archive.vp is the
-// forwards route.
+// execution_agrees route of the rule.
 
 attacker[active]
 

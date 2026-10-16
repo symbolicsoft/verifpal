@@ -7,8 +7,8 @@
 // halt suppresses restriction checks only for what Alice's halt leaves
 // unreached. Charlie runs to completion after it, so his assignment is
 // checked. The check once stopped at the earliest suppressed failure in any
-// run, and this model was accepted. scenario_restriction_before_corrupt_check.vp
-// declares Charlie first and must fail the same way.
+// run, and this model was accepted. Declaring Charlie first must fail the
+// same way.
 attacker[passive]
 
 principal Bob[

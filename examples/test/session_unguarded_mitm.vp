@@ -10,8 +10,7 @@
 // expansion, by doubling the principals and the wire slots, somehow *loses*
 // an attack the single-session analysis found. Replication only ever adds
 // principals and messages, so a mutation available before is available still;
-// this model is the assertion that it is. Contrast
-// session_dh_no_cross_feed.vp, the same protocol with the keys guarded.
+// this model is the assertion that it is.
 
 attacker[active]
 

@@ -2,19 +2,19 @@
 // SPDX-License-Identifier: CC-BY-SA-4.0
 // Expected: c0e0 at one session, c0e1 at two.
 //
-// The counterweight session_dh_no_cross_feed.vp was missing. There, both sides
-// contribute an ephemeral, the two sessions agree on different secrets, and no
-// cross-feed exists at any session count. Here both exponents are long-term,
-// so every session agrees on the SAME key and a ciphertext from one run
-// decrypts perfectly in another.
+// The counterweight to a handshake where both sides contribute an ephemeral:
+// there the two sessions agree on different secrets, and no cross-feed exists
+// at any session count. Here both exponents are long-term, so every session
+// agrees on the SAME key and a ciphertext from one run decrypts perfectly in
+// another.
 //
 // Both public keys are guarded, so there is no man in the middle and nothing
 // is ever learned — the confidentiality verdict is c0 at either count. What
 // fails is agreement: Bob's checked decryption succeeds on the sibling
 // session's ciphertext and leaves him holding a message Alice sent elsewhere.
 // Static-static Diffie-Hellman buys authentication and buys no freshness at
-// all, and the pair of models is where that shows up as two different verdicts
-// for two protocols that look identical on the page.
+// all, which is where this protocol and the ephemeral one, identical on the
+// page, part ways.
 
 attacker[active]
 

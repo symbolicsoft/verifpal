@@ -7,8 +7,8 @@
 // surrendered in phase 2 and opens the one encapsulated to it, while the
 // ephemeral key that was never stored keeps its message.
 //
-// The distinction is the one kem_ephemeral_forward_secrecy.vp and
-// kem_static_key_no_forward_secrecy.vp make separately. Putting both keys in
+// The distinction is the one kem_ephemeral_forward_secrecy.vp makes against
+// a long-term decapsulation key in a protocol of its own. Putting both keys in
 // one principal under one leak is what rules out the alternative explanation:
 // the two ciphertexts differ in which key they were encapsulated to and in
 // nothing else.

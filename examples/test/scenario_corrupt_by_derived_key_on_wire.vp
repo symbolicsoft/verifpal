@@ -3,12 +3,12 @@
 
 // Expected: c0 at one session and at two.
 //
-// scenario_corrupt_by_leaked_derived_key.vp with Mallory's derived private
-// key scd_mk2 = HASH(scd_mk) sent to Bob in the clear instead of leaked. The
-// attacker holds it either way, so the run in which Alice's peer is Mallory
-// is a corrupt-peer run either way, and the message Alice encrypts to that
-// peer is not a claim the model makes. A private key that travels bare on a
-// message is compromised from that message's phase, whatever its declaration.
+// Mallory's private key is not a declared secret but an assignment, scd_mk2 =
+// HASH(scd_mk), and she sends it to Bob in the clear. The attacker holds it as
+// surely as if she had leaked it, so the run in which Alice's peer is Mallory
+// is a corrupt-peer run, and the message Alice encrypts to that peer is not a
+// claim the model makes. A private key that travels bare on a message is
+// compromised from that message's phase, whatever its declaration.
 
 attacker[active]
 

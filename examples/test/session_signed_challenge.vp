@@ -16,7 +16,7 @@
 //
 // Both routes are therefore non-attacks for different reasons: the first
 // halts, the second reduces to the honest value. Contrast
-// session_psk_cross_feed.vp, where the responder contributes nothing and the
+// session_hkdf_cross_feed.vp, where the responder contributes nothing and the
 // same relay succeeds.
 
 attacker[active]

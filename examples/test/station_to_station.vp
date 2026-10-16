@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 //
 // Expected: c0c0a0a0e1 — Station-to-Station as designed. The Diffie-Hellman
-// exchange is still entirely unguarded, exactly as in
-// station_to_station_unsigned.vp; what changes is that each side signs BOTH
-// public keys under a long-term identity key, and the signature is carried
+// exchange is still entirely unguarded, exactly as in its unsigned form, which
+// a man in the middle breaks outright; what changes is that each side signs
+// BOTH public keys under a long-term identity key, and the signature is carried
 // inside the freshly agreed session key so that it also proves possession of
 // the secret.
 //

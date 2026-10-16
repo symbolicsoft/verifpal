@@ -3,11 +3,13 @@
 
 // Expected: a0 at one session and a1 at two.
 //
-// duplicate_acceptance_no_forward.vp with one guarded message added below
-// the query, to a principal that does nothing with it. The added leg is
-// downstream of the acceptance being asked about and the attacker cannot
-// choose what travels on it, so it can bear on nothing the query asks: the
-// verdict has to be the one the model without it reports.
+// Alice signs a fresh message and hands it to Bob on an open leg, and at two
+// sessions the attacker gives this Bob Alice's other run's pair, which both of
+// her Bobs accept: a replayable first flight. Here one guarded message is added
+// below the query, to a principal that does nothing with it. The added leg is
+// downstream of the acceptance being asked about and the attacker cannot choose
+// what travels on it, so it can bear on nothing the query asks: the verdict has
+// to be the one the model without it reports.
 //
 // The engine used to lose it. The duplicate-acceptance check seeded an
 // install at every wire recipient of an attacker-tainted slot, and a slot's

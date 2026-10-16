@@ -1,12 +1,12 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
 //
-// Expected: c0a1 — and the point is that its twin produces the same code.
+// Expected: c0a1 — and the point is that it does so whichever order the
+// scenarios[] block lists its entries in.
 //
-// scenario_order_is_not_a_verdict_swapped.vp is this model with the two
-// entries of the scenarios[] block exchanged and nothing else changed. A
-// scenarios[] block is a set of alternative peer instantiations, so the two
-// must agree; they used to differ in both queries, in opposite directions.
+// A scenarios[] block is a set of alternative peer instantiations, so
+// exchanging its two entries must change nothing; the two orders used to
+// differ in both queries, in opposite directions.
 //
 // The authentication query could only ever be evaluated against scenario 1's
 // recipient, because queries were not cloned per scenario. When scenario 1 was

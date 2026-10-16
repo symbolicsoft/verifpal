@@ -2,7 +2,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Expected: c0 at one session and at two.
 //
-// scenario_corrupt_inline_key.vp with a Diffie-Hellman key agreement.
+// Mallory's key is PUBKEY(HASH(seed)) and she leaks seed, so a run with her
+// as peer is corrupt and its secret is not the protocol's to keep, here
+// under a Diffie-Hellman key agreement. Key material was once recorded only
+// when a constant sat at the key position, so the inline HASH(seed) left the
+// scenario honest.
 attacker[active]
 principal Bob[
 	knows private b

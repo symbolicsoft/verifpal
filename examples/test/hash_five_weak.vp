@@ -3,9 +3,9 @@
 //
 // Expected: c1c1c0c0 — a preimage of a five-argument hash recovers all five
 // arguments, which is why `weak` cannot reuse the single-valued
-// DecomposeRule::reveal. cap_weak_hash.vp says this at arity two; this says it
-// at the arity where an off-by-one in weak_reveals actually has somewhere to
-// hide, and it checks the LAST argument as well as the first.
+// DecomposeRule::reveal. It says so at the arity where an off-by-one in
+// weak_reveals actually has somewhere to hide, and it checks the LAST
+// argument as well as the first.
 //
 // The two digests take disjoint arguments on purpose. Capabilities are
 // deliberately absent from primitive_hash, so an annotated term and its

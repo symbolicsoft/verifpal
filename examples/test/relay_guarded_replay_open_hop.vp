@@ -3,12 +3,13 @@
 //
 // Expected: a1a0 at one session and at two.
 //
-// relay_guarded_replay_is_not_a_duplicate.vp with the relay's own leg left
-// open. At two sessions the attacker does not need the leg above: it takes
-// Bob's other run's flight off the wire and hands it to this Carol, who
-// accepts a sending Bob made once and his other Carol accepts too. That is
-// a genuine duplicate acceptance, and it is what keeps the guarded case
-// from being read as a blanket exemption.
+// Alice signs a message and hands it to Bob under guards; Bob verifies and
+// relays both to Carol on an open leg, and Carol verifies again and relays the
+// message under a guard to Dave. At two sessions the attacker does not need the
+// leg above: it takes Bob's other run's flight off the wire and hands it to
+// this Carol, who accepts a sending Bob made once and his other Carol accepts
+// too. That is a genuine duplicate acceptance, and it is what keeps the guarded
+// case from being read as a blanket exemption.
 //
 // At one session the open leg lets the attacker skip Bob entirely. It reads
 // Alice's signed pair off the guarded Alice -> Bob leg, never lets Bob run,

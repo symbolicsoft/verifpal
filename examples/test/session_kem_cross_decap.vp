@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: CC-BY-SA-4.0
 // Expected: c0e0 at one session, c0e1 at two.
 //
-// The post-quantum shape of session_psk_cross_feed.vp. Bob's decapsulation
+// The post-quantum shape of session_hkdf_cross_feed.vp. Bob's decapsulation
 // key is long-term, so every session's ciphertext decapsulates for every
 // session's Bob, and nothing in the encapsulation says which run it belongs
 // to.

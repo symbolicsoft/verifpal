@@ -10,8 +10,6 @@
 // re-tags the second under Bob's first challenge and Bob accepts m#2. The
 // pair exists only in the state the attacker arranges, so the solver has to
 // install one nonce into both runs.
-// aead_nonce_reuse_attacker_supplied_retag_guarded.vp guards the nonce and
-// holds.
 attacker[active]
 
 principal Bob[

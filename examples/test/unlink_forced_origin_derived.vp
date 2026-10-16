@@ -3,13 +3,14 @@
 
 // Expected: u0 at one session and at two.
 //
-// unlink_forced_origin.vp one derivation deeper. Bob hashes each nonce
-// before deriving a token from it, so replacing Alice's nonce with Carol's
-// on the wire gives the two tokens the common origin HASH(nc), a value the
-// attacker never put on a wire itself but one that exists only because of
-// its substitution. The honest tokens share nothing, and a link says the
-// two values came from one party: a witness the attacker manufactured by
-// feeding one party's input to another is not evidence about them.
+// Bob derives two tokens from two independently generated nonces under two
+// public labels, and hashes each nonce before deriving a token from it, so
+// replacing Alice's nonce with Carol's on the wire gives the two tokens the
+// common origin HASH(nc), a value the attacker never put on a wire itself but
+// one that exists only because of its substitution. The honest tokens share
+// nothing, and a link says the two values came from one party: a witness the
+// attacker manufactured by feeding one party's input to another is not evidence
+// about them.
 //
 // The engine used to refuse only a shared origin that was literally the
 // installed value, so the derived one slipped through. It now requires the

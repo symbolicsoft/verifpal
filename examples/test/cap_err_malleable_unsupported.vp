@@ -5,7 +5,7 @@
 // actually be mauled, and HASH is not one of them, so the engine rejects the
 // annotation rather than accepting an assumption it would silently ignore. An
 // annotation that does nothing reads as a check that was performed when it was
-// not. See cap_malleable_enc.vp for the supported case.
+// not. See cap_malleable_key_scoped.vp for the supported case.
 attacker[active]
 
 principal Alice[
