@@ -1,4 +1,9 @@
-Verifpal 1.6.6
+Verifpal 1.6.7
+
+Changes since v1.6.6:
+
+- Streamline tests
+- Fix performance regression + more tests
 
 Changes since v1.6.5:
 
