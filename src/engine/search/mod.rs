@@ -38,6 +38,7 @@ const HONEST_NODE: NodeIdx = NodeIdx(0);
 
 struct Node {
 	installs: Installs,
+	family: Family,
 	held: IndexVec<RunIdx, Vec<HeldValue>>,
 	sent: IndexVec<DeliveryIdx, Option<Vec<Value>>>,
 	knowledge: Vec<PhaseKnowledge>,
@@ -63,6 +64,7 @@ impl Node {
 	fn of(installs: Installs, ex: &Execution, queried: &IdSet<SlotIdx>) -> Self {
 		Self {
 			installs,
+			family: Family::Base,
 			held: ex
 				.runs
 				.iter()
@@ -168,6 +170,7 @@ struct Attempts {
 	merged: IdMap<(u64, NodeIdx), Vec<Vec<Value>>>,
 	family: Family,
 	executed: usize,
+	extended: NodeIdx,
 }
 
 #[derive(Default)]
@@ -274,6 +277,7 @@ enum Family {
 	Shared,
 	Rerouted,
 	Unblocked,
+	Extended,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -287,7 +291,24 @@ impl Family {
 	fn derived(self) -> bool {
 		matches!(
 			self,
-			Family::Fill | Family::Stuck | Family::Cleared | Family::Admitted | Family::Unblocked
+			Family::Fill
+				| Family::Stuck
+				| Family::Cleared
+				| Family::Admitted
+				| Family::Unblocked
+				| Family::Extended
+		)
+	}
+
+	fn constructs(self) -> bool {
+		matches!(
+			self,
+			Family::Base
+				| Family::Repair
+				| Family::Merge
+				| Family::Unshaped
+				| Family::Shared
+				| Family::Rerouted
 		)
 	}
 }
@@ -468,6 +489,7 @@ impl<'a, 'b> Search<'a, 'b> {
 				merged: IdMap::default(),
 				family: Family::Base,
 				executed: 0,
+				extended: NodeIdx::new(0),
 			},
 			retries: Retries::default(),
 			memo: Memo::default(),

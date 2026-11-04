@@ -23,7 +23,7 @@
 // makes both queries pass.
 
 // An active attacker controls the network completely: it reads every
-// message, and may drop, replay, or replace any unguarded value.
+// message, may drop any value, and may replay or replace any unguarded one.
 // (The alternative, attacker[passive], only eavesdrops.)
 attacker[active]
 

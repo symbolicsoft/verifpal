@@ -14,7 +14,9 @@ mod tests;
 pub(crate) mod vars;
 
 pub(crate) use free::honest_slot_terms;
-pub(crate) use propose::{emissions_under, install_signature, leave_honest_slots, propose};
+pub(crate) use propose::{
+	emissions_under, extended, install_signature, leave_honest_slots, propose,
+};
 
 use std::sync::Arc;
 

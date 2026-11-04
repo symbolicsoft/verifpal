@@ -112,7 +112,8 @@ impl<'a, 'b> Search<'a, 'b> {
 		}
 	}
 
-	pub(super) fn push_node(&mut self, node: Node) {
+	pub(super) fn push_node(&mut self, mut node: Node) {
+		node.family = self.attempts.family;
 		let at = self.nodes.next_index();
 		for install in &node.installs {
 			self.retries

@@ -483,6 +483,10 @@ pub(crate) fn is_projection(id: PrimitiveId) -> bool {
 	projects(id).is_some()
 }
 
+pub(crate) fn is_tuple(id: PrimitiveId) -> bool {
+	core_specs().any(|core| core.projection_of == Some(id))
+}
+
 pub(crate) fn is_equality(id: PrimitiveId) -> bool {
 	core_entry(id).is_some_and(|s| s.equality)
 }

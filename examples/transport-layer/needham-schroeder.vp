@@ -11,18 +11,26 @@
 // no way to tell a fresh ticket from an old one, so an attacker who ever
 // compromises ONE session key can replay that session's ticket forever and
 // speak to Bob using the stale key. The phase[1] leak of k_ab below models
-// exactly that one-time compromise, and every query fails (c1c1a1a1a1):
+// exactly that one-time compromise, and every query fails (c1c1a1a1a1, at
+// one session and at two):
 //
 //   confidentiality? k_ab   FAILS — leaked outright in phase 1 (by design).
 //   confidentiality? n_b    FAILS — e_n_b was recorded off the wire in
 //                           phase 0; the leaked k_ab opens it retroactively.
 //                           This is the cost of having no forward secrecy.
-//   authentication? …       All three FAIL — with a compromised session key
-//                           and no freshness in the ticket, the attacker
-//                           replays the old ticket to Bob and forges both
-//                           directions of the nonce handshake. Note how the
-//                           traces lean on values recorded from other
-//                           sessions: replay is the heart of every one.
+//   authentication? …       All three FAIL, and none of them needs the
+//                           leak: the handshake runs in phase 0 and is
+//                           judged as it stood there, before k_ab falls.
+//                           Bob's two AEAD_DECs and Alice's second one are
+//                           unchecked, so each accepts the nil the attacker
+//                           puts in place of the ciphertext; Bob's ASSERT
+//                           runs only after that acceptance. At two
+//                           sessions the ticket is replayed from the other
+//                           session instead and accepted twice: nothing in
+//                           it is fresh for Bob. The replay of a ticket
+//                           after its key leaks, which is Denning and
+//                           Sacco's attack, needs a Bob run after the leak,
+//                           and this model has none.
 //
 // The historical fix (used in Kerberos) is a timestamp — or, as in
 // Needham-Schroeder's own 1987 revision, a nonce from Bob inside the ticket.
@@ -125,8 +133,9 @@ Alice -> Bob: n_e_n_b_minus_one, e_n_b_minus_one
 
 principal Bob[
 	n_b_minus_one_bob = AEAD_DEC(k_ab_bob, n_e_n_b_minus_one, e_n_b_minus_one, nil)
-	// Bob's enforced check that his challenge was answered. The attacker
-	// passes it with the compromised key, so it gates nothing.
+	// Bob's enforced check that his challenge was answered. It runs after
+	// his unchecked decryption has already accepted whatever arrived, so
+	// it does not decide the authentication query on e_n_b_minus_one.
 	_ = ASSERT(n_b_minus_one_bob, HASH(n_b))?
 ]
 

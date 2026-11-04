@@ -34,10 +34,8 @@
 //   authentication? (all five) FAIL — same root cause, compounded by the
 //     boxes being AEADs under hash-derived keys with no signature over the
 //     later ones: a member attacker can get Bob to accept boxes it authored,
-//     and several traces splice in material recorded from the other
-//     concurrent session. (Some of these witnesses reproduce only because
-//     parallel sessions share the model's ephemerals; the m2 story above
-//     does not need that crutch.)
+//     and Alice to accept one of Bob's boxes in place of the other, all of
+//     it already at one session.
 //   authentication? Bob -> Alice: secretBox1Bob  FAILS by reflection, even
 //     at one session. Alice derives her master secret through Bob's guarded
 //     long-term key, so the only ciphertexts that open under it are Bob's:

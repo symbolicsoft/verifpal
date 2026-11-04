@@ -1,0 +1,81 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: c0 at one session and at two.
+//
+// kem_key_confusion_later_leak.vp with Bob's two signatures over tagged keys,
+// as PQXDH revision 2 requires. gbssig no longer verifies as a signature over
+// a KEM key, so the swap fails Alice's check and every route to ss needs dkb,
+// which never leaks.
+attacker[active]
+principal Alice[
+	knows private alongterm
+	galongterm = PUBKEY(alongterm)
+]
+principal Bob[
+	knows public info, ec_tag, kem_tag
+	knows private blongterm, bs, dkb
+	generates bo
+	gblongterm = PUBKEY(blongterm)
+	gbs = PUBKEY(bs)
+	gbo = PUBKEY(bo)
+	ekb = PUBKEY(dkb)
+	gbssig = SIGN(blongterm, CONCAT(ec_tag, gbs))
+	ekbsig = SIGN(blongterm, CONCAT(kem_tag, ekb))
+]
+Bob -> Alice: [gblongterm], gbs, gbssig, gbo, ekb, ekbsig
+principal Alice[
+	_ = SIGNVERIF(gblongterm, CONCAT(kem_tag, ekb), ekbsig)?
+	generates ae1, r
+	gae1 = PUBKEY(ae1)
+	ss, ct = KEM_ENCAP(ekb, r)
+	amaster = HKDF(nil, HASH(DH_KEX(gbs, alongterm), DH_KEX(gblongterm, ae1), DH_KEX(gbs, ae1), DH_KEX(gbo, ae1), ss), info)
+	generates m1, ae2
+	gae2 = PUBKEY(ae2)
+	akshared1 = DH_KEX(gbs, ae2)
+	arkab1, ackab1 = HKDF(amaster, akshared1, nil)
+	akenc1 = HKDF(nil, MAC(ackab1, nil), nil)
+	generates n_e1
+	e1 = AEAD_ENC(akenc1, n_e1, m1, HASH(galongterm, gblongterm, gae2))
+]
+Alice -> Bob: [galongterm], gae1, ct, gae2, n_e1, e1
+principal Bob[
+	bss = KEM_DECAP(dkb, ct)
+	bmaster = HKDF(nil, HASH(DH_KEX(galongterm, bs), DH_KEX(gae1, blongterm), DH_KEX(gae1, bs), DH_KEX(gae1, bo), bss), info)
+]
+principal Bob[
+	bkshared1 = DH_KEX(gae2, bs)
+	brkab1, bckab1 = HKDF(bmaster, bkshared1, nil)
+	generates m2, be
+	gbe = PUBKEY(be)
+	bkshared2 = DH_KEX(gae2, be)
+	brkba2, bckba2 = HKDF(brkab1, bkshared2, nil)
+	bkenc2 = HKDF(nil, MAC(bckba2, nil), nil)
+	generates n_e2
+	e2 = AEAD_ENC(bkenc2, n_e2, m2, HASH(galongterm, gblongterm, gbe))
+]
+Bob -> Alice: gbe, n_e2, e2
+principal Alice[
+	akshared2 = DH_KEX(gbe, ae2)
+	arkba2, ackba2 = HKDF(arkab1, akshared2, nil)
+]
+principal Alice[
+	generates m3, ae3
+	gae3 = PUBKEY(ae3)
+	akshared3 = DH_KEX(gbe, ae3)
+	arkab3, ackab3 = HKDF(arkba2, akshared3, nil)
+	akenc3 = HKDF(nil, MAC(ackab3, nil), nil)
+	generates n_e3
+	e3 = AEAD_ENC(akenc3, n_e3, m3, HASH(galongterm, gblongterm, gae3))
+]
+Alice -> Bob: gae3, n_e3, e3
+principal Bob[
+	bkshared3 = DH_KEX(gae3, be)
+	brkab3, bckab3 = HKDF(brkba2, bkshared3, nil)
+	bkenc3 = HKDF(nil, MAC(bckab3, nil), nil)
+	m3_d = AEAD_DEC(bkenc3, n_e3, e3, HASH(galongterm, gblongterm, gae3))?
+]
+phase[1]
+principal Bob[leaks blongterm, bs, bo, be]
+queries[
+	confidentiality? m1
+]

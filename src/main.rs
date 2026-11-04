@@ -129,8 +129,9 @@ struct VerifyArgs {
 		             That is what makes replay attacks reachable. Authentication queries in \
 		             Verifpal ask for injective agreement, so a message the attacker lifts \
 		             out of one session and delivers into another breaks the query even \
-		             though nothing was forged. At --sessions 1 there is no sibling run to \
-		             replay from, and no such attack can be reported.\n\n\
+		             though nothing was forged. At --sessions 1 there is no sibling session \
+		             to replay from, so only the copies that declared scenarios create can \
+		             supply one.\n\n\
 		             Verdicts are relative to this count. Raising it \
 		             strengthens a query that still holds, and can only reveal more attacks, \
 		             never fewer, but it is expensive: cost grows steeply with the number of \
@@ -270,7 +271,8 @@ enum Commands {
 		              analysis its 'attacker[passive]' or 'attacker[active]' declaration asks \
 		              for. A passive attacker only observes the wire and deduces what it can \
 		              from what it sees. An active attacker can also substitute the values \
-		              carried by any message not written inside guard brackets.\n\n\
+		              carried by any message not written inside guard brackets, and drop any \
+		              value, guarded or not.\n\n\
 		              Every query is then reported as holding or as broken, and each broken \
 		              query is printed with a minimized attack trace: the wire substitutions the \
 		              attacker made, the checks it defeated, and the derivation by which it \
@@ -390,7 +392,7 @@ enum Commands {
 		about = "Print version, homepage and author",
 		long_about = "Print the Verifpal banner, which is the version you are running and the \
 		              project's homepage, followed by its author and by where to find the Wall \
-		              of Honor in the Verifpal User Manual, which names the people who have \
+		              of Honor on the Verifpal documentation's Acknowledgments page, which names the people who have \
 		              contributed suggestions, bug reports, ideas or discussion to the \
 		              project.\n\n\
 		              This command also runs the same release check that verify does, printing \
@@ -418,7 +420,7 @@ enum Commands {
 		              Documents live only in memory, keyed by the URI the editor gave them. The \
 		              server never reads or writes the filesystem, so an unsaved buffer is \
 		              analyzed exactly as it stands. There are editor integrations for Visual \
-		              Studio Code and for Neovim."
+		              Studio Code, Neovim and Zed."
 	)]
 	Lsp {
 		#[arg(

@@ -108,7 +108,7 @@ pub(crate) const QUERIES: &[Entry] = &[
 	Entry {
 		name: "authentication",
 		eg: "authentication? Alice -> Bob: m",
-		help: "Checks that Bob only uses m in a meaningful way (verifying a signature, decrypting authentically) if Alice really sent it to him, in this very session. This is injective agreement, so it fails both when the attacker can forge m and when the attacker can replay an m Alice sent once and make Bob accept it twice. Replays need two runs to appear, so analyze more than one session per principal to catch them.",
+		help: "Checks that Bob only uses m in a meaningful way (verifying a signature, decrypting authentically) if Alice really sent it to him, and that Bob's runs accept it no more often than Alice's runs sent it. This is injective agreement, so it fails both when the attacker can forge m and when the attacker can replay an m Alice sent once and make Bob accept it twice. Replays need two runs to appear, so analyze more than one session per principal to catch them.",
 	},
 	Entry {
 		name: "freshness",
@@ -123,7 +123,7 @@ pub(crate) const QUERIES: &[Entry] = &[
 	Entry {
 		name: "equivalence",
 		eg: "equivalence? ss_a, ss_b",
-		help: "Checks whether any protocol scenario can be derived such that the given values are not equivalent to one another. This query could be useful for checking if all parties derived the same shared secret, for example. Takes at least two distinct constants.",
+		help: "Checks whether the attacker can bring about an execution in which the given values are not equivalent to one another. This query could be useful for checking if all parties derived the same shared secret, for example. Takes at least two distinct constants.",
 	},
 	Entry {
 		name: "precondition",
@@ -136,12 +136,12 @@ pub(crate) const KEYWORDS: &[Entry] = &[
 	Entry {
 		name: "attacker",
 		eg: "attacker[active]",
-		help: "Declares the attacker model, and must be the first statement in a model. `active` lets the attacker inject and replace unguarded values on the wire; `passive` lets it only observe.",
+		help: "Declares the attacker model, and must be the first statement in a model. `active` lets the attacker inject and replace unguarded values on the wire and drop any value, guarded or not; `passive` lets it only observe.",
 	},
 	Entry {
 		name: "active",
 		eg: "attacker[active]",
-		help: "The attacker may observe every message, and may also inject or replace any value that is not guarded with `[ ]`.",
+		help: "The attacker may observe every message, may inject or replace any value that is not guarded with `[ ]`, and may drop any value of any message, guarded or not.",
 	},
 	Entry {
 		name: "passive",
@@ -186,7 +186,7 @@ pub(crate) const KEYWORDS: &[Entry] = &[
 	Entry {
 		name: "scenarios",
 		eg: "scenarios[ Alice[gpeer = gb] Alice[gpeer = gm] ]",
-		help: "Runs the protocol once per declared peer configuration, cloning every principal and message and substituting the bindings in the named principal. A scenario whose bound values are reachable from a `leaks` declaration is a corrupt-peer run from the phase of that leak: it is analyzed, because it is where the attacker learns things, but from then on its queries are not claimed and its checked primitives may fail without that being a model error. Scenarios multiply with sessions, and the block goes before `queries`.",
+		help: "Runs the protocol once per declared peer configuration, cloning every principal and message and substituting the bindings in the named principal. A scenario is a corrupt-peer run from the first phase at whose end the attacker holds the binding's key material, however it learned it (a leak, the wire, a public value, recombined shares): it is analyzed, because it is where the attacker learns things, but from then on its queries are not claimed and its checked primitives may fail without that being a model error. Scenarios multiply with sessions, and the block goes before `queries`.",
 	},
 	Entry {
 		name: "queries",

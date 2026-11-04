@@ -152,7 +152,7 @@ pub(super) fn build_core_specs() -> Vec<PrimitiveCoreSpec> {
 			name: "ASSERT",
 			doc: PrimitiveDoc {
 				example: "ASSERT(MAC(key, message), MAC(key, message)): unused",
-				help: "Checks the equality of two values, and especially useful for checking MAC equality. Output value is not used. May be suffixed with `?` to halt the principal if the check fails.",
+				help: "Checks the equality of two values, and especially useful for checking MAC equality. Its output is the assertion term itself, which anyone holding both inputs can build; it is usually discarded with `_`. May be suffixed with `?` to halt the principal if the check fails.",
 			},
 			arity: vec![2],
 			output: vec![1],
@@ -186,7 +186,7 @@ pub(super) fn build_core_specs() -> Vec<PrimitiveCoreSpec> {
 			name: "SPLIT",
 			doc: PrimitiveDoc {
 				example: "SPLIT(CONCAT(a, b)): a, b",
-				help: "Splits a concatenation back to its component values, producing between one and five outputs. Must contain a CONCAT primitive as input; otherwise, Verifpal will output an error. May be suffixed with `?` to halt the principal if the check fails.",
+				help: "Splits a concatenation back to its component values, producing between one and five outputs. Applied to anything but a CONCAT it does not reduce: a checked SPLIT halts the principal, and an unchecked one keeps the unreduced term. May be suffixed with `?` to halt the principal if the check fails.",
 			},
 			arity: vec![1],
 			output: vec![1, 2, 3, 4, 5],
@@ -223,7 +223,7 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 			name: "HKDF",
 			doc: PrimitiveDoc {
 				example: "HKDF(salt, ikm, info): a, b...",
-				help: "Hash-based key derivation function inspired by the Krawczyk HKDF scheme. Essentially, HKDF is used to extract more than one key out a single secret value. salt and info help contextualize derived keys. Takes exactly three arguments and produces between one and five outputs.",
+				help: "Hash-based key derivation function inspired by the Krawczyk HKDF scheme. Essentially, HKDF is used to extract more than one key out of a single secret value. salt and info help contextualize derived keys. Takes exactly three arguments and produces between one and five outputs.",
 			},
 			arity: vec![3],
 			output: vec![1, 2, 3, 4, 5],
@@ -235,7 +235,7 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 			name: "AEAD_ENC",
 			doc: PrimitiveDoc {
 				example: "AEAD_ENC(key, nonce, plaintext, ad): ciphertext",
-				help: "Authenticated encryption with associated data, similar for example to AES-GCM or to ChaCha20-Poly1305. `nonce` must be unique per key: two encryptions under one key and nonce that differ in plaintext or in `ad` let the attacker re-tag either ciphertext under any `ad`, as the tag key falls. If it also knows either plaintext, it learns the other and the keystream, and can forge any ciphertext under that key and nonce. `ad` represents an additional payload that is not encrypted, but that must be provided exactly in the decryption function for authenticated decryption to succeed. Decrypting needs the key and the nonce.",
+				help: "Authenticated encryption with associated data, similar for example to AES-GCM or to ChaCha20-Poly1305. `nonce` must be unique per key. Two encryptions under one key and nonce that differ in plaintext or in `ad` give up the tag key and the combination of their plaintexts, but neither plaintext: the attacker can re-tag either ciphertext under any `ad`, and once it knows one plaintext it learns the other and can forge any ciphertext under that key and nonce. A plaintext built with `CONCAT` is read field by field, since each field lies over its own stretch of keystream: knowing a field of one plaintext reveals the field at the same position in the other, and the attacker can splice fields between the two ciphertexts and overwrite any field whose counterpart it knows before re-tagging. `ad` represents an additional payload that is not encrypted, but that must be provided exactly in the decryption function for authenticated decryption to succeed. Decrypting needs the key and the nonce.",
 			},
 			arity: vec![4],
 			output: vec![1],

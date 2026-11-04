@@ -10,8 +10,8 @@
 // that hpke_auth.vp reports at two sessions.
 //
 // hpke_auth_kci.vp is c1a1. Adding the signature moves the authentication
-// query back to a0 and leaves confidentiality at c1, and both halves of that
-// are the point.
+// query back to a0 at one session and leaves confidentiality at c1, and both
+// halves of that are the point.
 //
 // a0, because key-compromise impersonation works by rebuilding the KEM
 // shared secret from sk_r alone, and a signature does not live in the KEM

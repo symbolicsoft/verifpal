@@ -24,8 +24,10 @@
 // then rebuilds the DHKEM shared secret through the ordinary reconstruction
 // rules, with no DH-specific machinery involved. This is harvest-now-
 // decrypt-later: everything happens in phase 0 and is opened in phase 1.
-// Compare pqxdh-weak.vp in examples/messaging, which uses the same adversary
-// against the same problem and solves it with a KEM instead of a PSK.
+// Compare pqxdh.vp in examples/messaging, which meets the same
+// harvest-now-decrypt-later adversary, written there as phase-1 leaks of
+// every Diffie-Hellman private value, and solves the same problem with a KEM
+// instead of a PSK.
 //
 // What c0 on pt_psk does and does not say. The PSK is doing the work alone:
 // once the KEM is broken, HKDF(ss2, psk, ks_context2) is the only step the

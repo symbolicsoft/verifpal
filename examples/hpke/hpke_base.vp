@@ -34,9 +34,9 @@
 // l_kem stands for the KEM suite_id and the "shared_secret" label of §4.1;
 // mode_base is the one-byte mode value of Table 1, and it is the domain
 // separator that keeps this key schedule distinct from the PSK-mode one in
-// hpke_psk_pq.vp. Per-message nonces (base_nonce XOR seq, §5.2) are outside
-// the symbolic model: AEAD_ENC takes no nonce, so the multi-shot context
-// collapses to encryption under a single key, and the message-ordering and
+// hpke_psk_pq.vp. Per-message nonces (base_nonce XOR seq, §5.2) are not
+// derived: the one message sealed here takes a fresh nonce sent beside it,
+// so the multi-shot context is not modelled, and the message-ordering and
 // replay non-goals of §9.7.1 and §9.7.3 are out of reach here by
 // construction.
 attacker[active]

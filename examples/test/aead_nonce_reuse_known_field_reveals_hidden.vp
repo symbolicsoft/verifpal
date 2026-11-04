@@ -1,0 +1,33 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: c0c0c0c0 at one session and at two.
+//
+// aead_nonce_reuse_known_field_reveals.vp with a private header. The fields
+// still line up, but the attacker knows none of them, so it reads no
+// keystream and every field gives up only a combination: x holds.
+attacker[passive]
+
+principal Alice[
+	knows private k, n
+	knows private hdr
+	knows public ad
+	generates s1, x, s2, s3
+	e1 = AEAD_ENC(k, n, CONCAT(hdr, s1), ad)
+	e2 = AEAD_ENC(k, n, CONCAT(x, s2, s3), ad)
+]
+
+Alice -> Bob: e1, e2
+
+principal Bob[
+	knows private k, n
+	knows public ad
+	d1 = AEAD_DEC(k, n, e1, ad)?
+	d2 = AEAD_DEC(k, n, e2, ad)?
+]
+
+queries[
+	confidentiality? x
+	confidentiality? s1
+	confidentiality? s2
+	confidentiality? s3
+]

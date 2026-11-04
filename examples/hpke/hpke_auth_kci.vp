@@ -6,9 +6,10 @@
 //
 // Expected: c1a1, at one session and at two.
 //
-// This is hpke_auth.vp plus a single `leaks sk_r` line, and both queries
-// flip. Neither failure is a flaw Verifpal found in HPKE; both are properties
-// RFC 9180 states about itself, reproduced here from the protocol text alone.
+// This is hpke_auth.vp plus a single `leaks sk_r` line, and at one session
+// both queries flip. Neither failure is a flaw Verifpal found in HPKE; both
+// are properties RFC 9180 states about itself, reproduced here from the
+// protocol text alone.
 //
 // a1 is the key-compromise impersonation of §9.1.1: "an adversary who knows
 // a recipient's private key can decapsulate an observed KEM ciphertext,
@@ -26,9 +27,9 @@
 // here simply decapsulates the honest kem_enc and opens the honest ct.
 //
 // The RFC's suggested mitigation for the authentication half is in
-// hpke_auth_kci_signed.vp, which recovers a0 and — correctly — leaves c1
-// standing, because a signature over the ciphertext cannot make a
-// compromised recipient key forget how to decrypt.
+// hpke_auth_kci_signed.vp, which recovers a0 at one session and —
+// correctly — leaves c1 standing, because a signature over the ciphertext
+// cannot make a compromised recipient key forget how to decrypt.
 attacker[active]
 
 principal Recipient[

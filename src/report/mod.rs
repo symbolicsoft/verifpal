@@ -326,7 +326,7 @@ impl Analysis {
 
 	pub(crate) fn scope(&self) -> String {
 		let mut text = format!(
-			"Every verdict above was reached against {} {} attacker, with each principal running {} \
+			"Every verdict above was reached against {} {} attacker, with each principal running up to {} \
 			 concurrent session{}, over exactly the model as written. An attack is a witness and \
 			 stands on its own. A query reported as holding says only that this search found no \
 			 attack at those parameters: the search space this engine defines was explored, which is \

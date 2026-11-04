@@ -1,0 +1,43 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: c0a0 at one session, c0a1 at two.
+//
+// Alice seals Bob's challenge beside a fresh message under a long-term key and
+// a nonce that every session shares. One session is one ciphertext. At two,
+// e and e#2 share key and nonce, which gives up the tag key, and the challenge
+// field of each lies over keystream the attacker can read, since chal and
+// chal#2 cross the wire in the clear. The attacker overwrites chal#2 with chal
+// in e#2, keeps the unknown m#2, re-tags the result and Bob's first run
+// accepts m#2, which Alice sealed for his other run. Bob's challenge check
+// rules out the plain replay. Neither m nor m#2 is ever revealed.
+// aead_nonce_reuse_rewrite_known_field_fresh_nonce.vp generates the nonce and
+// holds.
+attacker[active]
+
+principal Bob[
+	generates chal
+]
+
+Bob -> Alice: [chal]
+
+principal Alice[
+	knows private k, n
+	generates m
+	p = CONCAT(chal, m)
+	e = AEAD_ENC(k, n, p, nil)
+]
+
+Alice -> Bob: e
+
+principal Bob[
+	knows private k, n
+	d = AEAD_DEC(k, n, e, nil)?
+	c, mm = SPLIT(d)?
+	_ = ASSERT(c, chal)?
+	h = HASH(mm)
+]
+
+queries[
+	confidentiality? m
+	authentication? Alice -> Bob: e
+]

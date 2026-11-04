@@ -1,3 +1,8 @@
+<!---
+# SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+# SPDX-License-Identifier: CC-BY-SA-4.0
+-->
+
 # Security Policy
 
 ## Scope
@@ -5,7 +10,7 @@
 Verifpal is a formal verification tool for cryptographic protocols. Security-relevant areas include:
 
 - **Parser (`src/syntax/parser/`):** Parses `.vp` protocol model files. Malformed input could trigger unexpected behavior.
-- **Verification engine (`src/verify/`, `src/engine/`, `src/solve/`):** Performs symbolic analysis under an active attacker model. Bugs here could cause security properties to be incorrectly verified.
+- **Verification engine (`src/verify/`, `src/engine/`, `src/solve/`):** Performs symbolic analysis under an active attacker model. Bugs here could cause a security property to be reported as holding when an attack exists, or an attack to be reported that does not exist.
 - **Primitive definitions (`src/primitive/`):** Built-in cryptographic primitives and their symbolic reduction rules. Errors could lead to unsound analysis results.
 - **Resolution and rewriting (`src/protocol/trace.rs`, `src/theory/`):** Value resolution and term rewriting during analysis. Incorrect behavior could cause missed attacks or false positives.
 

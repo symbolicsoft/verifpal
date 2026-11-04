@@ -7,7 +7,8 @@ use super::decomposition::inverts_through;
 use super::shapes::rewrite_shapes_from;
 use super::{Deducer, match_each, refine_check};
 use crate::primitive::{
-	Capability, RewriteRule, commutativity_rule, commutativity_swap, reuse_rule, rewrite_rule,
+	Capability, RewriteRule, commutativity_rule, commutativity_swap, is_tuple, reuse_rule,
+	rewrite_rule,
 };
 use crate::solve::matching::{match_values, unifiers};
 use crate::solve::vars::{
@@ -90,6 +91,58 @@ impl<'a> Deducer<'a> {
 			for member in self.retaggable(target) {
 				out.extend(self.reshape(target, member, &kept, &open, s));
 			}
+			let mut groups: Vec<Vec<&Primitive>> = Vec::new();
+			for member in self.retaggable(target).filter(|member| {
+				self.attacker.reused.iter().any(|pair| {
+					pair.iter().any(|m| {
+						matches!(m, Value::Primitive(q) if crate::term::equivalence::equivalent_primitives(q, member, true))
+					})
+				})
+			}) {
+				match groups.iter_mut().find(|group| {
+					rule.fixed.iter().all(|&f| {
+						match (group[0].arguments.get(f), member.arguments.get(f)) {
+							(Some(x), Some(y)) => x.equivalent(y, true),
+							_ => false,
+						}
+					})
+				}) {
+					Some(group) => group.push(member),
+					None => groups.push(vec![member]),
+				}
+			}
+			for group in &groups {
+				if rule.fixed.iter().all(|&f| {
+					group[0]
+						.arguments
+						.get(f)
+						.is_some_and(|a| self.obtainable(a))
+				}) {
+					continue;
+				}
+				let mut frontier = vec![s.clone()];
+				for &f in &rule.fixed {
+					frontier = match_each(&target.arguments[f], &group[0].arguments[f], &frontier);
+				}
+				let mut under: Vec<&Value> = Vec::new();
+				for plaintext in group.iter().filter_map(|m| m.arguments.get(at)) {
+					if !under.iter().any(|seen| seen.equivalent(plaintext, true)) {
+						under.push(plaintext);
+					}
+				}
+				let mut next = Vec::new();
+				for candidate in &frontier {
+					self.rewrite_masked(&target.arguments[at], &under, candidate, &mut next);
+				}
+				frontier = dedupe(next);
+				for &i in &open {
+					if frontier.is_empty() {
+						break;
+					}
+					frontier = self.solve_each(&target.arguments[i], &frontier);
+				}
+				out.extend(frontier);
+			}
 		}
 		let mut offered: Vec<&Value> = Vec::new();
 		for pair in self.attacker.reused.iter() {
@@ -109,6 +162,90 @@ impl<'a> Deducer<'a> {
 				out.extend(self.reshape(target, held, &rule.fixed, &supplied, s));
 			}
 		}
+	}
+
+	fn rewrite_masked(
+		&self,
+		want: &Value,
+		under: &[&Value],
+		s: &Substitution,
+		out: &mut Vec<Substitution>,
+	) {
+		let applied = apply(want, s);
+		let Value::Primitive(tuple) = &applied else {
+			return;
+		};
+		if !is_tuple(tuple.id) {
+			return;
+		}
+		let columns: Vec<Vec<&Value>> = (0..tuple.arguments.len())
+			.map(|i| {
+				let mut column: Vec<&Value> = Vec::new();
+				for field in under
+					.iter()
+					.filter_map(|v| crate::theory::fields(v, &applied)?.get(i))
+				{
+					if !column.iter().any(|seen| seen.equivalent(field, true)) {
+						column.push(field);
+					}
+				}
+				column
+			})
+			.collect();
+		if columns.iter().any(Vec::is_empty) {
+			return;
+		}
+		for base in under {
+			let Some(kept) = crate::theory::fields(base, &applied) else {
+				continue;
+			};
+			let mut frontier = vec![(s.clone(), false)];
+			for (i, field) in tuple.arguments.iter().enumerate() {
+				let mut next = Vec::new();
+				for (candidate, changed) in &frontier {
+					let same: Vec<Substitution> = kept
+						.get(i)
+						.map(|own| match_values(field, own, candidate).collect())
+						.unwrap_or_default();
+					if same.is_empty() {
+						let mut rewritten = Vec::new();
+						self.rewrite_field(field, &columns[i], candidate, &mut rewritten);
+						next.extend(dedupe(rewritten).into_iter().map(|r| (r, true)));
+					} else {
+						next.extend(same.into_iter().map(|r| (r, *changed)));
+					}
+				}
+				frontier = next;
+				if frontier.is_empty() {
+					break;
+				}
+			}
+			out.extend(
+				frontier
+					.into_iter()
+					.filter_map(|(r, changed)| changed.then_some(r)),
+			);
+		}
+	}
+
+	fn rewrite_field(
+		&self,
+		want: &Value,
+		under: &[&Value],
+		s: &Substitution,
+		out: &mut Vec<Substitution>,
+	) {
+		for field in under {
+			out.extend(match_values(want, field, s));
+		}
+		if as_var(&apply(want, s)).is_none()
+			&& under
+				.iter()
+				.any(|field| self.attacker.knows(field).is_some())
+		{
+			self.solve_into(want, s, out);
+		}
+		self.rewrite_masked(want, under, s, out);
 	}
 
 	fn retaggable(&self, target: &Primitive) -> impl Iterator<Item = &Primitive> {
@@ -445,7 +582,7 @@ impl<'a> Deducer<'a> {
 		let secret_position = crate::primitive::spec(p.id)
 			.ok()
 			.and_then(|spec| spec.forgeable_secret);
-		let by_reuse = forgery(p, self.attacker).map_or_else(Vec::new, |f| f.exempt);
+		let by_reuse = forgery(p, capabilities, self.attacker).map_or_else(Vec::new, |f| f.exempt);
 		let (shaping, carried): (Vec<usize>, Vec<usize>) =
 			(0..p.arguments.len()).partition(|&i| shapes_a_variable(&p.arguments[i]));
 		let mut frontier = vec![s.clone()];

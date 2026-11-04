@@ -1,7 +1,9 @@
 /* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
  * SPDX-License-Identifier: GPL-3.0-only */
 
-use super::{Family, Mode, NodeIdx, Search, normalize};
+use std::sync::Arc;
+
+use super::{Family, HONEST_NODE, Mode, NodeIdx, Search, normalize};
 use crate::engine::exec::Install;
 use crate::engine::program::{Event, RunIdx, StepIdx};
 use crate::primitive::CapabilityIndex;
@@ -162,6 +164,7 @@ impl<'a, 'b> Search<'a, 'b> {
 			self.close_union();
 			self.merge_for_queries();
 			self.retry_all_stuck();
+			self.extend_later();
 			self.drain();
 			if self.log.debug {
 				eprintln!(
@@ -279,6 +282,19 @@ impl<'a, 'b> Search<'a, 'b> {
 				flights.len()
 			);
 		}
+		self.try_flights(r, pass, (capabilities, attacker), sym, flights, addressed);
+		replays
+	}
+
+	fn try_flights(
+		&mut self,
+		r: RunIdx,
+		pass: Pass,
+		(capabilities, attacker): (&CapabilityIndex, &AttackerState),
+		sym: &SymbolicState,
+		flights: Vec<Flight>,
+		addressed: bool,
+	) {
 		let mut repairer: Option<Deducer> = None;
 		for (signature, chained, variant) in flights {
 			if self.done() {
@@ -296,7 +312,93 @@ impl<'a, 'b> Search<'a, 'b> {
 				);
 			}
 		}
-		replays
+	}
+
+	pub(super) fn extend_later(&mut self) {
+		let km = self.cx.km;
+		if km.max_phase == 0 {
+			return;
+		}
+		while self.attempts.extended.index() < self.nodes.len() {
+			let node = self.attempts.extended;
+			self.attempts.extended = NodeIdx::new(node.index() + 1);
+			if node != HONEST_NODE && !self.nodes[node].family.constructs() {
+				continue;
+			}
+			for r in self.cx.program.runs.indices() {
+				if self.done() {
+					return;
+				}
+				let installed: Vec<(SlotIdx, Value)> = self.nodes[node]
+					.installs
+					.iter()
+					.filter_map(|install| match install {
+						Install::Value { run, slot, value } if *run == r => {
+							Some((*slot, value.clone()))
+						}
+						_ => None,
+					})
+					.collect();
+				if installed.is_empty() && node != HONEST_NODE {
+					continue;
+				}
+				let principal = self.cx.program.runs[r].id;
+				let Some(attacker) = self.union.at_last_receive(km, principal) else {
+					continue;
+				};
+				let Some((later, _, _)) = self.nodes[node].knowledge.last() else {
+					continue;
+				};
+				if attacker.current_phase >= later.current_phase {
+					continue;
+				}
+				let later = Arc::clone(later);
+				let capabilities = Arc::clone(self.union.knowledge.capabilities());
+				let controllable =
+					crate::solve::control::Controllable::of(km, principal, &attacker);
+				let sym = symbolic::build(&controllable, km, principal, &attacker);
+				let fixed = |slot: SlotIdx| installed.iter().any(|(at, _)| *at == slot);
+				let base: Substitution = installed
+					.iter()
+					.map(|(slot, value)| (vars::attacker_var_id(*slot), value.clone()))
+					.collect();
+				let mut proposals = Vec::new();
+				for free in sym.var_slots().filter(|&slot| {
+					!fixed(slot)
+						&& crate::primitive::value_is_key_derivation(&km.slots[slot].initial_value)
+				}) {
+					let honest: Vec<SlotIdx> = sym
+						.var_slots()
+						.filter(|&slot| slot != free && !fixed(slot))
+						.collect();
+					let narrowed = symbolic::build_assuming_honest(
+						&controllable,
+						km,
+						principal,
+						&attacker,
+						&honest,
+					);
+					let deducer = self.deducer(&capabilities, &later, &narrowed);
+					proposals.extend(crate::solve::extended(
+						self.ctx, km, principal, &attacker, &narrowed, &deducer, &base,
+					));
+				}
+				if proposals.is_empty() {
+					continue;
+				}
+				let flights = flights(km, &sym, proposals);
+				self.as_family(Family::Extended, |search| {
+					search.try_flights(
+						r,
+						Pass::Targeted,
+						(&capabilities, &attacker),
+						&sym,
+						flights,
+						false,
+					);
+				});
+			}
+		}
 	}
 
 	fn repair<'x>(

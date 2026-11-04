@@ -384,8 +384,8 @@ pub(super) fn goals_for_query(
 	principal: PrincipalId,
 	sym: &SymbolicState,
 	deducer: &Deducer,
+	base: &Substitution,
 ) -> Vec<Substitution> {
-	let base = &Substitution::default();
 	match query.kind {
 		QueryKind::Confidentiality => match slot_term(query.constants.first(), km, sym) {
 			Some(term) => deducer.solve(&term, base),

@@ -10,8 +10,9 @@ use crate::term::hashing::TermSet;
 use crate::term::{Primitive, Value};
 use crate::theory::attacker::next_chain;
 use crate::theory::{
-	AttackerState, DerivationRecord, can_break_weak, can_decompose, can_recompose,
-	can_reconstruct_primitive, can_rewrite, obtainable, reused_pair, revealed, unmasks,
+	AttackerState, DerivationRecord, Keystream, can_break_weak, can_decompose, can_recompose,
+	can_reconstruct_primitive, can_rewrite, keystream_of, obtainable, opened_with, reduce_once,
+	reused_pair,
 };
 use crate::util::{IdMap, IdSet};
 
@@ -382,26 +383,12 @@ impl Knowledge {
 					self.learn(&v, Origin::Derived(record));
 				}
 			}
-			for (pair, unmasked) in pairs {
+			for (pair, reveals) in pairs {
 				self.note_reused(&pair);
-				let Value::Primitive(p) = &pair[0] else {
-					continue;
-				};
-				let (Some(rule), Some(using)) = (reuse_rule(p.id), unmasked) else {
-					continue;
-				};
-				for revealed in revealed(p, &rule.reveals)
-					.into_iter()
-					.filter(|r| admitted(r))
-				{
-					self.learn(
-						&revealed,
-						Origin::Derived(DerivationRecord::Reused {
-							of: pair[0].clone(),
-							with: pair[1].clone(),
-							using: using.clone(),
-						}),
-					);
+				for (revealed, record) in reveals {
+					if admitted(&revealed) {
+						self.learn(&revealed, Origin::Derived(record));
+					}
 				}
 			}
 			if self.state.chain != chain {
@@ -446,13 +433,15 @@ struct Pass<'s> {
 	genuine: &'s TermSet,
 }
 
+type NotedPair = ([Value; 2], Vec<(Value, DerivationRecord)>);
+
 #[derive(Default)]
 struct Found {
 	learned: Vec<(Value, DerivationRecord)>,
 	grown: Pools,
 	settling: Vec<(usize, u8)>,
 	unproven: Vec<usize>,
-	pairs: Vec<([Value; 2], Option<Vec<Value>>)>,
+	pairs: Vec<NotedPair>,
 	seen: TermSet,
 }
 
@@ -678,28 +667,54 @@ impl Pass<'_> {
 			if members.len() < 2 {
 				continue;
 			}
+			let keystreams: Vec<Keystream> = members
+				.iter()
+				.map(|&j| keystream_of(&attacker.known[j], capabilities, attacker))
+				.collect();
 			for &i in members {
 				let of = &attacker.known[i];
-				let partners = members
-					.iter()
-					.map(|&j| &attacker.known[j])
-					.filter(|partner| reused_pair(of, partner));
+				let Value::Primitive(p) = of else {
+					continue;
+				};
 				let mut first = None;
 				let mut unmasking = None;
-				for partner in partners {
+				let mut reveals: Vec<(Value, DerivationRecord)> = Vec::new();
+				for (partner, keystream) in members
+					.iter()
+					.map(|&j| &attacker.known[j])
+					.zip(&keystreams)
+					.filter(|(partner, _)| reused_pair(of, partner))
+				{
 					first.get_or_insert(partner);
-					if let Some(using) = unmasks(partner, capabilities, attacker) {
-						unmasking = Some((partner, using));
+					let opened = opened_with(p, keystream);
+					let whole = !opened.is_empty()
+						&& (keystream.first().is_some_and(|(path, _)| path.is_empty())
+							|| reuse_rule(p.id).is_some_and(|rule| rule.masked.is_none()));
+					for (field, using) in opened {
+						if reveals
+							.iter()
+							.any(|(seen, _)| seen.equivalent(&field, true))
+						{
+							continue;
+						}
+						unmasking.get_or_insert(partner);
+						reveals.push((
+							reduce_once(&field),
+							DerivationRecord::Reused {
+								of: of.clone(),
+								with: partner.clone(),
+								using,
+							},
+						));
+					}
+					if whole {
 						break;
 					}
 				}
-				let Some(partner) = unmasking.as_ref().map(|(p, _)| *p).or(first) else {
+				let Some(partner) = unmasking.or(first) else {
 					continue;
 				};
-				found.pairs.push((
-					[of.clone(), partner.clone()],
-					unmasking.map(|(_, using)| using),
-				));
+				found.pairs.push(([of.clone(), partner.clone()], reveals));
 			}
 		}
 	}

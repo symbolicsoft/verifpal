@@ -1,0 +1,40 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: c0a0 at one session and at two.
+//
+// aead_nonce_reuse_splice_fields.vp with a third field: a MAC under the shared
+// secret over the challenge and the message together. The pair still gives up
+// the tag key, and the attacker can still splice fields between e and e#2, but
+// every splice that changes the binding or the message leaves a MAC that does
+// not cover the pair it now sits beside, and the attacker cannot compute one.
+attacker[active]
+
+principal Bob[
+	generates chal
+]
+
+Bob -> Alice: [chal]
+
+principal Alice[
+	knows private k, n, s
+	generates m
+	t = MAC(s, CONCAT(chal, m))
+	p = CONCAT(chal, m, t)
+	e = AEAD_ENC(k, n, p, nil)
+]
+
+Alice -> Bob: e
+
+principal Bob[
+	knows private k, n, s
+	d = AEAD_DEC(k, n, e, nil)?
+	c, mm, tt = SPLIT(d)?
+	_ = ASSERT(c, chal)?
+	_ = ASSERT(tt, MAC(s, CONCAT(chal, mm)))?
+	h = HASH(mm)
+]
+
+queries[
+	confidentiality? m
+	authentication? Alice -> Bob: e
+]

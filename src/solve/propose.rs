@@ -83,6 +83,38 @@ pub(crate) fn propose(
 	}
 }
 
+pub(crate) fn extended(
+	ctx: &VerifyContext,
+	km: &ProtocolTrace,
+	principal: PrincipalId,
+	attacker: &AttackerState,
+	sym: &SymbolicState,
+	deducer: &Deducer,
+	base: &Substitution,
+) -> Vec<Substitution> {
+	let mut proposals = Vec::new();
+	for query in ctx.open_queries().iter().filter(|query| {
+		matches!(
+			query.kind,
+			QueryKind::Confidentiality | QueryKind::Unlinkability
+		)
+	}) {
+		proposals.extend(goals_for_query(query, km, principal, sym, deducer, base));
+	}
+	if proposals.is_empty() {
+		return proposals;
+	}
+	with_free_positions(
+		km,
+		deducer.capabilities(),
+		attacker,
+		sym,
+		ctx.term_bound(km).protocol(),
+		proposals,
+		false,
+	)
+}
+
 fn targeted_goals(
 	ctx: &VerifyContext,
 	km: &ProtocolTrace,
@@ -100,7 +132,14 @@ fn targeted_goals(
 		if debug {
 			eprintln!("[search] goals {principal} {:?}: start", query.kind);
 		}
-		let goals = goals_for_query(query, km, principal, sym, &deducer);
+		let goals = goals_for_query(
+			query,
+			km,
+			principal,
+			sym,
+			&deducer,
+			&Substitution::default(),
+		);
 		if let Some(started) = started {
 			eprintln!(
 				"[search] goals {principal} {:?}: {} in {:?}",

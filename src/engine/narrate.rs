@@ -12,7 +12,7 @@ use crate::protocol::{ProtocolTrace, SlotIdx};
 use crate::syntax::names::copy_base_name;
 use crate::syntax::{PrincipalId, Query, Span};
 use crate::term::{Constant, Primitive, Value, ValueId};
-use crate::theory::DerivationRecord;
+use crate::theory::{DerivationRecord, masked};
 use crate::util::IdMap;
 use crate::verify::{Subtype, TraceStep, TraceValue};
 
@@ -496,28 +496,58 @@ impl<'a, 'b> Narrator<'a, 'b> {
 				self.term(with, &[]),
 				crate::primitive::reuse_fixed_names(of)
 			),
-			DerivationRecord::Reused { of, with, .. } => format!(
-				"Attacker recovers {} from {}: {} shares its {}, and Attacker knows its {}.",
+			DerivationRecord::Reused { of, with, using } => format!(
+				"Attacker recovers {} from {}: {} shares its {}, and Attacker knows {}.",
 				self.term(v, &[]),
 				self.term(of, &[]),
 				self.term(with, &[]),
 				crate::primitive::reuse_fixed_names(of),
-				crate::primitive::reuse_masked_name(with)
+				if whole(with, &using[0]) {
+					format!("its {}", crate::primitive::reuse_masked_name(with))
+				} else {
+					format!(
+						"the matching field of its {}",
+						crate::primitive::reuse_masked_name(with)
+					)
+				}
 			),
-			DerivationRecord::ReusedForge { with, .. } => format!(
-				"Attacker forges {} under the {} shared by {} and {}, knowing the {} of one of them.",
+			DerivationRecord::ReusedForge { with, using } => format!(
+				"Attacker forges {} under the {} shared by {} and {}, knowing {}.",
 				self.subject(v),
 				crate::primitive::reuse_fixed_names(&with[0]),
 				self.term(&with[0], &[]),
 				self.term(&with[1], &[]),
-				crate::primitive::reuse_masked_name(&with[0])
+				if using
+					.first()
+					.is_some_and(|known| with.iter().any(|m| whole(m, known)))
+				{
+					format!(
+						"the {} of one of them",
+						crate::primitive::reuse_masked_name(&with[0])
+					)
+				} else {
+					format!(
+						"the {} beneath every field it writes",
+						crate::primitive::reuse_masked_name(&with[0])
+					)
+				}
 			),
+			DerivationRecord::Retagged { of, with, .. } if whole(of, masked(v).unwrap_or(v)) => {
+				format!(
+					"Attacker re-tags {} as {}: {} shares its {}.",
+					self.term(of, &[]),
+					self.subject(v),
+					self.term(with, &[]),
+					crate::primitive::reuse_fixed_names(of)
+				)
+			}
 			DerivationRecord::Retagged { of, with, .. } => format!(
-				"Attacker re-tags {} as {}: {} shares its {}.",
+				"Attacker rewrites {} as {}: {} shares its {}, so Attacker can splice their {} fields, overwrite those it knows and re-tag the result.",
 				self.term(of, &[]),
 				self.subject(v),
 				self.term(with, &[]),
-				crate::primitive::reuse_fixed_names(of)
+				crate::primitive::reuse_fixed_names(of),
+				crate::primitive::reuse_masked_name(of)
 			),
 			DerivationRecord::Initial | DerivationRecord::Leaked | DerivationRecord::Obtained => {
 				return;
@@ -1142,4 +1172,8 @@ fn recipient_contributed(c: &Constant, km: &ProtocolTrace, recipient: PrincipalI
 				slot.constant.fresh && km.same_actor(slot.creator, recipient)
 			})
 		})
+}
+
+fn whole(member: &Value, plaintext: &Value) -> bool {
+	masked(member).is_some_and(|own| own.equivalent(plaintext, true))
 }

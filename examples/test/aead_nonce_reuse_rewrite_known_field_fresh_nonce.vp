@@ -1,0 +1,37 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: c0a0 at one session and at two.
+//
+// aead_nonce_reuse_rewrite_known_field.vp with a nonce Alice generates and
+// sends beside each ciphertext. No two ciphertexts share key and nonce, so
+// there is no tag key to give up and no keystream to read, and Bob's challenge
+// check rules out the replay across sessions.
+attacker[active]
+
+principal Bob[
+	generates chal
+]
+
+Bob -> Alice: [chal]
+
+principal Alice[
+	knows private k
+	generates n, m
+	p = CONCAT(chal, m)
+	e = AEAD_ENC(k, n, p, nil)
+]
+
+Alice -> Bob: n, e
+
+principal Bob[
+	knows private k
+	d = AEAD_DEC(k, n, e, nil)?
+	c, mm = SPLIT(d)?
+	_ = ASSERT(c, chal)?
+	h = HASH(mm)
+]
+
+queries[
+	confidentiality? m
+	authentication? Alice -> Bob: e
+]

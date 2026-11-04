@@ -30,7 +30,10 @@
 //     digest carried in the description before it decrypts, so a router
 //     that hands over anything other than the packet the sender uploaded is
 //     caught. Integrity comes from the out-of-band description, not from
-//     the connection. Delete the digest check and this flips.
+//     the connection. Delete the digest check and this still holds, since
+//     the recipient's checked decryption under the file key the description
+//     carries rejects any other packet too; drop that decryption's `?` as
+//     well and this flips.
 //
 // Two properties the model states without testing, because they are about
 // who holds what rather than about what can be derived. The per-recipient
@@ -61,8 +64,8 @@ principal Sender[
 	knows private filedata
 	generates fkey, fnonce
 	chunk = AEAD_ENC(fkey, fnonce, filedata, tag_file)
-	// The digest that will travel in the description. This is the only
-	// integrity the recipient will have.
+	// The digest that will travel in the description. With the file key
+	// beside it, this is the only integrity the recipient will have.
 	cdigest = HASH(chunk)
 	// The sender's own key for FNEW and FDEL, and one recipient key. Both
 	// are generated here: the recipient never chooses its own.
@@ -127,8 +130,8 @@ XRouter -> Recipient: gsdh, cbnonce, out
 principal Recipient[
 	pss_r = DH_KEX(gsdh, rdh)
 	chunk_r = AEAD_DEC(pss_r, cbnonce, out, tag_pkt)?
-	// The digest check, before anything is decrypted. This is what makes
-	// the untrusted router harmless.
+	// The digest check, before anything is decrypted. With the checked
+	// decryption below, this is what makes the untrusted router harmless.
 	_ = ASSERT(HASH(chunk_r), cdigest_r)?
 	data_r = AEAD_DEC(fkey_r, fnonce_r, chunk_r, tag_file)?
 ]

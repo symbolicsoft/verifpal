@@ -260,7 +260,7 @@ fn can_reconstruct_primitive_directly(
 	let forgeable_secret =
 		capabilities.forgeable_secret_position(rewritten_prim, attacker.current_phase);
 	let reused = (!capabilities.forgery_denied(rewritten_prim))
-		.then(|| forgery(rewritten_prim, attacker))
+		.then(|| forgery(rewritten_prim, capabilities, attacker))
 		.flatten();
 	let by_reuse: &[usize] = reused.as_ref().map_or(&[], |f| &f.exempt);
 	let mut has = Vec::new();
@@ -289,22 +289,30 @@ fn can_reconstruct_primitive_directly(
 			_,
 			Some(Forgery {
 				pair,
-				known: Some(known),
+				base: None,
+				using,
 				..
 			}),
 		) => DerivationRecord::ReusedForge {
 			with: pair,
-			using: std::iter::once(known).chain(has).collect(),
+			using: distinct(using, has),
 		},
 		(
 			_,
 			Some(Forgery {
-				pair: [of, with], ..
+				pair: [first, second],
+				base: Some(of),
+				using,
+				..
 			}),
 		) => DerivationRecord::Retagged {
+			with: if first.equivalent(&of, true) {
+				second
+			} else {
+				first
+			},
 			of,
-			with,
-			using: has,
+			using: distinct(using, has),
 		},
 		(_, None) => DerivationRecord::Broken {
 			of: rewrite_value.clone(),
@@ -592,4 +600,14 @@ fn combinable(
 		}
 	}
 	None
+}
+
+fn distinct(first: Vec<Value>, then: Vec<Value>) -> Vec<Value> {
+	let mut out: Vec<Value> = Vec::with_capacity(first.len() + then.len());
+	for v in first.into_iter().chain(then) {
+		if !out.iter().any(|seen| seen.equivalent(&v, true)) {
+			out.push(v);
+		}
+	}
+	out
 }

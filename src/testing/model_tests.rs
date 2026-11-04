@@ -3035,6 +3035,37 @@ fn aead_nonce_reuse_models() {
 	run_model_sessions("aead_nonce_reuse_attacker_supplied_retag.vp", 2, "a1");
 	run_model_sessions("aead_nonce_two_executions_not_a_reuse.vp", 1, "c0");
 	run_model_sessions("aead_nonce_two_executions_not_a_reuse.vp", 2, "c0");
+	run_model_sessions("aead_nonce_reuse_rewrite_known_field.vp", 1, "c0a0");
+	run_model_sessions("aead_nonce_reuse_rewrite_known_field.vp", 2, "c0a1");
+	run_model(
+		"aead_nonce_reuse_rewrite_known_field_fresh_nonce.vp",
+		"c0a0",
+	);
+	run_model_sessions(
+		"aead_nonce_reuse_rewrite_known_field_fresh_nonce.vp",
+		1,
+		"c0a0",
+	);
+	run_model_sessions("aead_nonce_reuse_splice_fields.vp", 1, "c0a0");
+	run_model_sessions("aead_nonce_reuse_splice_fields.vp", 2, "c0a1");
+	run_model("aead_nonce_reuse_splice_fields_bound.vp", "c0a0");
+	run_model_sessions("aead_nonce_reuse_splice_fields_bound.vp", 1, "c0a0");
+	run_model("aead_nonce_reuse_known_field_reveals.vp", "c1c0c0c0");
+	run_model_sessions("aead_nonce_reuse_known_field_reveals.vp", 1, "c1c0c0c0");
+	run_model("aead_nonce_reuse_known_field_reveals_hidden.vp", "c0c0c0c0");
+	run_model_sessions(
+		"aead_nonce_reuse_known_field_reveals_hidden.vp",
+		1,
+		"c0c0c0c0",
+	);
+}
+
+#[test]
+fn later_leak_key_slot_extension() {
+	run_model_sessions("kem_key_confusion_later_leak.vp", 1, "c0");
+	run_model_sessions("kem_key_confusion_later_leak.vp", 2, "c1");
+	run_model("kem_key_confusion_later_leak_tagged.vp", "c0");
+	run_model_sessions("kem_key_confusion_later_leak_tagged.vp", 1, "c0");
 }
 
 #[test]

@@ -361,13 +361,15 @@ fn observed(scope: &Scope, cx: &Context, ex: &Execution) -> TermSet {
 		if let Some(revealed) = scope.knowledge.breaks(p) {
 			pending.extend(revealed);
 		}
-		if let Some(rule) = crate::primitive::reuse_rule(p.id)
-			&& attacker.reused.iter().any(|pair| {
-				pair.iter().any(|member| member.equivalent(&value, true))
-					&& pair.iter().all(|member| attacker.knows(member).is_some())
-			}) && crate::theory::opens(p, scope.knowledge.capabilities(), attacker)
-		{
-			pending.extend(crate::theory::revealed(p, &rule.reveals));
+		if attacker.reused.iter().any(|pair| {
+			pair.iter().any(|member| member.equivalent(&value, true))
+				&& pair.iter().all(|member| attacker.knows(member).is_some())
+		}) {
+			pending.extend(
+				crate::theory::opened(p, scope.knowledge.capabilities(), attacker)
+					.iter()
+					.map(crate::theory::reduce_once),
+			);
 		}
 	}
 	seen

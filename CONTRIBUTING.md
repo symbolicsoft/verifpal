@@ -4,7 +4,7 @@
 -->
 
 # Contributing to Verifpal
-If you wish to contribute to Verifpal, please first discuss the changes you are envisioning via the [Verifpal Mailing List](https://lists.symbolic.software/mailman/listinfo/verifpal).
+If you wish to contribute to Verifpal, please first discuss the changes you are envisioning in a [GitHub issue](https://github.com/symbolicsoft/verifpal/issues).
 
 Please note that as a Symbolic Software project, Verifpal operates under the Symbolic Software Community Guidelines, which we expect everyone to follow in their interactions with the project.
 

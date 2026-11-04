@@ -108,7 +108,11 @@ fn a_reused_nonce_needs_two_distinct_terms_under_one_key_and_nonce() {
 	let ad = make_constant("rn_ad");
 	let m1 = make_constant("rn_m1");
 	let m2 = make_constant("rn_m2");
-	let e1 = make_primitive(PRIM_AEAD_ENC, vec![k.clone(), n.clone(), m1, ad.clone()], 0);
+	let e1 = make_primitive(
+		PRIM_AEAD_ENC,
+		vec![k.clone(), n.clone(), m1.clone(), ad.clone()],
+		0,
+	);
 	let e2 = make_primitive(
 		PRIM_AEAD_ENC,
 		vec![k.clone(), n.clone(), m2.clone(), ad.clone()],
@@ -141,10 +145,80 @@ fn a_reused_nonce_needs_two_distinct_terms_under_one_key_and_nonce() {
 	assert!(!reused_pair(&e1, &other_key));
 	let pair = [e1.clone(), e2.clone()];
 	let both = vec![e1.clone(), e2.clone(), m2.clone()];
-	assert!(keystream(p1, &confirmed(both.clone(), pair.clone())).is_some());
-	assert!(keystream(p1, &confirmed(vec![e1.clone(), m2.clone()], pair.clone())).is_none());
-	assert!(keystream(p_other, &confirmed(both.clone(), pair)).is_none());
-	assert!(keystream(p1, &make_attacker_state(both)).is_none());
+	let capabilities = CapabilityIndex::default();
+	let opened_with = |p: &Primitive, attacker: &AttackerState| opened(p, &capabilities, attacker);
+	assert!(
+		opened_with(p1, &confirmed(both.clone(), pair.clone()))
+			.iter()
+			.any(|v| v.equivalent(&m1, true))
+	);
+	assert!(opened_with(p1, &confirmed(vec![e1.clone(), m2.clone()], pair.clone())).is_empty());
+	assert!(opened_with(p_other, &confirmed(both.clone(), pair)).is_empty());
+	assert!(opened_with(p1, &make_attacker_state(both)).is_empty());
+}
+
+#[test]
+fn a_reused_nonce_rewrites_splices_and_opens_tuple_plaintexts_field_by_field() {
+	let k = make_constant("rt_k");
+	let n = make_constant("rt_n");
+	let ad = make_constant("rt_ad");
+	let c1 = make_constant("rt_c1");
+	let c2 = make_constant("rt_c2");
+	let m1 = make_constant("rt_m1");
+	let m2 = make_constant("rt_m2");
+	let m3 = make_constant("rt_m3");
+	let tuple = |a: &Value, b: &Value| make_primitive(PRIM_CONCAT, vec![a.clone(), b.clone()], 0);
+	let sealed = |plaintext: Value| {
+		make_primitive(
+			PRIM_AEAD_ENC,
+			vec![k.clone(), n.clone(), plaintext, ad.clone()],
+			0,
+		)
+	};
+	let e1 = sealed(tuple(&c1, &m1));
+	let e2 = sealed(tuple(&c2, &m2));
+	let primitive = |v: Value| match v {
+		Value::Primitive(p) => p,
+		_ => panic!("expected a primitive"),
+	};
+	let capabilities = CapabilityIndex::default();
+	let paired = |known: Vec<Value>| {
+		let mut attacker = make_attacker_state(known);
+		attacker.reused = Arc::new(vec![[e1.clone(), e2.clone()]]);
+		attacker
+	};
+	let headers = paired(vec![
+		e1.clone(),
+		e2.clone(),
+		c1.clone(),
+		c2.clone(),
+		m3.clone(),
+		ad.clone(),
+	]);
+	let rewritten =
+		can_reconstruct_primitive(&primitive(sealed(tuple(&c1, &m2))), &capabilities, &headers)
+			.expect("a known field is overwritten and the rest kept");
+	assert!(matches!(rewritten, DerivationRecord::Retagged { .. }));
+	assert!(
+		can_reconstruct_primitive(&primitive(sealed(tuple(&c1, &m3))), &capabilities, &headers)
+			.is_none(),
+		"a field whose keystream is unknown takes no chosen value"
+	);
+	let opened_e1 = opened(&primitive(e1.clone()), &capabilities, &headers);
+	assert!(!opened_e1.iter().any(|v| v.equivalent(&m1, true)));
+	let blind = paired(vec![e1.clone(), e2.clone(), ad.clone()]);
+	let spliced =
+		can_reconstruct_primitive(&primitive(sealed(tuple(&c2, &m1))), &capabilities, &blind)
+			.expect("fields at one position splice across ciphertexts");
+	assert!(matches!(spliced, DerivationRecord::Retagged { .. }));
+	assert!(
+		can_reconstruct_primitive(&primitive(sealed(tuple(&c1, &m3))), &capabilities, &blind)
+			.is_none()
+	);
+	let message = paired(vec![e1.clone(), e2.clone(), m2.clone()]);
+	let opened_e1 = opened(&primitive(e1), &capabilities, &message);
+	assert!(opened_e1.iter().any(|v| v.equivalent(&m1, true)));
+	assert!(!opened_e1.iter().any(|v| v.equivalent(&c1, true)));
 }
 
 #[test]

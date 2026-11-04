@@ -16,5 +16,8 @@ pub(crate) use decompose::{
 };
 pub(crate) use memo::{DeductionMemo, SavedMemo};
 pub(crate) use obtain::{KnowledgeInputs, can_recompose, can_reconstruct_primitive, obtainable};
-pub(crate) use reuse::{forgery, keystream, opens, reused_pair, same_fixed, unmasks};
+pub(crate) use reuse::{
+	Keystream, fields, forgery, keystream, keystream_of, masked, opened, opened_with, reused_pair,
+	same_fixed,
+};
 pub(crate) use rewrite::{can_rewrite, combine_binding_values, combine_bindings_hold, reduce_once};

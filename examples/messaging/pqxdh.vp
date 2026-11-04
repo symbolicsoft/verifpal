@@ -57,11 +57,15 @@
 //   the swap becomes available: ekb and ekbsig are replaced by gbs and
 //   gbssig, Bob's own signature carries the substitution past Alice's
 //   check, and she encapsulates to a curve public key. Verifpal reports
-//   that swap where Bob's curve prekey is compromised while the
-//   exchange runs. It does not report it on this model, and the reason
-//   is the leak in phase 1: a key disclosed only downstream of the
-//   check it would forge is not held in time to forge it. The deployed
-//   consequence is the one the paper draws — encapsulating to a curve
+//   that swap here once the tags are dropped, at two sessions: the swap
+//   forges nothing, and once Bob#2 leaks bs and blongterm in phase 1
+//   the attacker decapsulates ss and, replacing the unsigned one-time
+//   prekey with gblongterm, rebuilds every DH leg and reads m1. At one
+//   session the attacked Bob halts before his phase-1 leak, so nothing
+//   discloses bs. With the tags, Bob's curve-key signature no longer
+//   verifies as one over a KEM key, and the swap fails Alice's check
+//   (examples/test/kem_key_confusion_later_leak.vp reduces both). The
+//   deployed consequence is the one the paper draws — encapsulating to a curve
 //   key puts the KEM outside the assumption that makes it secure, so
 //   the leg meant to survive the curve stops surviving it.
 //
