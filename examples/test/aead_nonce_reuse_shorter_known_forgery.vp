@@ -1,0 +1,43 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: e0 at one session and at two.
+//
+// Alice seals a public two-field plaintext and a three-field one that opens
+// with a header she shares with Bob, under one key and a nonce Bob receives
+// guarded. Bob opens the second, splits it under a check, checks its header
+// and only then hashes its third field, so short and any re-tag of it make
+// him halt before he computes opened. The pair gives the attacker the tag
+// key and the keystream over the first two fields, not over the third, so
+// any three-field plaintext it seals for Bob carries three from long, and
+// opened never differs from sealed. A known plaintext once gave the attacker
+// the whole keystream however many fields it had, and it sealed
+// CONCAT(hdr, nil, nil) for Bob (e1). Each session draws its own nonce, so
+// the other session's long splices nothing in.
+// aead_nonce_reuse_shorter_known_forgery_equal.vp gives the known plaintext
+// a third field, and the forgery goes through.
+attacker[active]
+
+principal Alice[
+	knows private k, hdr
+	knows public tag, pad, ad
+	generates nonce, two, three
+	short = AEAD_ENC(k, nonce, CONCAT(tag, pad), ad)
+	long = AEAD_ENC(k, nonce, CONCAT(hdr, two, three), ad)
+	sealed = HASH(three)
+	leaks short
+]
+
+Alice -> Bob: [nonce], long
+
+principal Bob[
+	knows private k, hdr
+	knows public ad
+	d = AEAD_DEC(k, nonce, long, ad)?
+	a, b, c = SPLIT(d)?
+	_ = ASSERT(a, hdr)?
+	opened = HASH(c)
+]
+
+queries[
+	equivalence? opened, sealed
+]

@@ -7,7 +7,7 @@
 // some of those shared secrets DON'T stay secret: the keyed-hash key skk
 // and the key identifier ekid are handed to the attacker outright with
 // `leaks`, the wire is fully attacker-controlled, and the untrusted server
-// is simply modeled AS the attacker. At one session all queries hold
+// is modeled AS the attacker. At one session all queries hold
 // (c0a0a0a0f0); at the default two sessions the three authentication
 // queries report injective-agreement replays (c0a1a1a1f0), the other run's
 // signed content being accepted a second time. For ekid, a declared value
@@ -31,7 +31,7 @@
 // The protocol has two layers, and the queries separate their fates:
 //   1. A keyed-hash challenge-response (h0, h1, h2 under skk, with the
 //      public tags zero/one/two for domain separation). Since skk is
-//      leaked, the attacker can forge this entire layer — it provides
+//      leaked, the attacker can forge this entire layer; it provides
 //      nothing here.
 //   2. Sign-then-encrypt of the actual content. This is the layer doing
 //      all the work, and it holds on its own.
@@ -47,11 +47,11 @@ principal Client1[
 	knows public two
 	// skk: the shared keyed-hash (MAC) key for the handshake layer.
 	knows private skk
-	// signprivkey: Client1's long-term signing key — the one secret that
+	// signprivkey: Client1's long-term signing key, the one secret that
 	// must hold for authentication to hold.
 	knows private signprivkey
 	// keygen: the shared secret from which the content-encryption key is
-	// derived — the one secret that must hold for confidentiality to hold.
+	// derived, the one secret that must hold for confidentiality to hold.
 	knows private keygen
 	// ekid: identifies which derived key encrypts this clipboard entry.
 	knows private ekid
@@ -95,15 +95,16 @@ Client2 -> Client1: rprime, h1
 principal Client1[
 	generates ts
 	generates n
-	// m is the clipboard content being copied — the value under test.
+	// m is the clipboard content being copied, the value under test.
 	generates m
 	_ = ASSERT(h1, HASH(skk, one, rprime, h0))?
 	// The content key: a key-exchange between the shared keygen secret
 	// and the key id. Neither DH half's private value is on the wire.
 	gkeygen = PUBKEY(keygen)
 	ct = ENC(DH_KEX(gkeygen, ekid), CONCAT(n, m))
-	// The signature covers the key id, the nonce, and the ciphertext —
-	// this is what makes all three authentication queries hold.
+	// The signature covers the key id, the nonce, and the ciphertext;
+	// this is what makes all three authentication queries hold at one
+	// session.
 	signature = SIGN(signprivkey, CONCAT(ekid, n, ct))
 	// Final keyed-hash transcript over the stored record.
 	h2 = HASH(skk, two, h1, S, CONCAT(ts, signature, ekid))

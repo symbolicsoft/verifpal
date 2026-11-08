@@ -56,6 +56,27 @@ pub(crate) fn fields<'a>(v: &'a Value, like: &Value) -> Option<&'a [Value]> {
 
 pub(crate) type Keystream = Vec<(Vec<(PrimitiveId, usize)>, Value)>;
 
+fn spans(known: &Value, want: &Value) -> bool {
+	match (fields(known, want), fields(want, known)) {
+		(Some(have), Some(wanted)) => {
+			have.len() >= wanted.len() && wanted.iter().zip(have).all(|(w, k)| spans(k, w))
+		}
+		_ => true,
+	}
+}
+
+fn aligned(known: &Value, under: &Value, out: &mut Vec<(Value, Vec<Value>)>) {
+	if spans(known, under) {
+		out.push((under.clone(), vec![known.clone()]));
+		return;
+	}
+	if let (Some(have), Some(wanted)) = (fields(known, under), fields(under, known)) {
+		for (k, w) in have.iter().zip(wanted) {
+			aligned(k, w, out);
+		}
+	}
+}
+
 fn readable(
 	v: &Value,
 	path: &mut Vec<(PrimitiveId, usize)>,
@@ -110,10 +131,13 @@ pub(crate) fn opened_with(of: &Primitive, keystream: &Keystream) -> Vec<(Value, 
 	let Some(plaintext) = of.arguments.get(at) else {
 		return Vec::new();
 	};
-	keystream
-		.iter()
-		.filter_map(|(path, known)| Some((beneath(plaintext, path)?.clone(), vec![known.clone()])))
-		.collect()
+	let mut out = Vec::new();
+	for (path, known) in keystream {
+		if let Some(under) = beneath(plaintext, path) {
+			aligned(known, under, &mut out);
+		}
+	}
+	out
 }
 
 fn opened_by(
@@ -176,7 +200,7 @@ fn covers(
 ) -> bool {
 	if let Some((_, known)) = under
 		.iter()
-		.find(|(_, field)| attacker.knows(field).is_some())
+		.find(|(_, field)| attacker.knows(field).is_some() && spans(field, want))
 		&& obtainable(want, capabilities, attacker)
 	{
 		cover.using.push((*known).clone());
@@ -261,10 +285,10 @@ pub(crate) fn forgery(
 }
 
 pub(crate) fn keystream(p: &Primitive, attacker: &AttackerState) -> Option<Value> {
-	reuse_rule(p.id)?.masked?;
+	let want = p.arguments.get(reuse_rule(p.id)?.masked?)?;
 	pairs_of(p, attacker)
 		.flatten()
 		.filter_map(masked)
-		.find(|known| attacker.knows(known).is_some())
+		.find(|known| attacker.knows(known).is_some() && spans(known, want))
 		.cloned()
 }

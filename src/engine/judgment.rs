@@ -193,10 +193,10 @@ impl<'a, 'b> Judge<'a, 'b> {
 		let eventually = &self.whole.runs[run];
 		let failed: Vec<SlotIdx> = eventually
 			.halted
-			.into_iter()
+			.iter()
 			.flat_map(|halt| {
-				let at = program.step_of_slot[&halt];
-				std::iter::once(halt).chain(later_outputs(self.cx, run, at, halt))
+				let at = program.step_of_slot[&halt.slot];
+				std::iter::once(halt.slot).chain(later_outputs(self.cx, run, at, halt.slot))
 			})
 			.collect();
 		let mut first = None;

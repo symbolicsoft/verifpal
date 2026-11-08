@@ -1,0 +1,36 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: e1 at one session and at two.
+//
+// aead_nonce_reuse_shorter_known_forgery.vp with a third public field in
+// short. The known plaintext now lies over all of long, so the attacker
+// forges a ciphertext under the reused key and nonce whose plaintext keeps
+// long's header and carries a third field of its own choosing, and hands it
+// to Bob in place of long: his checks pass and he hashes the attacker's
+// field, not three.
+attacker[active]
+
+principal Alice[
+	knows private k, hdr
+	knows public tag, pad, ad
+	generates nonce, two, three
+	short = AEAD_ENC(k, nonce, CONCAT(tag, pad, tag), ad)
+	long = AEAD_ENC(k, nonce, CONCAT(hdr, two, three), ad)
+	sealed = HASH(three)
+	leaks short
+]
+
+Alice -> Bob: [nonce], long
+
+principal Bob[
+	knows private k, hdr
+	knows public ad
+	d = AEAD_DEC(k, nonce, long, ad)?
+	a, b, c = SPLIT(d)?
+	_ = ASSERT(a, hdr)?
+	opened = HASH(c)
+]
+
+queries[
+	equivalence? opened, sealed
+]

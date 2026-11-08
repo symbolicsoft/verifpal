@@ -19,7 +19,7 @@
 // The adversary is `PUBKEY[weak from phase 1]`: a capability parameter, not
 // a `leaks` line. That distinction matters here. `leaks sk_r` would hand
 // over one private value; PUBKEY[weak] says the *operation* is invertible,
-// so every private key behind every annotated PUBKEY falls at once —
+// so every private key behind every annotated PUBKEY falls at once,
 // including the per-session ephemerals the sender never transmits. Verifpal
 // then rebuilds the DHKEM shared secret through the ordinary reconstruction
 // rules, with no DH-specific machinery involved. This is harvest-now-
@@ -63,7 +63,7 @@ principal Sender[
 	ct_base = AEAD_ENC(key1, n_ct_base, pt_base, aad)
 	// SealPSK(pk_r, info, aad, pt_psk, psk, psk_id). Same KEM, same
 	// adversary; the key schedule differs by the mode byte, the psk_id hash
-	// and — the point — the psk in the ikm position.
+	// and (the point) the psk in the ikm position.
 	kem_enc2 = PUBKEY[weak from phase 1](sk_e2)
 	dh2 = DH_KEX(pk_r, sk_e2)
 	kem_context2 = CONCAT(l_kem, kem_enc2, pk_r)

@@ -115,7 +115,7 @@ fn validate_file_name(file_path: &str, file_name: &str) -> VResult<()> {
 	if file_name.is_empty() {
 		return Err(
 			VerifpalError::parse(format!("`{}` does not name a file", file_path).into())
-				.note("Verifpal reads a single model file, whose name ends in a `.vp` extension"),
+				.note("each path must name one model file, whose name ends in `.vp`"),
 		);
 	}
 	let length = file_name.chars().count();

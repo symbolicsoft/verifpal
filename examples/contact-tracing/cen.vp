@@ -16,7 +16,7 @@
 // Phones broadcast cen_i values as rotating pseudonyms. On a positive
 // diagnosis, the patient publishes a signed report containing rvk and ONE
 // chain key cek_j: from it, anyone can roll the chain FORWARD and recompute
-// cen_j, cen_j+1, … to check their own contact log — but nobody can roll it
+// cen_j, cen_j+1, … to check their own contact log, but nobody can roll it
 // BACKWARD to cek_(j-1) or to rak, because that would mean inverting HASH.
 //
 // The verdict is c0c1c0, and the middle failure is the protocol WORKING:
@@ -26,15 +26,15 @@
 //     stay unlinkable to the reporter.
 //   confidentiality? cek_1A   FAILS — deliberately: cek_1A is IN the
 //     published report; revealing it is what lets contacts match. A failing
-//     confidentiality query is not always an attack — here it documents
+//     confidentiality query is not always an attack; here it documents
 //     exactly which part of the chain a report burns.
 //   confidentiality? cen_0C   HOLDS — Charlie never reported, and his
 //     broadcast cen_1C does not expose sibling or earlier chain values.
 //
-// Instructive detail: the report is signed with rak and verified against
-// rvk — and rvk is itself bound into every chain step. A report therefore
-// proves that whoever signed it also OWNS the broadcast pseudonyms being
-// disclosed; nobody can report someone else's chain.
+// The report is signed with rak and verified against rvk, and rvk is
+// itself bound into every chain step. A report therefore proves that
+// whoever signed it also OWNS the broadcast pseudonyms being disclosed;
+// nobody can report someone else's chain.
 
 attacker[active]
 
@@ -79,7 +79,7 @@ principal Charlie[
 	cen_1C = HASH(CONCAT(i1, cek_1C))
 ]
 
-// Bluetooth proximity broadcasts: whoever is nearby (attacker included —
+// Bluetooth proximity broadcasts: whoever is nearby (attacker included;
 // these are unguarded) hears the current pseudonym.
 Alice -> Bob: cen_1A
 Bob -> Alice: cen_1B
@@ -91,7 +91,7 @@ Charlie -> Bob: cen_1C
 phase[1]
 
 principal Alice [
-	// The memo carries report metadata (its type, length, and payload —
+	// The memo carries report metadata (its type, length, and payload,
 	// e.g. a health-authority attestation), private until published.
 	knows private memo_type
 	knows private memo_len
@@ -100,7 +100,7 @@ principal Alice [
 	cek_2A = HASH(CONCAT(rvkA, cek_1A))
 	cen_2A = HASH(CONCAT(i1, cek_2A))
 	// The report: verification key, the EARLIEST chain key being
-	// disclosed (cek_1A — not cek_0A, not rakA), the interval range it
+	// disclosed (cek_1A, not cek_0A, not rakA), the interval range it
 	// covers, and the memo. Publishing cek_1A is the deliberate
 	// disclosure that makes the second query fail.
 	report = CONCAT(rvkA, cek_1A, i1, i2, memo)

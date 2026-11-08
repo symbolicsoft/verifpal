@@ -1,0 +1,35 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: u1 at one session and at two.
+//
+// unlink_failed_check_output.vp with Bob's decryption unchecked. The
+// attacker hands Bob nil for box, and Bob holds the failing decryption of
+// nil under k, the very value Carol leaks: k made both, and the forced
+// equality links them.
+attacker[active]
+
+principal Alice[
+	knows private k
+	knows public nonce, ad
+	generates message
+	box = AEAD_ENC(k, nonce, message, ad)
+]
+
+principal Carol[
+	knows private k
+	knows public nonce, ad
+	error = AEAD_DEC(k, nonce, nil, ad)
+	leaks error
+]
+
+Alice -> Bob: box
+
+principal Bob[
+	knows private k
+	knows public nonce, ad
+	plain = AEAD_DEC(k, nonce, box, ad)
+]
+
+queries[
+	unlinkability? plain, error
+]

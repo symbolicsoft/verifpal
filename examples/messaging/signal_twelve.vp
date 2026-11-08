@@ -3,12 +3,12 @@
 
 // This is examples/messaging/signal.vp extended from three messages to twelve.
 // The X3DH handshake and the first three messages are unchanged; messages four
-// through twelve simply continue the Double Ratchet: for each message the
+// through twelve continue the Double Ratchet: for each message the
 // sender generates a fresh ratchet key, mixes it with the peer's most recent
 // ratchet public key, and chains the root key onto the previous one with
-// KDF_RK. Every block below is that same three-derivation step — DH_KEX with
+// KDF_RK. Every block below is that same three-derivation step (DH_KEX with
 // the newest peer ratchet key, HKDF(previous root key, DH share, nil) for the
-// root chain, MAC-then-HKDF for the message key — applied twelve times; see
+// root chain, MAC-then-HKDF for the message key) applied twelve times; see
 // signal.vp for the line-by-line commentary on one step, on the X3DH
 // handshake, and for how each derivation maps onto the Signal specifications.
 //

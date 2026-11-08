@@ -1,0 +1,70 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: u1 at one session and at two.
+//
+// unlink_shared_dag.vp with y hashing the same public label as x: the two
+// values are equal and carry the secret both were made from, so they link.
+// The chain under v48 has fifty nodes and 2^48 paths, and the analysis must
+// walk it by node.
+attacker[passive]
+
+principal Alice[
+	knows private secret
+	knows public left, right
+	v0 = HASH(secret)
+	v1 = HASH(v0, v0)
+	v2 = HASH(v1, v1)
+	v3 = HASH(v2, v2)
+	v4 = HASH(v3, v3)
+	v5 = HASH(v4, v4)
+	v6 = HASH(v5, v5)
+	v7 = HASH(v6, v6)
+	v8 = HASH(v7, v7)
+	v9 = HASH(v8, v8)
+	v10 = HASH(v9, v9)
+	v11 = HASH(v10, v10)
+	v12 = HASH(v11, v11)
+	v13 = HASH(v12, v12)
+	v14 = HASH(v13, v13)
+	v15 = HASH(v14, v14)
+	v16 = HASH(v15, v15)
+	v17 = HASH(v16, v16)
+	v18 = HASH(v17, v17)
+	v19 = HASH(v18, v18)
+	v20 = HASH(v19, v19)
+	v21 = HASH(v20, v20)
+	v22 = HASH(v21, v21)
+	v23 = HASH(v22, v22)
+	v24 = HASH(v23, v23)
+	v25 = HASH(v24, v24)
+	v26 = HASH(v25, v25)
+	v27 = HASH(v26, v26)
+	v28 = HASH(v27, v27)
+	v29 = HASH(v28, v28)
+	v30 = HASH(v29, v29)
+	v31 = HASH(v30, v30)
+	v32 = HASH(v31, v31)
+	v33 = HASH(v32, v32)
+	v34 = HASH(v33, v33)
+	v35 = HASH(v34, v34)
+	v36 = HASH(v35, v35)
+	v37 = HASH(v36, v36)
+	v38 = HASH(v37, v37)
+	v39 = HASH(v38, v38)
+	v40 = HASH(v39, v39)
+	v41 = HASH(v40, v40)
+	v42 = HASH(v41, v41)
+	v43 = HASH(v42, v42)
+	v44 = HASH(v43, v43)
+	v45 = HASH(v44, v44)
+	v46 = HASH(v45, v45)
+	v47 = HASH(v46, v46)
+	v48 = HASH(v47, v47)
+	x = HASH(v48, left)
+	y = HASH(v48, left)
+	leaks x, y
+]
+
+queries[
+	unlinkability? x, y
+]

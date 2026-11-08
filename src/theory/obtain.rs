@@ -207,8 +207,8 @@ fn can_interpolate(
 	}
 	if obtainable(secret, capabilities, attacker) {
 		let others = held_shares(p, attacker, Some(p.output), p.threshold - 1);
-		return (others.len() + 1 == p.threshold).then(|| DerivationRecord::Reconstructed {
-			from: vec![secret.clone()],
+		return (others.len() + 1 == p.threshold).then(|| DerivationRecord::Recomposed {
+			using: std::iter::once(secret.clone()).chain(others).collect(),
 		});
 	}
 	let using = held_shares(p, attacker, Some(p.output), p.threshold);

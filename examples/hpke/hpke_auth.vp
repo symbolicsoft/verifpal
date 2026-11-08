@@ -14,9 +14,9 @@
 // to the KEM context, which is precisely how the RFC describes the
 // difference: "the calls to Encap() and Decap() are replaced with calls to
 // AuthEncap() and AuthDecap(), which add the sender public key to their
-// internal context string" (§5.1.3). The pair is worth reading side by side
-// — at one session the authentication query goes from a1 to a0 on the
-// strength of those two lines, and nothing else in the two models differs.
+// internal context string" (§5.1.3). Read the pair side by side: at one
+// session the authentication query goes from a1 to a0 on the strength of
+// those two lines, and nothing else in the two models differs.
 //
 // Why authentication now holds. AuthEncap mixes DH(sk_s, pk_r) into the KEM
 // shared secret, so deriving the key schedule requires sk_s or sk_r, and the
@@ -28,8 +28,8 @@
 // the same term, so the two sides agree and no third party can join them.
 //
 // Read this verdict for what it is. a0 means no attack was found within one
-// session of each principal, under the abstractions listed in hpke_base.vp
-// — not that mode_auth is unconditionally authenticated. hpke_auth_kci.vp is
+// session of each principal, under the abstractions listed in hpke_base.vp,
+// not that mode_auth is unconditionally authenticated. hpke_auth_kci.vp is
 // the same model plus one `leaks` line, and it is a1: the assurance here is
 // conditional on sk_r staying secret, which is the key-compromise
 // impersonation caveat of §9.1.1 and not a detail the RFC leaves implicit.
@@ -59,7 +59,7 @@ principal Sender[
 	kem_context = CONCAT(l_kem, kem_enc, pk_r, pk_s)
 	shared_secret = HKDF(nil, dh, kem_context)
 	// KeyScheduleS(mode_auth, shared_secret, info, default_psk,
-	// default_psk_id) — identical to base mode but for the mode byte.
+	// default_psk_id): identical to base mode but for the mode byte.
 	ks_context = CONCAT(mode_auth, HASH(nil), HASH(info))
 	key, base_nonce, exporter_secret = HKDF(shared_secret, nil, ks_context)
 	generates n_ct

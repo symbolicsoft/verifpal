@@ -8,8 +8,8 @@
 // the key that opens it. Modelled from agent-protocol.md's "Short links"
 // section and Crypto/ShortLink.hs.
 //
-// The construction is a commitment. The fixed link data — the agent version
-// range, an Ed25519 root key, and the connection request — is hashed to
+// The construction is a commitment. The fixed link data (the agent version
+// range, an Ed25519 root key, and the connection request) is hashed to
 // give the link key, `linkKey = SHA3-256(fixedData)`; the link ID the router
 // files it under and the key that encrypts it are both HKDF outputs of that
 // link key. So the router stores a blob it cannot read, filed under an
@@ -22,7 +22,7 @@
 // THE USER DATA IS NOT COMMITTED TO. Alongside the fixed data the router
 // stores `encUserData`, which for a contact address carries the `direct`
 // flag, the OWNERS LIST, the relay list and the profile. It is encrypted
-// under the same key, and it is signed — by the root key, or by one of the
+// under the same key, and it is signed: by the root key, or by one of the
 // owner keys the list itself names. But it is not hashed into the link key,
 // it carries no version number, no counter and no timestamp, and nothing
 // binds it to any particular update. `LSET` overwrites it whenever the
@@ -50,7 +50,7 @@
 // accepts user data signed by the root key OR by any owner it names, and
 // `validateLinkOwners` walks a chain of `authOwnerSig` signatures rooted at
 // the root key. There is no revocation in that chain. Removing an owner is
-// done by publishing a user-data blob that no longer names them — which is
+// done by publishing a user-data blob that no longer names them, which is
 // precisely the update a rollback undoes. A router that serves the previous
 // blob restores a removed owner's authority over the link, and, because
 // that owner can then sign user data of their own, over everything the link
@@ -116,7 +116,7 @@ Owner -> Router: [linkid], [n_fd], [enc_fd], [sig_fd], [n_ud1], [enc_ud1], [sig_
 
 principal Owner[
 	// LSET again, later: the second owner is removed. This is what
-	// revocation looks like — a new blob that no longer names them.
+	// revocation looks like: a new blob that no longer names them.
 	ud2 = CONCAT(rootpk, nil)
 	sig_ud2 = SIGN(rootsk, ud2)
 	generates n_ud2

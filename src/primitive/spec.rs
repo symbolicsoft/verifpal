@@ -152,7 +152,7 @@ pub(super) fn build_core_specs() -> Vec<PrimitiveCoreSpec> {
 			name: "ASSERT",
 			doc: PrimitiveDoc {
 				example: "ASSERT(MAC(key, message), MAC(key, message)): unused",
-				help: "Checks the equality of two values, and especially useful for checking MAC equality. Its output is the assertion term itself, which anyone holding both inputs can build; it is usually discarded with `_`. May be suffixed with `?` to halt the principal if the check fails.",
+				help: "Checks that two values are equal, for example two MACs. Its output is the assertion term itself, which anyone holding both inputs can build, and is usually discarded with `_`. May be suffixed with `?` to halt the principal if the check fails.",
 			},
 			arity: vec![2],
 			output: vec![1],
@@ -169,7 +169,7 @@ pub(super) fn build_core_specs() -> Vec<PrimitiveCoreSpec> {
 			name: "CONCAT",
 			doc: PrimitiveDoc {
 				example: "CONCAT(a, b...): c",
-				help: "Concatenates between two and five values into one value. For example, the concatenation of the strings `cat` and `dog` would be `catdog`.",
+				help: "Concatenates two to five values into one. For example, concatenating the strings `cat` and `dog` gives `catdog`.",
 			},
 			arity: vec![2, 3, 4, 5],
 			output: vec![1],
@@ -186,7 +186,7 @@ pub(super) fn build_core_specs() -> Vec<PrimitiveCoreSpec> {
 			name: "SPLIT",
 			doc: PrimitiveDoc {
 				example: "SPLIT(CONCAT(a, b)): a, b",
-				help: "Splits a concatenation back to its component values, producing between one and five outputs. Applied to anything but a CONCAT it does not reduce: a checked SPLIT halts the principal, and an unchecked one keeps the unreduced term. May be suffixed with `?` to halt the principal if the check fails.",
+				help: "Splits a CONCAT back into its values, producing one to five outputs. Applied to anything but a CONCAT, it halts the principal when suffixed with `?`, and otherwise leaves the term unreduced.",
 			},
 			arity: vec![1],
 			output: vec![1, 2, 3, 4, 5],
@@ -209,7 +209,7 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 			name: "HASH",
 			doc: PrimitiveDoc {
 				example: "HASH(a, b...): x",
-				help: "Secure hash function, similar in practice to, for example, BLAKE2s. Takes between one and five input arguments, and returns one output.",
+				help: "Secure hash function, for example BLAKE2s. Takes one to five arguments and returns one output.",
 			},
 			arity: vec![1, 2, 3, 4, 5],
 			output: vec![1],
@@ -223,7 +223,7 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 			name: "HKDF",
 			doc: PrimitiveDoc {
 				example: "HKDF(salt, ikm, info): a, b...",
-				help: "Hash-based key derivation function inspired by the Krawczyk HKDF scheme. Essentially, HKDF is used to extract more than one key out of a single secret value. salt and info help contextualize derived keys. Takes exactly three arguments and produces between one and five outputs.",
+				help: "Hash-based key derivation, modelled on Krawczyk's HKDF. Derives one to five keys from the secret `ikm`; `salt` and `info` give the derivation its context. Takes exactly three arguments.",
 			},
 			arity: vec![3],
 			output: vec![1, 2, 3, 4, 5],
@@ -235,7 +235,7 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 			name: "AEAD_ENC",
 			doc: PrimitiveDoc {
 				example: "AEAD_ENC(key, nonce, plaintext, ad): ciphertext",
-				help: "Authenticated encryption with associated data, similar for example to AES-GCM or to ChaCha20-Poly1305. `nonce` must be unique per key. Two encryptions under one key and nonce that differ in plaintext or in `ad` give up the tag key and the combination of their plaintexts, but neither plaintext: the attacker can re-tag either ciphertext under any `ad`, and once it knows one plaintext it learns the other and can forge any ciphertext under that key and nonce. A plaintext built with `CONCAT` is read field by field, since each field lies over its own stretch of keystream: knowing a field of one plaintext reveals the field at the same position in the other, and the attacker can splice fields between the two ciphertexts and overwrite any field whose counterpart it knows before re-tagging. `ad` represents an additional payload that is not encrypted, but that must be provided exactly in the decryption function for authenticated decryption to succeed. Decrypting needs the key and the nonce.",
+				help: "Authenticated encryption with associated data, for example AES-GCM or ChaCha20-Poly1305. `ad` is authenticated but not encrypted, and decryption needs the same key, nonce and `ad`. `nonce` must be unique per key. If two ciphertexts share a key and nonce, the attacker can re-tag either one under any `ad`. Knowing one plaintext, or some fields of a `CONCAT` plaintext, also reveals the matching fields of the other and lets the attacker write its own values there.",
 			},
 			arity: vec![4],
 			output: vec![1],
@@ -286,7 +286,7 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 			name: "ENC",
 			doc: PrimitiveDoc {
 				example: "ENC(key, plaintext): ciphertext",
-				help: "Symmetric encryption, similar for example to AES-CBC or to ChaCha20. Unauthenticated, which is why it is the one primitive that accepts `malleable`.",
+				help: "Symmetric encryption without authentication, for example AES-CBC or ChaCha20. Because it is unauthenticated, it is the only primitive that accepts `malleable`.",
 			},
 			arity: vec![2],
 			output: vec![1],
@@ -332,7 +332,7 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 			name: "MAC",
 			doc: PrimitiveDoc {
 				example: "MAC(key, message): h",
-				help: "Keyed hash function. Useful for message authentication and for some other protocol constructions.",
+				help: "Keyed hash function, used for message authentication and in other constructions.",
 			},
 			arity: vec![2],
 			output: vec![1],
@@ -364,7 +364,7 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 			name: "DH_KEX",
 			doc: PrimitiveDoc {
 				example: "DH_KEX(PUBKEY(a), b): shared_secret",
-				help: "Diffie-Hellman key exchange. DH_KEX(PUBKEY(a), b) and DH_KEX(PUBKEY(b), a) yield the same shared secret. The first argument is the peer's public key and the second is your own private value: the second argument may not be a public key, and neither argument may itself be a DH_KEX, since the attacker cannot compute a shared secret from two public keys.",
+				help: "Diffie-Hellman key exchange: `DH_KEX(PUBKEY(a), b)` and `DH_KEX(PUBKEY(b), a)` give the same shared secret. The first argument is the peer's public key and the second is your own private value, which may not be a public key. Neither argument may itself be a DH_KEX.",
 			},
 			arity: vec![2],
 			output: vec![1],
@@ -393,7 +393,7 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 			name: "SIGN",
 			doc: PrimitiveDoc {
 				example: "SIGN(key, message): signature",
-				help: "Classic signature primitive. Here, `key` is a private key, for example `a`.",
+				help: "Digital signature with the private key `key`, verified by SIGNVERIF under `PUBKEY(key)`.",
 			},
 			arity: vec![2],
 			output: vec![1],
@@ -406,7 +406,7 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 			name: "SIGNVERIF",
 			doc: PrimitiveDoc {
 				example: "SIGNVERIF(PUBKEY(key), message, SIGN(key, message)): verified",
-				help: "Verifies if signature can be authenticated. If key a was used for SIGN, then SIGNVERIF will expect `PUBKEY(a)` as the key value. May be suffixed with `?` to halt the principal if verification fails.",
+				help: "Verifies a signature: `SIGN(a, message)` verifies under `PUBKEY(a)`. May be suffixed with `?` to halt the principal if verification fails.",
 			},
 			arity: vec![3],
 			output: vec![1],
@@ -471,7 +471,7 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 			name: "THRESHOLD_SPLIT",
 			doc: PrimitiveDoc {
 				example: "THRESHOLD_SPLIT[t](k): s1, …, sn",
-				help: "Shares a secret so that any t of the n bound shares recover it, and fewer reveal nothing. The bracket carries the threshold t, at least 2 and at most n, and n is the number of shares bound on the left. Any t distinct shares recover k through THRESHOLD_JOIN, and the shares double as the signing shares of THRESHOLD_SIGN.",
+				help: "Splits a secret `k` into n shares, one per constant bound on the left, so that any t of them recover `k` through THRESHOLD_JOIN and fewer reveal nothing. The threshold t goes in the brackets, from 2 to n. The shares are also the signing shares of THRESHOLD_SIGN.",
 			},
 			arity: vec![1],
 			output: (2..=MAX_SHARES as i32).collect(),
@@ -490,7 +490,7 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 			name: "THRESHOLD_JOIN",
 			doc: PrimitiveDoc {
 				example: "THRESHOLD_JOIN(s1, s2, ...): k",
-				help: "Lagrange interpolation over pieces of one THRESHOLD_SPLIT. Given at least t distinct shares it yields the secret; given at least t partial signatures from THRESHOLD_SIGN over distinct shares, the same commitments and the same message, it yields the plain signature SIGN(k, message), which SIGNVERIF checks under PUBKEY(k); given at least t PUBKEY(share) values it yields PUBKEY(k). Each signing nonce must have its PUBKEY commitment in the shared commitment list. Fewer than t pieces, a repeated share, a missing commitment, or partials that disagree leave the term unreduced.",
+				help: "Combines at least t pieces of one THRESHOLD_SPLIT by Lagrange interpolation: t distinct shares give `k`, t `PUBKEY(share)` values give `PUBKEY(k)`, and t THRESHOLD_SIGN partials over distinct shares, the same commitments and the same message give `SIGN(k, message)`. Fewer pieces, a repeated share, a nonce missing from the commitments, or partials that disagree leave the term unreduced.",
 			},
 			arity: (2..=MAX_SHARES as i32).collect(),
 			output: vec![1],
@@ -531,7 +531,7 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 			name: "THRESHOLD_SIGN",
 			doc: PrimitiveDoc {
 				example: "THRESHOLD_SIGN(share, nonce, commitments, message): partial",
-				help: "A signer's share of a threshold signature, as in FROST's second round: `share` is one output of THRESHOLD_SPLIT, `nonce` is this signer's fresh secret nonce (representing FROST's hiding-and-binding nonce pair), `commitments` is whatever the coordinator distributed to bind the signing session (typically a CONCAT of the participants' PUBKEY(nonce) commitments), and `message` is what is being signed. Any t partials over distinct shares, the same commitments and the same message combine through THRESHOLD_JOIN into SIGN(k, message), provided each nonce has its PUBKEY commitment in that list. Nested CONCAT lists are accepted. Knowing a partial's nonce, commitments and message reveals its signing share. Reusing a nonce under one share, whatever else differs, reveals the share.",
+				help: "One signer's partial signature, as in FROST's second round. `share` is an output of THRESHOLD_SPLIT, `nonce` is the signer's fresh secret nonce, `commitments` is the session's list of `PUBKEY(nonce)` commitments, usually a CONCAT, and `message` is what is signed. THRESHOLD_JOIN combines t partials into `SIGN(k, message)`. A partial gives away its share when its nonce, commitments and message are all known, or when its nonce is reused under the same share.",
 			},
 			arity: vec![4],
 			output: vec![1],
@@ -556,7 +556,7 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 			name: "RINGSIGN",
 			doc: PrimitiveDoc {
 				example: "RINGSIGN(key_a, PUBKEY(key_b), PUBKEY(key_c), message): signature",
-				help: "Ring signature. In ring signatures, one of three parties (Alice, Bob and Charlie) signs a message. The resulting signature can be verified using the public key of any of the three parties, and the signature does not reveal the signatory, only that they are a member of the signing ring (Alice, Bob or Charlie). The first key must be the private key of the actual signer, while the subsequent two keys must be the public keys of the other potential signers.",
+				help: "Ring signature over a ring of three. The first key is the signer's private key and the other two are the other members' public keys. The signature shows that one of the three signed, not which one.",
 			},
 			arity: vec![4],
 			output: vec![1],
@@ -575,7 +575,7 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 			name: "RINGSIGNVERIF",
 			doc: PrimitiveDoc {
 				example: "RINGSIGNVERIF(PUBKEY(a), PUBKEY(b), PUBKEY(c), m, RINGSIGN(a, PUBKEY(b), PUBKEY(c), m)): verified",
-				help: "Verifies if a ring signature can be authenticated. The signer's public key must match one or more of the public keys provided, but the public keys may be provided in any order and not necessarily in the order used during the RINGSIGN operation. May be suffixed with `?` to halt the principal if verification fails.",
+				help: "Verifies a ring signature. The three public keys may come in any order, and the signer's must be among them. May be suffixed with `?` to halt the principal if verification fails.",
 			},
 			arity: vec![5],
 			output: vec![1],
@@ -606,7 +606,7 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 			name: "BLIND",
 			doc: PrimitiveDoc {
 				example: "BLIND(k, m): b",
-				help: "Message blinding primitive, useful for the implementation of blind signatures. Here, the sender uses the secret blinding factor `k` in order to blind message `m`, which can then be sent to the signer, who will be able to produce a signature on `m` without knowing `m`. Used in conjunction with UNBLIND -- see UNBLIND's documentation for more information.",
+				help: "Blinds the message `m` with the secret factor `k`, for blind signatures: a signer can sign `BLIND(k, m)` without learning `m`, and UNBLIND turns that signature into one over `m`.",
 			},
 			arity: vec![2],
 			output: vec![1],
@@ -624,7 +624,7 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 			name: "UNBLIND",
 			doc: PrimitiveDoc {
 				example: "UNBLIND(k, m, SIGN(a, BLIND(k, m))): SIGN(a, m)",
-				help: "Once `BLIND(k, m)` is signed by the signer, the sender can convert `SIGN(a, BLIND(k, m))` to `SIGN(a, m)` by unblinding the message using their secret blinding factor `k`. The resulting unblinded signature can then be used as if it were a regular signature by `a` over `m`.",
+				help: "Removes the blinding from a signature: with the blinding factor `k`, `SIGN(a, BLIND(k, m))` becomes `SIGN(a, m)`, an ordinary signature by `a` over `m`.",
 			},
 			arity: vec![3],
 			output: vec![1],
@@ -644,7 +644,7 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 			name: "KEM_ENCAP",
 			doc: PrimitiveDoc {
 				example: "ss, ct = KEM_ENCAP(PUBKEY(dk), r)",
-				help: "Key encapsulation, as in a post-quantum KEM such as ML-KEM. Takes the recipient's encapsulation key `PUBKEY(dk)` and a random value, and binds two outputs: the shared secret and the encapsulation ciphertext that transports it. The random value should be freshly generated, since encapsulating twice under the same randomness yields the same shared secret. The random value may not be a public key, and the encapsulation key may not itself be a shared secret. A KEM says nothing about who performed the encapsulation: authenticate the ciphertext separately if the recipient needs to know who it came from.",
+				help: "Key encapsulation, as in ML-KEM. Takes the recipient's encapsulation key `PUBKEY(dk)` and a random value, and outputs a shared secret and the ciphertext that carries it. Generate the random value fresh, since the same randomness gives the same shared secret. A KEM does not say who encapsulated, so authenticate the ciphertext separately when the recipient needs to know.",
 			},
 			arity: vec![2],
 			output: vec![2],
@@ -675,7 +675,7 @@ pub(super) fn build_primitive_specs() -> Vec<PrimitiveSpec> {
 			name: "KEM_DECAP",
 			doc: PrimitiveDoc {
 				example: "KEM_DECAP(dk, ct): ss",
-				help: "Key decapsulation. Recovers the shared secret from an encapsulation ciphertext using the private decapsulation key `dk` matching the `PUBKEY(dk)` used to encapsulate. May be suffixed with `?` to halt the principal if decapsulation fails.",
+				help: "Key decapsulation: recovers the shared secret from a ciphertext with the private key `dk` whose `PUBKEY(dk)` it was encapsulated to. May be suffixed with `?` to halt the principal if decapsulation fails.",
 			},
 			arity: vec![2],
 			output: vec![1],

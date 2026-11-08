@@ -66,7 +66,7 @@
 // Modelling notes. The invitation link is guarded: it is passed out-of-band
 // as a link or QR code, and it is the only authenticated thing in the
 // protocol. Bob's reply key material is guarded too, because its
-// authenticity is what the SMP layer below is responsible for — see
+// authenticity is what the SMP layer below is responsible for; see
 // simplex_smp.vp, whose confirmation race is precisely what happens when
 // that assumption fails. The ratchet ciphertexts and encrypted headers are
 // left open in both directions. Message counters and the skipped-key store

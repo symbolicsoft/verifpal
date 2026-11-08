@@ -47,7 +47,7 @@ principal Recipient[
 ]
 
 // Guarded: HPKE assumes the sender already holds the recipient's genuine
-// public key. Unguard it and the attacker simply substitutes its own,
+// public key. Unguard it and the attacker substitutes its own,
 // which measures unauthenticated key distribution rather than HPKE.
 Recipient -> Sender: [pk_r]
 

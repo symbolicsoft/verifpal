@@ -450,7 +450,7 @@ impl<'a, 'b> Narrator<'a, 'b> {
 				self.list(from)
 			),
 			DerivationRecord::Recomposed { using, .. } => format!(
-				"Attacker recomposes {} from enough of its shares ({}).",
+				"Attacker interpolates {} from {}.",
 				self.term(v, &[]),
 				self.list(using)
 			),
@@ -909,7 +909,12 @@ impl<'a, 'b> Narrator<'a, 'b> {
 				&& (s == slot
 					|| (span != Span::default() && self.cx.km.slots[s].declared_span == span))
 		};
-		if self.gated.iter().any(same_assignment) || self.ex.runs[run].halted == Some(slot) {
+		if self.gated.iter().any(same_assignment)
+			|| self.ex.runs[run]
+				.halted
+				.as_ref()
+				.is_some_and(|halt| halt.slot == slot)
+		{
 			return;
 		}
 		let Some(h) = self.ex.runs[run].held(slot) else {

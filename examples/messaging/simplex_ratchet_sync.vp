@@ -17,15 +17,15 @@
 // on the double ratchet being independent of the SMP layer beneath it.
 //
 // WHAT THE CODE DOES. In Agent.hs, a received SMP client message is opened
-// with `decryptClientMessage e2eDh` — the per-queue crypto_box secret — and
+// with `decryptClientMessage e2eDh` (the per-queue crypto_box secret), and
 // an `AgentRatchetKey` envelope is dispatched straight to `newRatchetKey`
 // (Agent.hs:3196). `newRatchetKey` (Agent.hs:3638), for a connection in the
 // ordinary healthy state RSOk, calls `sendReplyKey`: it generates fresh
 // X3DH parameters, sends them to the peer, runs pqX3dh against the
 // parameters that just arrived, and calls `recreateRatchet`, which deletes
 // the existing ratchet and installs the new one. There is no
-// ratchet-level authentication on that envelope — it is the message that
-// REPLACES the ratchet, so it cannot be inside it — and no user
+// ratchet-level authentication on that envelope (it is the message that
+// REPLACES the ratchet, so it cannot be inside it) and no user
 // confirmation. The only replay guard is `ratchetExists`, a SHA-256 of the
 // offered key pair, which any freshly generated attacker key pair passes.
 //
@@ -73,12 +73,12 @@
 // at RSAgreed, so the attack is not silent at the API; whether any client
 // surfaces or gates on it is outside this repository.
 //
-// TWO DETAILS FROM THE IMPLEMENTATION WORTH KNOWING. First, the
+// TWO DETAILS FROM THE IMPLEMENTATION. First, the
 // renegotiated key agreement is Diffie-Hellman ONLY. `sendReplyKey` calls
 // `generateRcvE2EParams`, which PROPOSES an encapsulation key without a
 // ciphertext, and both `pqX3dhSnd` and `pqX3dhRcv` yield `kemAccepted =
 // Nothing` when the KEM parameters on both sides are proposals. So the
-// re-established root key carries no post-quantum secret at all — the KEM
+// re-established root key carries no post-quantum secret at all; the KEM
 // only re-enters at the next DH ratchet step. That is written out below,
 // and it means a forced renegotiation also strips the connection's
 // post-quantum protection at the moment of the reset.
@@ -87,7 +87,7 @@
 // comparing SHA-256 of the two offered key pairs. The attacker chooses its
 // own key pair, so it chooses the branch its victim takes. This model puts
 // Alice on the `otherwise` branch, where she initialises a SENDING ratchet
-// and therefore speaks first — which is what turns the takeover into
+// and therefore speaks first, which is what turns the takeover into
 // plaintext rather than merely a denial of service.
 //
 // Modelling notes. The SMP envelope around ordinary ratchet messages is

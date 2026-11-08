@@ -16,7 +16,7 @@
 // compute the key schedule, and encrypt an arbitrary message that the
 // recipient will accept as coming from the original sender." That is exactly
 // the trace Verifpal prints. The reason it works is visible in the model:
-// AuthDecap's second leg is DH_KEX(pk_s, sk_r), and sk_r alone computes it —
+// AuthDecap's second leg is DH_KEX(pk_s, sk_r), and sk_r alone computes it:
 // the sender's private key is never needed to *rebuild* the shared secret,
 // only to have built it first. §4.1 flags the same thing about DHKEM, and
 // notes NaCl's box interface shares it.
@@ -24,11 +24,11 @@
 // c1 is the separate statement in §9.1 that HPKE offers no forward secrecy
 // with respect to recipient compromise: in Base and Auth modes the secrecy
 // properties hold only if sk_r is never compromised, full stop. The attacker
-// here simply decapsulates the honest kem_enc and opens the honest ct.
+// here decapsulates the honest kem_enc and opens the honest ct.
 //
 // The RFC's suggested mitigation for the authentication half is in
-// hpke_auth_kci_signed.vp, which recovers a0 at one session and —
-// correctly — leaves c1 standing, because a signature over the ciphertext
+// hpke_auth_kci_signed.vp, which recovers a0 at one session and,
+// correctly, leaves c1 standing, because a signature over the ciphertext
 // cannot make a compromised recipient key forget how to decrypt.
 attacker[active]
 

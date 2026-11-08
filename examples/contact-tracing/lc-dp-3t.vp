@@ -21,8 +21,8 @@
 //   confidentiality? EphID02A   HOLDS — an EphID that was derived but
 //     never broadcast stays secret, even after SmartphoneA uploads SK1A:
 //     EphID02A hangs off SK0A, one ratchet step BEFORE anything disclosed.
-//   authentication? SmartphoneA -> BackendServer: m2   FAILS — a genuine
-//     modeling catch. The upload m2 = ENC(ephemeral_sk, SK1A) uses plain
+//   authentication? SmartphoneA -> BackendServer: m2   FAILS — a modeling
+//     catch. The upload m2 = ENC(ephemeral_sk, SK1A) uses plain
 //     symmetric ENC, which (unlike AEAD_ENC) has no integrity: DEC accepts
 //     any ciphertext and silently returns garbage. Verifpal's trace shows
 //     the attacker substituting a recorded ciphertext under the same key
@@ -40,7 +40,7 @@ attacker[active]
 principal SmartphoneA[
 
 	// Public HKDF context string, fixed by the protocol spec ("broadcast
-	// key" in the DP-3T paper) — same for every phone.
+	// key" in the DP-3T paper), the same for every phone.
 	knows public BroadcastKey
 
 	// Day-0 secret. `generates` = fresh, private, unguessable.
@@ -64,7 +64,7 @@ principal SmartphoneC[
 ]
 
 // Bluetooth proximity: A and B are near each other, then C and B.
-// Broadcasts are unguarded — anyone in radio range, attacker included,
+// Broadcasts are unguarded: anyone in radio range, attacker included,
 // hears them. Each phone logs what it heard.
 SmartphoneA -> SmartphoneB: EphID00A
 SmartphoneB -> SmartphoneA: EphID00B
@@ -123,7 +123,7 @@ principal SmartphoneA[
 	knows private ephemeral_sk
 	m1_dec = DEC(ephemeral_sk, m1)
 	// The upload: the day-1 secret, for the backend to republish. Plain
-	// ENC here is the model's deliberate weakness — see the header. Note
+	// ENC here is the model's deliberate weakness; see the header. Note
 	// SK1A is uploaded, not SK0A: disclosure starts at the contagious
 	// window, and earlier days stay private forever.
 	m2 = ENC(ephemeral_sk, SK1A)
@@ -134,7 +134,7 @@ SmartphoneA -> BackendServer: m2
 principal BackendServer [
 	knows private ephemeral_sk
 	// DEC never fails and there is no checked assert after it: whatever
-	// arrived — genuine upload or attacker substitution — flows straight
+	// arrived, genuine upload or attacker substitution, flows straight
 	// into the published list. This is what the failing authentication
 	// query is pointing at.
 	m2_dec = DEC(ephemeral_sk, m2)
@@ -151,7 +151,7 @@ queries[
 	confidentiality? EphID02A
 	authentication? SmartphoneA -> BackendServer: m2
 	// An unlinkability query takes two or more constants and asks whether
-	// the attacker can tell they belong together — here, whether observed
+	// the attacker can tell they belong together; here, whether observed
 	// and unobserved pseudonyms from the same phone can be connected.
 	unlinkability? EphID02A, EphID00A, EphID01A
 ]

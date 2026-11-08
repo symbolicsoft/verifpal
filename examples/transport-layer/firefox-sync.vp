@@ -4,7 +4,7 @@
 // Expected: c0a1 at one session and at two.
 //
 // A simplified model of the Firefox Sync account protocol ("onepw"): one
-// password, stretched into two independent keys with different destinies —
+// password, stretched into two independent keys with different destinies:
 // an encryption key the server must NEVER learn, and an authentication
 // token the server is explicitly given. The security of the whole design
 // rests on that split, and the split holds; what fails is the server's
@@ -32,7 +32,7 @@
 // The instructive move is the HKDF split:
 //     h1, h2 = HKDF(pass, salt, nil)
 // One primitive call binding two outputs. Handing the server h2 does not
-// help it (or an attacker who breaches it) recover h1 — this is what lets a
+// help it (or an attacker who breaches it) recover h1; this is what lets a
 // storage server authenticate users whose data it cannot read.
 //
 // Modeling note: `pass` is declared `knows private`, i.e. an unguessable
@@ -52,7 +52,7 @@ principal ComputerA[
 	knows private username
 	knows private pass
 	knows public salt
-	// The user's Sync data: bookmarks, history — the thing worth protecting.
+	// The user's Sync data (bookmarks, history), the thing worth protecting.
 	knows private data
 	hashedPassword = HASH(pass, salt)
 	// The key split described above: h1 stays on the client, h2 goes to
@@ -69,7 +69,7 @@ principal ComputerB[]
 
 principal Server[]
 
-// Registration: the server receives the auth token h2 and the ciphertext —
+// Registration: the server receives the auth token h2 and the ciphertext,
 // and can decrypt nothing. The attacker sees all of this too.
 ComputerA -> Server: username, h2, n_e1, e1
 
@@ -80,7 +80,7 @@ principal Server[
 ]
 
 // A second device owned by the same user: it knows the same password and
-// salt, so it can re-derive both keys from scratch — no key escrow, no
+// salt, so it can re-derive both keys from scratch: no key escrow, no
 // server-side recovery, exactly like adding a device to Sync.
 principal ComputerB[
 	knows private username
@@ -96,8 +96,8 @@ ComputerB -> Server: usernameb, h2b
 
 principal Server[
 	// Checked asserts (`?`): if either comparison fails, the server halts
-	// and never releases e1. This is what stops the attacker from simply
-	// asking for the ciphertext under a made-up identity.
+	// and never releases e1. This is what stops the attacker from asking
+	// for the ciphertext under a made-up identity.
 	_ = ASSERT(HASH(username), usernameb)?
 	_ = ASSERT(h3, HASH(usernameb, h2b))?
 ]

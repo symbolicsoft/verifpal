@@ -86,8 +86,8 @@ fn sanity_capabilities_value(v: &Value, km: &ProtocolTrace) -> VResult<()> {
 			)
 			.narrow(cap.name())
 			.note(
-				"a weakening assumption has to name a property the primitive actually \
-				 has, or the analysis would run under an assumption that does nothing",
+				"a weakening assumption has to name a property the primitive has, or \
+				 the analysis would run under an assumption that does nothing",
 			));
 		}
 		if onset > km.max_phase {
@@ -373,8 +373,8 @@ fn sanity_queries_multi_constant(query: &Query, km: &ProtocolTrace, kind: &str) 
 		)
 		.note(match kind {
 			"unlinkability" => {
-				"unlinkability asks whether the attacker can tell two values apart, \
-				 so it needs at least two"
+				"unlinkability asks whether the attacker can link values to one \
+				 another, so it needs at least two"
 			}
 			_ => {
 				"equivalence asks whether two values resolve to the same thing, \
@@ -508,7 +508,7 @@ fn sanity_queries_check_known(
 			 declares, generates, computes or receives it",
 					m.sender_name, c, m.sender_name
 				))
-				.help("name the principal that actually produces this value as the sender"),
+				.help("name the principal that produces this value as the sender"),
 		);
 	}
 	if !slot

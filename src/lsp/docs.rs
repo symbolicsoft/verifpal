@@ -71,7 +71,7 @@ fn capability_entries() -> Vec<Entry> {
 			name: "weak",
 			eg: example(Capability::Weak),
 			help: leak(format!(
-				"Declared weakening assumption: this primitive loses confidentiality, so holding the term is enough to recover what it protects, which is whatever its definition marks as revealed under `weak`. Declared for {}. Append `from phase N` to delay it.",
+				"Declared weakening assumption: the primitive loses confidentiality, so holding the term reveals what its definition marks as revealed under `weak`. Declared for {}. Append `from phase N` to delay it.",
 				declared_for(Capability::Weak)
 			)),
 		},
@@ -79,7 +79,7 @@ fn capability_entries() -> Vec<Entry> {
 			name: "forgeable",
 			eg: example(Capability::Forgeable),
 			help: leak(format!(
-				"Declared weakening assumption: this primitive loses authenticity, so the term becomes constructible without its secret argument. Declared for {}. Kept separate from `weak` so that an authenticated cipher can be forgeable while its contents stay unreadable. Append `from phase N` to delay it.",
+				"Declared weakening assumption: the primitive loses authenticity, so the attacker can build the term without its secret argument. Declared for {}. It is separate from `weak` so that an authenticated cipher can be forgeable while its contents stay secret. Append `from phase N` to delay it.",
 				declared_for(Capability::Forgeable)
 			)),
 		},
@@ -87,14 +87,14 @@ fn capability_entries() -> Vec<Entry> {
 			name: "malleable",
 			eg: example(Capability::Malleable),
 			help: leak(format!(
-				"Declared weakening assumption: a ciphertext the attacker already holds can be retargeted into another the recipient still accepts, which is the symbolic shape of a bit-flipping attack. Declared for {}, over the positions its definition marks malleable: holding one such term the attacker may vary those positions to anything it can construct, under a key it never learns. It licenses reshaping a ciphertext, not conjuring one, so the attacker must already hold a term of the same shape. Because malleability is an authenticity loss, an authenticated primitive is pointed at `forgeable` instead. Append `from phase N` to delay it.",
+				"Declared weakening assumption: the attacker can turn a ciphertext it holds into another that the recipient still accepts, the symbolic form of a bit-flipping attack. Declared for {}. The attacker sets the positions the definition marks malleable to anything it can construct, under a key it never learns, but it needs a ciphertext of the same shape to start from. Malleability is a loss of authenticity, so an authenticated primitive takes `forgeable` instead. Append `from phase N` to delay it.",
 				declared_for(Capability::Malleable)
 			)),
 		},
 		Entry {
 			name: "from",
 			eg: delayed,
-			help: "Delays a weakening assumption: it is not in force until the named phase, and holds from there onward. Cryptanalysis does not un-happen, which is why this reads `from` a phase rather than `in` one. A capability that arrives later than the message it would act on is no capability at all, since phases still govern when a value may be substituted.",
+			help: "Delays a weakening assumption until the named phase, after which it stays in force: cryptanalysis cannot be undone, so it reads `from` a phase rather than `in` one. An assumption that takes effect after a message was sent cannot change that message, since phases still decide when a value may be substituted.",
 		},
 	]
 }
@@ -108,27 +108,27 @@ pub(crate) const QUERIES: &[Entry] = &[
 	Entry {
 		name: "authentication",
 		eg: "authentication? Alice -> Bob: m",
-		help: "Checks that Bob only uses m in a meaningful way (verifying a signature, decrypting authentically) if Alice really sent it to him, and that Bob's runs accept it no more often than Alice's runs sent it. This is injective agreement, so it fails both when the attacker can forge m and when the attacker can replay an m Alice sent once and make Bob accept it twice. Replays need two runs to appear, so analyze more than one session per principal to catch them.",
+		help: "Checks that Bob uses m in a meaningful way (verifying a signature, decrypting authentically) only if Alice sent it to him, and that Bob's runs accept it no more often than Alice's runs sent it. This is injective agreement: it fails when the attacker can forge m, and when it can replay an m that Alice sent once so that Bob accepts it twice. A replay needs two runs, so analyze more than one session per principal to find one.",
 	},
 	Entry {
 		name: "freshness",
 		eg: "freshness? a",
-		help: "Checks that a value differs from session to session, which is what stops an old message from being reused as a new one. Against a passive attacker, this simply asks whether the value contains something freshly generated. Against an active attacker, it also asks whether the attacker can force the value to stay the same across sessions and then get it accepted again.",
+		help: "Checks that a value differs from session to session, which is what stops an old message from being reused as a new one. Against a passive attacker, it asks whether the value contains something freshly generated. Against an active attacker, it also asks whether the attacker can force the value to stay the same across sessions and then get it accepted again.",
 	},
 	Entry {
 		name: "unlinkability",
 		eg: "unlinkability? a, b, c",
-		help: "Checks whether the attacker can link two of the given values: by observing them equal, by a check such as a decryption or a signature verification that succeeds over both under one participant's key, by a secret they share as their origin, or by a secret it can confirm sits inside both. If any pair links, the query fails. Takes at least two distinct constants.",
+		help: "Checks whether the attacker can link two of the given values: by seeing that they are equal, by a check under one participant's key, such as a decryption or a signature verification, that succeeds on both, by a secret both were made from, or by a secret it can confirm is inside both. The query fails if any pair links. Takes at least two distinct constants.",
 	},
 	Entry {
 		name: "equivalence",
 		eg: "equivalence? ss_a, ss_b",
-		help: "Checks whether the attacker can bring about an execution in which the given values are not equivalent to one another. This query could be useful for checking if all parties derived the same shared secret, for example. Takes at least two distinct constants.",
+		help: "Checks whether the attacker can bring about an execution in which the given values differ, for example to check that all parties derived the same shared secret. Takes at least two distinct constants.",
 	},
 	Entry {
 		name: "precondition",
 		eg: "confidentiality? k[ precondition[ Alice -> Bob: done ] ]",
-		help: "An option that may be attached to any query. It restricts the query to the executions in which the named message is sent: the query is contradicted only where its own condition fails and the sender still reaches that send, so the property must hold whenever the sender goes on to send the value. The event is the send itself, not its receipt or its authentication. The model must contain the message, or it is rejected.",
+		help: "An option that can be attached to any query. It restricts the query to the executions in which the named message is sent, so the property must hold whenever the sender goes on to send it. The event is the send itself, not its receipt or its authentication. The model must contain the message.",
 	},
 ];
 
@@ -186,12 +186,12 @@ pub(crate) const KEYWORDS: &[Entry] = &[
 	Entry {
 		name: "scenarios",
 		eg: "scenarios[ Alice[gpeer = gb] Alice[gpeer = gm] ]",
-		help: "Runs the protocol once per declared peer configuration, cloning every principal and message and substituting the bindings in the named principal. A scenario is a corrupt-peer run from the first phase at whose end the attacker holds the binding's key material, however it learned it (a leak, the wire, a public value, recombined shares): it is analyzed, because it is where the attacker learns things, but from then on its queries are not claimed and its checked primitives may fail without that being a model error. Scenarios multiply with sessions, and the block goes before `queries`.",
+		help: "Runs the protocol once per declared peer configuration, cloning every principal and message and substituting each binding in its named principal. A scenario becomes a corrupt peer from the first phase at whose end the attacker holds the binding's key material, however it learned it. A corrupt scenario still runs, so the attacker can learn from it, but its queries are no longer claimed and its failed checks are not model errors. Scenarios multiply with sessions. The block goes just before `queries`.",
 	},
 	Entry {
 		name: "queries",
 		eg: "queries[ confidentiality? m ]",
-		help: "The block of security queries to check. It must exist, and nothing may follow it: a statement after the queries block is a hard error rather than something silently ignored.",
+		help: "The block of security queries to check. Every model needs one, and nothing may follow it: a statement after it is an error, not something ignored.",
 	},
 	Entry {
 		name: "nil",

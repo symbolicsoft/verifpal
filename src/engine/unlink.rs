@@ -13,9 +13,11 @@ use crate::protocol::SlotIdx;
 use crate::syntax::Qualifier;
 use crate::term::hashing::TermSet;
 use crate::term::{Constant, Primitive, PrimitiveId, Value, ValueId};
-use crate::theory::{AttackerState, can_recompose, can_reconstruct_primitive, obtainable};
-use crate::util::IdSet;
+use crate::theory::{
+	AttackerState, can_break_weak, can_recompose, can_reconstruct_primitive, obtainable,
+};
 use crate::util::generation::{AnalysisKey, AnalysisLocal, Recent};
+use crate::util::{IdMap, IdSet};
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum LinkKind {
@@ -386,28 +388,40 @@ fn observable(scope: &Scope, observed: &TermSet, v: &Value) -> bool {
 		&& p.arguments.iter().all(|arg| observable(scope, observed, arg)))
 }
 
-fn projected(v: &Value) -> Value {
+fn projected(v: &Value, memo: &mut IdMap<usize, Value>) -> Value {
 	let Value::Primitive(p) = v else {
 		return v.clone();
 	};
-	let arguments: Vec<Value> = p.arguments.iter().map(projected).collect();
-	let rebuilt = std::sync::Arc::new(p.with_arguments(arguments));
-	if crate::primitive::is_projection(p.id) {
-		let (reduced, value) = crate::theory::can_rewrite(&rebuilt);
-		if reduced {
-			return value;
-		}
+	let key = Arc::as_ptr(p) as usize;
+	if let Some(hit) = memo.get(&key) {
+		return hit.clone();
 	}
-	Value::Primitive(rebuilt)
+	let rebuilt = match p.map_arguments(|a| {
+		let r = projected(a, memo);
+		(!r.same_term(a)).then_some(r)
+	}) {
+		Some(mapped) => Arc::new(mapped),
+		None => p.clone(),
+	};
+	let out = match crate::primitive::is_projection(p.id) {
+		true => match crate::theory::can_rewrite(&rebuilt) {
+			(true, value) => value,
+			(false, _) => Value::Primitive(rebuilt),
+		},
+		false => Value::Primitive(rebuilt),
+	};
+	memo.insert(key, out.clone());
+	out
 }
 
 fn shared_secret_leaves(scope: &Scope, a: SlotIdx, b: SlotIdx) -> IdSet<ValueId> {
 	let km = scope.km;
-	let of = |slot: SlotIdx| {
-		crate::term::subterms(&projected(&crate::protocol::trace::resolve_trace_constant(
-			&km.slots[slot].constant,
-			km,
-		)))
+	let mut memo = IdMap::default();
+	let mut of = |slot: SlotIdx| {
+		crate::term::subterms(&projected(
+			&crate::protocol::trace::resolve_trace_constant(&km.slots[slot].constant, km),
+			&mut memo,
+		))
 		.cloned()
 		.collect::<Vec<Value>>()
 	};
@@ -632,22 +646,20 @@ fn origin_leaves(scope: &Scope, v: &Value) -> Option<Vec<Value>> {
 	let mut out = Vec::new();
 	let leaves = collect_leaves(v, capabilities, without, &mut Vec::new(), &mut out)
 		.then_some(out)
-		.map(|leaves| {
+		.and_then(|leaves| {
 			let sealed = withholding(scope, v);
 			let sealed: &AttackerState = &sealed;
 			if collect_leaves(v, capabilities, sealed, &mut Vec::new(), &mut Vec::new()) {
-				return leaves;
+				return Some(leaves);
 			}
-			let Some(inside) = contents(v, capabilities, without) else {
-				return leaves;
-			};
+			let inside = contents(v, capabilities, without)?;
 			if inside
 				.iter()
 				.any(|w| sealed.knows(w).is_some() || obtainable(w, capabilities, sealed))
 			{
-				return leaves;
+				return Some(leaves);
 			}
-			inside
+			Some(inside)
 		});
 	LEAVES.with_current(|memo| {
 		memo.group(group)
@@ -666,17 +678,27 @@ fn contents(
 	let Value::Primitive(p) = v else {
 		return None;
 	};
-	let rule = crate::primitive::spec(p.id).ok()?.decompose.as_ref()?;
-	if rule.output.is_some_and(|output| p.output != output) {
+	let decomposed = crate::primitive::spec(p.id)
+		.ok()?
+		.decompose
+		.as_ref()
+		.filter(|rule| rule.output.is_none_or(|output| p.output == output))
+		.map(|rule| {
+			rule.reveals
+				.iter()
+				.filter_map(|reveal| match *reveal {
+					Reveal::Argument(at) => p.arguments.get(at).cloned(),
+					Reveal::Output(_) => None,
+				})
+				.collect::<Vec<Value>>()
+		});
+	let broken = can_break_weak(p, capabilities, attacker);
+	if decomposed.is_none() && broken.is_none() {
 		return None;
 	}
 	let mut out = Vec::new();
-	for reveal in &rule.reveals {
-		if let Reveal::Argument(at) = *reveal
-			&& let Some(argument) = p.arguments.get(at)
-		{
-			collect_leaves(argument, capabilities, attacker, &mut Vec::new(), &mut out);
-		}
+	for revealed in decomposed.into_iter().chain(broken).flatten() {
+		collect_leaves(&revealed, capabilities, attacker, &mut Vec::new(), &mut out);
 	}
 	Some(out)
 }

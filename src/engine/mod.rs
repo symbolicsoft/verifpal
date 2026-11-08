@@ -60,26 +60,29 @@ fn check_honest_run(
 	let failed = root
 		.runs
 		.iter()
-		.filter_map(|run| run.halted.map(|slot| (slot, run)))
-		.filter(|&(slot, _)| {
-			let creator = km.slots[slot].creator;
-			ctx.is_honest_at(creator, program.phase_of(creator, slot))
+		.filter_map(|run| run.halted.as_ref())
+		.filter(|halt| {
+			let creator = km.slots[halt.slot].creator;
+			ctx.is_honest_at(creator, program.phase_of(creator, halt.slot))
 		})
-		.min_by_key(|&(slot, _)| slot);
-	if let Some((slot, run)) = failed
-		&& let Some(Value::Primitive(p)) = run.held(slot).map(|held| &held.value)
+		.min_by_key(|halt| halt.slot);
+	if let Some(halt) = failed
+		&& let Value::Primitive(p) = &halt.failed
 	{
 		return Err(located(
 			crate::protocol::sanity::honest_check_failure(p),
-			slot,
+			halt.slot,
 		));
 	}
 	for run in &root.runs {
-		for (slot, held) in run.env.iter_enumerated() {
-			if let Some(held) = held {
-				crate::protocol::sanity::sanity_check_argument_restrictions(&held.value)
-					.map_err(|e| located(e, slot))?;
-			}
+		let held = run
+			.env
+			.iter_enumerated()
+			.filter_map(|(slot, held)| Some((slot, &held.as_ref()?.value)));
+		let failed = run.halted.iter().map(|halt| (halt.slot, &halt.failed));
+		for (slot, value) in held.chain(failed) {
+			crate::protocol::sanity::sanity_check_argument_restrictions(value)
+				.map_err(|e| located(e, slot))?;
 		}
 	}
 	Ok(())

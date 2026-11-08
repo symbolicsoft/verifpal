@@ -83,7 +83,7 @@ fn feeds(
 fn halts_of(ex: &Execution) -> Vec<(RunIdx, SlotIdx)> {
 	ex.runs
 		.iter_enumerated()
-		.filter_map(|(run, state)| state.halted.map(|slot| (run, slot)))
+		.filter_map(|(run, state)| Some((run, state.halted.as_ref()?.slot)))
 		.collect()
 }
 
@@ -367,10 +367,10 @@ impl<'a, 'b> Search<'a, 'b> {
 					};
 					if obtains(b, slot, value) {
 						fills.push(install);
-					} else if run.halted.is_some_and(|halt| {
+					} else if run.halted.as_ref().is_some_and(|halt| {
 						crate::engine::judgment::mentions(
 							km,
-							&km.slots[halt].initial_value,
+							&km.slots[halt.slot].initial_value,
 							km.slots[slot].constant.id,
 							self.cx.program.runs[b].id,
 							&mut Vec::new(),

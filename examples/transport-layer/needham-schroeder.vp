@@ -32,12 +32,12 @@
 //                           Sacco's attack, needs a Bob run after the leak,
 //                           and this model has none.
 //
-// The historical fix (used in Kerberos) is a timestamp — or, as in
+// The historical fix (used in Kerberos) is a timestamp or, as in
 // Needham-Schroeder's own 1987 revision, a nonce from Bob inside the ticket.
 //
 // Modeling notes. The server's reply to Alice is guarded with [e_alice]:
 // the attacker may read it but not replace it. That guard is deliberate
-// generosity — even with the server-to-Alice leg protected, the protocol
+// generosity: even with the server-to-Alice leg protected, the protocol
 // still falls, which makes the point sharper. The classic "decrement the
 // nonce" operation has no symbolic equivalent, so HASH stands in for it.
 
@@ -52,7 +52,7 @@ principal Alice[
 	knows private k_as
 	// Alice's challenge nonce for the server: proves the server's reply
 	// is an answer to *this* request. Note there is no such nonce for
-	// Bob's ticket — that omission is the protocol's flaw.
+	// Bob's ticket; that omission is the protocol's flaw.
 	generates n_a
 ]
 
@@ -74,14 +74,14 @@ principal Server[
 principal Carol[]
 
 // Message 1: Alice asks the server for a key to talk to B, quoting n_a.
-// Everything here is attacker-replaceable — it is an unprotected request.
+// Everything here is attacker-replaceable: it is an unprotected request.
 Alice -> Server: A, B, n_a
 
 principal Server[
 	// The fresh session key this run is meant to establish.
 	generates k_ab
 	// The "ticket": k_ab and the claimed initiator A, sealed for Bob.
-	// Nothing in it is fresh from Bob's point of view — no nonce of his,
+	// Nothing in it is fresh from Bob's point of view: no nonce of his,
 	// no timestamp. This is the Denning-Sacco flaw, verbatim.
 	generates n_e_bob
 	e_bob = AEAD_ENC(k_bs, n_e_bob, CONCAT(k_ab, A), nil)
@@ -99,11 +99,11 @@ principal Alice[
 	// SPLIT undoes CONCAT, binding each component to a name.
 	n_a_response, k_ab_alice, B_alice, e_bob_alice = SPLIT(e_alice_dec)
 	// The `?` makes the nonce check *enforced*: if it fails, Alice halts.
-	// Alice's half of the protocol is actually sound — she gets freshness.
+	// Alice's half of the protocol is sound: she gets freshness.
 	_ = ASSERT(n_a, n_a_response)?
 ]
 
-// Message 3: Alice forwards the ticket. Unguarded — and Bob will accept
+// Message 3: Alice forwards the ticket. Unguarded, and Bob will accept
 // ANY well-formed ticket under k_bs here, including one recorded from an
 // old session whose key the attacker has since compromised.
 Alice -> Bob: n_e_bob, e_bob_alice
@@ -145,7 +145,7 @@ phase[1]
 
 principal Server[
 	// The one-time session-key compromise. `leaks` hands the value to the
-	// attacker directly — modeling a cryptanalyzed, stolen, or subpoenaed
+	// attacker directly, modeling a cryptanalyzed, stolen, or subpoenaed
 	// old session key. The long-term keys k_as and k_bs stay secret;
 	// everything that breaks, breaks through this single stale key.
 	leaks k_ab

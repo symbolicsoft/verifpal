@@ -124,8 +124,9 @@ struct VerifyArgs {
 		             principal and each message block is replicated the given number of \
 		             times, with generated and computed values freshened per session, while \
 		             values a principal knows stay shared between them. The expanded model \
-		             is one you could have written by hand, so nothing about the analysis \
-		             changes; the attacker can now carry values between concurrent runs.\n\n\
+		             is one you could have written by hand, and it is analyzed like any other; \
+		             what changes is that the attacker can carry values between concurrent \
+		             runs.\n\n\
 		             That is what makes replay attacks reachable. Authentication queries in \
 		             Verifpal ask for injective agreement, so a message the attacker lifts \
 		             out of one session and delivers into another breaks the query even \
@@ -293,12 +294,13 @@ enum Commands {
 		long_about = "Print each model back in Verifpal's canonical formatting: one spelling for \
 		              every declaration, message and query, uniform indentation and spacing, and \
 		              the blocks laid out the way the User Manual writes them.\n\n\
-		              Comments are preserved and travel with the construct they were written \
-		              against, so formatting a file does not lose the prose in it. A few positions \
-		              cannot hold a comment again unambiguously, and a comment there is \
-		              moved to the line above the statement that contains it: inside a primitive's argument list, inside the brackets \
-		              of an attacker or phase declaration, inside a scenario's binding \
-		              brackets, and inside the inner brackets of a query option.\n\n\
+		Comments are preserved and travel with the construct they were written \
+		              against, so formatting a file does not lose the prose in it. A comment \
+		              in a position that cannot hold one unambiguously moves to the line above \
+		              the statement that contains it: inside a primitive's argument list, \
+		              inside the brackets of an attacker or phase declaration, inside a \
+		              scenario's binding brackets, and inside the inner brackets of a query \
+		              option.\n\n\
 		              Formatting only requires that the model parse. A model that parses but \
 		              fails validation is formatted all the same, since refusing would withhold \
 		              the formatter at exactly the moment the user is fixing the error.\n\n\
@@ -390,11 +392,10 @@ enum Commands {
 	},
 	#[command(
 		about = "Print version, homepage and author",
-		long_about = "Print the Verifpal banner, which is the version you are running and the \
-		              project's homepage, followed by its author and by where to find the Wall \
-		              of Honor on the Verifpal documentation's Acknowledgments page, which names the people who have \
-		              contributed suggestions, bug reports, ideas or discussion to the \
-		              project.\n\n\
+		long_about = "Print the Verifpal banner, with the version you are running and the \
+		              project's homepage, then its author and the address of the Wall of Honor \
+		              on the documentation's Acknowledgments page, which names everyone who has \
+		              contributed to Verifpal.\n\n\
 		              This command also runs the same release check that verify does, printing \
 		              one line on stderr if a newer version of Verifpal has been tagged. It \
 		              takes no options and reads no files."

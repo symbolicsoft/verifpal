@@ -1,0 +1,37 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: c1c0e1 at one session and at two.
+//
+// failed_check_output_not_disclosed.vp with Bob's decryption unchecked. The
+// attacker hands Bob nil for box; his decryption fails but does not halt
+// him, and the failing application he holds is Carol's leaked error: plain
+// falls, and differs from message. message itself stays secret.
+attacker[active]
+
+principal Alice[
+	knows private k
+	knows public nonce, ad
+	generates message
+	box = AEAD_ENC(k, nonce, message, ad)
+]
+
+principal Carol[
+	knows private k
+	knows public nonce, ad
+	error = AEAD_DEC(k, nonce, nil, ad)
+	leaks error
+]
+
+Alice -> Bob: box
+
+principal Bob[
+	knows private k
+	knows public nonce, ad
+	plain = AEAD_DEC(k, nonce, box, ad)
+]
+
+queries[
+	confidentiality? plain
+	confidentiality? message
+	equivalence? plain, message
+]

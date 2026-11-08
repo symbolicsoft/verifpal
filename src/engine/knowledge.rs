@@ -11,8 +11,8 @@ use crate::term::{Primitive, Value};
 use crate::theory::attacker::next_chain;
 use crate::theory::{
 	AttackerState, DerivationRecord, Keystream, can_break_weak, can_decompose, can_recompose,
-	can_reconstruct_primitive, can_rewrite, keystream_of, obtainable, opened_with, reduce_once,
-	reused_pair,
+	can_reconstruct_primitive, can_rewrite, keystream_of, masked, obtainable, opened_with,
+	reduce_once, reused_pair,
 };
 use crate::util::{IdMap, IdSet};
 
@@ -687,9 +687,12 @@ impl Pass<'_> {
 				{
 					first.get_or_insert(partner);
 					let opened = opened_with(p, keystream);
-					let whole = !opened.is_empty()
-						&& (keystream.first().is_some_and(|(path, _)| path.is_empty())
-							|| reuse_rule(p.id).is_some_and(|rule| rule.masked.is_none()));
+					let whole = match masked(of) {
+						Some(plaintext) => {
+							opened.iter().any(|(field, _)| field.same_term(plaintext))
+						}
+						None => !opened.is_empty(),
+					};
 					for (field, using) in opened {
 						if reveals
 							.iter()

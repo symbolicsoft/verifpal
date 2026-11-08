@@ -18,7 +18,7 @@ Verifpal is a formal verification tool for cryptographic protocols. Security-rel
 
 If you discover a security vulnerability in Verifpal, you are welcome to report it however you prefer. Coordinated or responsible disclosure is appreciated but not required. Choose whichever channel works best for you:
 
-- **Public issue or pull request:** Open a [GitHub issue](https://github.com/symbolicsoft/verifpal/issues) or submit a pull request with a fix. This is perfectly fine and gets the community involved sooner.
+- **Public issue or pull request:** Open a [GitHub issue](https://github.com/symbolicsoft/verifpal/issues) or submit a pull request with a fix. This is fine and gets the community involved sooner.
 - **Private advisory:** Open a [private security advisory](https://github.com/symbolicsoft/verifpal/security/advisories/new) on GitHub if you prefer to discuss the issue confidentially before it is made public.
 - **Email:** Send a report to the maintainers via the contact information on [symbolic.software](https://symbolic.software).
 

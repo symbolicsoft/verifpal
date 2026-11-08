@@ -89,10 +89,16 @@ pub(crate) struct Held {
 }
 
 #[derive(Clone, Debug)]
+pub(crate) struct Halt {
+	pub(crate) slot: SlotIdx,
+	pub(crate) failed: Value,
+}
+
+#[derive(Clone, Debug)]
 pub(crate) struct RunState {
 	pub(crate) env: IndexVec<SlotIdx, Option<Held>>,
 	pub(crate) pc: StepIdx,
-	pub(crate) halted: Option<SlotIdx>,
+	pub(crate) halted: Option<Halt>,
 	pub(crate) frozen: bool,
 	pub(crate) idle: bool,
 }
@@ -514,6 +520,13 @@ fn assign(cx: &Context, ex: &mut Execution, r: RunIdx, slot: SlotIdx) {
 	ex.knowledge.note_protocol(&value, &pre, true);
 	ex.knowledge
 		.note_computed(&km.slots[computed].initial_value, &pre, &value);
+	if failed {
+		ex.runs[r].halted = Some(Halt {
+			slot,
+			failed: value,
+		});
+		return;
+	}
 	ex.runs[r].env[slot] = Some(Held {
 		value,
 		pre,
@@ -521,9 +534,6 @@ fn assign(cx: &Context, ex: &mut Execution, r: RunIdx, slot: SlotIdx) {
 		installed: None,
 		authored: false,
 	});
-	if failed {
-		ex.runs[r].halted = Some(slot);
-	}
 }
 
 fn step_run(

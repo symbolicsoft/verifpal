@@ -66,4 +66,7 @@ If server software includes FOSS licensed under the Affero General Public Licens
 #### Contributions to FOSS projects
 Symbolic Software wishes to encourage contributions and community involvement in order to advance worthy technologies and projects. For the purposes of this policy, “contribution” means making software and/or related material (descriptions, documentation) for which Symbolic Software holds the copyright available to third parties, or to the general public, under an FOSS license, granting access, modification and/or distribution rights with regard to the software in source code form.
 
-Plans for contributions (both collective and individual) should be reviewed and approved beforehand. Approval This policy should be effective immediately upon approval.
+Plans for contributions (both collective and individual) should be reviewed and approved beforehand.
+
+### Approval
+This policy should be effective immediately upon approval.

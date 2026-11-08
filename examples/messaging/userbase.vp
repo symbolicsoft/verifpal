@@ -44,7 +44,7 @@ principal UserB[]
 principal UserB_OtherDevice[]
 
 principal UserA[
-	// The password — see the header.
+	// The password (see the header).
 	knows private passA
 	// The TRUE cryptographic root: a random seed. The password's only
 	// job is to wrap and unwrap it.
@@ -78,9 +78,9 @@ principal UserA[
 	publicKeyA = PUBKEY(dhPrivateKeyA)
 ]
 
-// Signup: everything the server ever learns. Note what is in this list —
-// the token, the salts (public by nature), and wrapped ciphertext — and
-// what is not: no password, no seed, no encryption key.
+// Signup: everything the server ever learns. Note what is in this list
+// (the token, the salts, which are public by nature, and wrapped
+// ciphertext) and what is not: no password, no seed, no encryption key.
 UserA -> Server: passwordTokenA, publicKeyA, passwordSaltA, passwordTokenSaltA, encryptionKeySaltA, dhKeySaltA, hmacKeySaltA, passwordBasedEncryptionKeySaltA, n_passwordEncryptedSeedA, passwordEncryptedSeedA
 
 principal UserB[
@@ -150,7 +150,7 @@ Server -> UserA_OtherDevice: n_encryptedItemA, encryptedItemA, n_encryptedDbKeyA
 
 Server -> UserB_OtherDevice: n_encryptedItemB, encryptedItemB, n_encryptedDbKeyB, encryptedDbKeyB, n_passwordEncryptedSeedB, passwordEncryptedSeedB, passwordSaltB, passwordTokenSaltB, encryptionKeySaltB, passwordBasedEncryptionKeySaltB
 
-// The new device knows exactly one secret — the password — and re-derives
+// The new device knows exactly one secret, the password, and re-derives
 // the entire hierarchy: unwrap the seed, rebuild the master key, unwrap
 // the database key, decrypt the item. Every unwrap is a checked (`?`)
 // AEAD_DEC. These checks verify the supplied blobs under the derived keys;

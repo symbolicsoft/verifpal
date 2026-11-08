@@ -1,0 +1,37 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: u0 at one session and at two.
+//
+// failed_check_output_not_disclosed.vp asking whether plain and Carol's
+// error can be linked. The attacker can hand Bob nil, but his checked
+// decryption then fails and he never holds plain, so there is no value to
+// link. The failing application once stood in for plain and equalled error
+// up to the check: u1. unlink_failed_check_output_unchecked.vp drops Bob's
+// `?`, and the equal values link.
+attacker[active]
+
+principal Alice[
+	knows private k
+	knows public nonce, ad
+	generates message
+	box = AEAD_ENC(k, nonce, message, ad)
+]
+
+principal Carol[
+	knows private k
+	knows public nonce, ad
+	error = AEAD_DEC(k, nonce, nil, ad)
+	leaks error
+]
+
+Alice -> Bob: box
+
+principal Bob[
+	knows private k
+	knows public nonce, ad
+	plain = AEAD_DEC(k, nonce, box, ad)?
+]
+
+queries[
+	unlinkability? plain, error
+]

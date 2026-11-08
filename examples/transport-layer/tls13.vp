@@ -178,7 +178,7 @@
 // way to tell the client from an attacker with a key share, and every
 // claim the server makes about who it talked to fails: authentication of
 // the client's flight and data, and the confidentiality of the server's
-// own session secrets, since "the client" may simply be the attacker.
+// own session secrets, since "the client" may be the attacker.
 // With them those claims hold, and the ungated sHsTraffic query above is
 // what remains of that story.
 //

@@ -6,9 +6,9 @@
 // SimpleX Remote Control Protocol (XRCP), from xrcp.md: a desktop
 // "controller" drives a phone "host" that holds the chat database, so the
 // host's UI locks and the controller proxies commands into its core. The
-// interesting part is that the two devices are on the same local network
-// with no server between them, so all the trust has to be built from an
-// out-of-band invitation and a code the user reads off both screens.
+// two devices are on the same local network with no server between them,
+// so all the trust has to be built from an out-of-band invitation and a
+// code the user reads off both screens.
 //
 // The key agreement is a hybrid, and it is asymmetric in an unusual way.
 // The controller announces a session X25519 key, a session Ed25519 key and

@@ -1,0 +1,31 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: c1c0c1c0 at one session and at two.
+//
+// Two pairs of ciphertexts, each under one key and nonce. In the first, the
+// attacker knows the whole two-field plaintext of short, and long has three
+// fields: tag and pad lie over the stretches of one and two, which fall, and
+// nothing in short lies over three. In the second, the same two known fields
+// sit inside an unknown header, beside four, five and six. A known tuple once
+// opened whatever tuple lay at its position whole, so knowing short gave away
+// three and six as well. aead_nonce_reuse_shorter_known_equal.vp gives the
+// known plaintexts a third field, and every field falls.
+attacker[passive]
+
+principal Alice[
+	knows private k, n1, n2, header
+	knows public tag, pad, ad
+	generates one, two, three, four, five, six
+	short = AEAD_ENC(k, n1, CONCAT(tag, pad), ad)
+	long = AEAD_ENC(k, n1, CONCAT(one, two, three), ad)
+	short_nested = AEAD_ENC(k, n2, CONCAT(header, CONCAT(tag, pad)), ad)
+	long_nested = AEAD_ENC(k, n2, CONCAT(header, CONCAT(four, five, six)), ad)
+	leaks short, long, short_nested, long_nested
+]
+
+queries[
+	confidentiality? two
+	confidentiality? three
+	confidentiality? five
+	confidentiality? six
+]

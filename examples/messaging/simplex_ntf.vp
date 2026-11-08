@@ -6,8 +6,8 @@
 // SimpleX push notifications, from push-notifications.md and the NKEY / NID
 // / NSUB / NMSG commands of simplex-messaging.md. iOS forbids background
 // services, so message arrival has to reach the device through Apple. The
-// design's problem is that this inserts two parties nobody trusts — a
-// SimpleX notification router and Apple's push service — into a path that
+// design's problem is that this inserts two parties nobody trusts (a
+// SimpleX notification router and Apple's push service) into a path that
 // must leak nothing.
 //
 // The answer is a separate DH agreement with a separate identifier. The
@@ -15,7 +15,7 @@
 // Curve25519 key; the SMP router answers NID with a notifier ID unrelated
 // to the queue's recipient and sender IDs, and its own Curve25519 key. The
 // secret those two agree encrypts the notification metadata, and it is
-// agreed between the SMP router and the RECIPIENT'S DEVICE — the
+// agreed between the SMP router and the RECIPIENT'S DEVICE; the
 // notification router in between only relays a blob.
 //
 //   confidentiality? msgid  HOLDS — the message ID inside the notification
@@ -38,10 +38,10 @@
 //     The judge once excused a delivered value equal to the honest one
 //     when its named sender had sent nothing.
 //
-// What the model does NOT contradict, and worth stating plainly, is that
-// the client hands the notification router the PRIVATE notifier key: the
-// SNEW command's `notifierKey` is "private key used to authorize requests
-// to subscribe to message notifications". That is deliberate, since the
+// What the model does NOT contradict is that the client hands the
+// notification router the PRIVATE notifier key: the SNEW command's
+// `notifierKey` is "private key used to authorize requests to subscribe
+// to message notifications". That is deliberate, since the
 // notification router must issue NSUB on the client's behalf, and it is why
 // the threat model concedes that a notification router learns how many
 // queues a user receives from and can undetectably drop notifications. It

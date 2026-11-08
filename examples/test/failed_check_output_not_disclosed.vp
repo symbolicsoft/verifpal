@@ -1,0 +1,43 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: c0c0e0 at one session, c0c0e1 at two.
+//
+// Carol leaks the unchecked decryption of nil under k, which fails and is an
+// ordinary value. The attacker hands Bob nil for box, and Bob's checked
+// decryption of it fails: Bob halts at plain and never holds it. The engine
+// once kept the failing application in Bob's environment, and since it
+// matches Carol's leak up to the check, plain was reported disclosed (c1).
+// message is fresh and stays secret. At two sessions the attacker hands Bob
+// the other session's box, which he opens to a genuine message#2 that
+// differs from message: e1. failed_check_output_disclosed.vp drops Bob's
+// `?`: his failing decryption is then a value he holds, equal to Carol's
+// leak, and plain falls.
+attacker[active]
+
+principal Alice[
+	knows private k
+	knows public nonce, ad
+	generates message
+	box = AEAD_ENC(k, nonce, message, ad)
+]
+
+principal Carol[
+	knows private k
+	knows public nonce, ad
+	error = AEAD_DEC(k, nonce, nil, ad)
+	leaks error
+]
+
+Alice -> Bob: box
+
+principal Bob[
+	knows private k
+	knows public nonce, ad
+	plain = AEAD_DEC(k, nonce, box, ad)?
+]
+
+queries[
+	confidentiality? plain
+	confidentiality? message
+	equivalence? plain, message
+]

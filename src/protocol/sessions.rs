@@ -52,7 +52,7 @@ pub(crate) const DEFAULT_SESSIONS: u8 = 2;
 pub(crate) fn expand_sessions(mut e: Expansion, sessions: u8) -> VResult<Expansion> {
 	if !(2..=MAX_SESSIONS).contains(&sessions) {
 		return Err(VerifpalError::sanity(
-			format!("session expansion supports 2 to {MAX_SESSIONS} sessions").into(),
+			format!("Verifpal analyzes 1 to {MAX_SESSIONS} sessions").into(),
 		));
 	}
 	let m = &e.model;
@@ -96,7 +96,7 @@ pub(crate) fn expand_sessions(mut e: Expansion, sessions: u8) -> VResult<Expansi
 	};
 	crate::console::message(
 		&format!(
-			"Analyzing {sessions} parallel sessions per principal; \
+			"Analyzing {sessions} concurrent sessions per principal; \
 			 per-session values and principals are {naming}.",
 		),
 		InfoLevel::Info,

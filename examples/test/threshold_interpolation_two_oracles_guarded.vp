@@ -1,0 +1,40 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: c0 at one session and at two.
+//
+// threshold_interpolation_two_oracles.vp with Carol's input guarded. The
+// attacker still learns secret through Bob, but Carol decrypts only junkc,
+// and the secret alone is one point of the sharing's line and fixes no
+// share: second holds.
+attacker[active]
+
+principal Alice[
+	knows private kb, kc, secret
+	generates junkb, junkc
+	first, second = THRESHOLD_SPLIT[2](secret)
+	wrapped_secret = ENC(kb, secret)
+	wrapped_first = ENC(kc, first)
+	xb = ENC(kb, junkb)
+	xc = ENC(kc, junkc)
+	leaks wrapped_secret, wrapped_first
+]
+
+Alice -> Bob: xb
+
+Alice -> Carol: [xc]
+
+principal Bob[
+	knows private kb
+	yb = DEC(kb, xb)
+	leaks yb
+]
+
+principal Carol[
+	knows private kc
+	yc = DEC(kc, xc)
+	leaks yc
+]
+
+queries[
+	confidentiality? second
+]

@@ -3061,6 +3061,24 @@ fn aead_nonce_reuse_models() {
 }
 
 #[test]
+fn a_known_tuple_covers_only_its_own_fields_of_a_wider_one() {
+	for sessions in [1, 2] {
+		run_model_sessions("aead_nonce_reuse_shorter_known.vp", sessions, "c1c0c1c0");
+		run_model_sessions(
+			"aead_nonce_reuse_shorter_known_equal.vp",
+			sessions,
+			"c1c1c1c1",
+		);
+		run_model_sessions("aead_nonce_reuse_shorter_known_forgery.vp", sessions, "e0");
+		run_model_sessions(
+			"aead_nonce_reuse_shorter_known_forgery_equal.vp",
+			sessions,
+			"e1",
+		);
+	}
+}
+
+#[test]
 fn later_leak_key_slot_extension() {
 	run_model_sessions("kem_key_confusion_later_leak.vp", 1, "c0");
 	run_model_sessions("kem_key_confusion_later_leak.vp", 2, "c1");
@@ -3884,6 +3902,16 @@ fn test_split_checked_partial_output() {
 	run_model("split_checked_partial_output.vp", "c0e1");
 	for sessions in [1, 2] {
 		run_model_sessions("split_checked_partial_output_full.vp", sessions, "c1e1");
+	}
+}
+#[test]
+fn a_failed_checked_assignment_holds_no_output_for_any_query() {
+	run_model_sessions("failed_check_output_not_disclosed.vp", 1, "c0c0e0");
+	run_model("failed_check_output_not_disclosed.vp", "c0c0e1");
+	for sessions in [1, 2] {
+		run_model_sessions("failed_check_output_disclosed.vp", sessions, "c1c0e1");
+		run_model_sessions("unlink_failed_check_output.vp", sessions, "u0");
+		run_model_sessions("unlink_failed_check_output_unchecked.vp", sessions, "u1");
 	}
 }
 #[test]
@@ -5309,6 +5337,41 @@ fn test_cap_executed_terms() {
 fn test_threshold_secret_reveals_no_share() {
 	for sessions in [1, 2] {
 		run_model_sessions("threshold_secret_reveals_no_share.vp", sessions, "c0");
+	}
+}
+
+#[test]
+fn interpolation_from_the_secret_records_the_share_it_needs() {
+	for sessions in [1, 2] {
+		run_model_sessions("threshold_interpolation_two_oracles.vp", sessions, "c1");
+		run_model_sessions(
+			"threshold_interpolation_two_oracles_guarded.vp",
+			sessions,
+			"c0",
+		);
+	}
+	let (results, _) = crate::verify::verify_with_sessions(
+		"examples/test/threshold_interpolation_two_oracles.vp",
+		1,
+	)
+	.expect("verify");
+	let trace = results
+		.iter()
+		.find(|r| r.resolved)
+		.map(|r| r.summary.as_str())
+		.expect("the confidentiality query on second fails");
+	assert!(
+		trace.contains("replaces xc") && trace.contains("interpolates second from secret, first"),
+		"the secret alone fixes no share, so the trace must show the attacker obtaining \
+		 first through Carol and interpolating from both. Narrated: {trace}"
+	);
+}
+
+#[test]
+fn unlinkability_walks_a_shared_term_by_node() {
+	for sessions in [1, 2] {
+		run_model_sessions("unlink_shared_dag.vp", sessions, "u0");
+		run_model_sessions("unlink_shared_dag_equal.vp", sessions, "u1");
 	}
 }
 

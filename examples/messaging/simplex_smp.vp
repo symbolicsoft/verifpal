@@ -52,8 +52,8 @@
 // attack is very hard, and accepting its risk is better than worse UX."
 //
 // This model puts the attacker exactly there. Alice's own connection to the
-// Router is guarded — TLS with the router certificate fingerprint pinned
-// from the queue URI, which is what the guards on those legs mean — while
+// Router is guarded (TLS with the router certificate fingerprint pinned
+// from the queue URI, which is what the guards on those legs mean), while
 // Bob's leg to the Router is left open, modelling the compromised sender
 // transport the spec's note contemplates. The attacker then reads Alice's
 // per-queue key gek off the invitation, seals a confirmation of its own to

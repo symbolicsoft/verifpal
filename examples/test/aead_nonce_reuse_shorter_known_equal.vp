@@ -1,0 +1,26 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: c1c1c1c1 at one session and at two.
+//
+// aead_nonce_reuse_shorter_known.vp with a third public field in each known
+// plaintext. short now lies over all of long, and the inner tuple of
+// short_nested over all of the inner tuple of long_nested: every field falls.
+attacker[passive]
+
+principal Alice[
+	knows private k, n1, n2, header
+	knows public tag, pad, ad
+	generates one, two, three, four, five, six
+	short = AEAD_ENC(k, n1, CONCAT(tag, pad, tag), ad)
+	long = AEAD_ENC(k, n1, CONCAT(one, two, three), ad)
+	short_nested = AEAD_ENC(k, n2, CONCAT(header, CONCAT(tag, pad, tag)), ad)
+	long_nested = AEAD_ENC(k, n2, CONCAT(header, CONCAT(four, five, six)), ad)
+	leaks short, long, short_nested, long_nested
+]
+
+queries[
+	confidentiality? two
+	confidentiality? three
+	confidentiality? five
+	confidentiality? six
+]
