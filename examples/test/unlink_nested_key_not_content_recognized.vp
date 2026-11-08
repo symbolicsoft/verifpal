@@ -1,0 +1,31 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: u1u1 at one session and at two.
+//
+// unlink_nested_key_not_content.vp in two recognizable forms. In the first,
+// the inner plaintext carries tag as a field: opening b1 with a1 and then
+// with tag yields a tuple whose first field is the public tag, which
+// confirms a1 as b1's key. In the second, Alice leaks the inner ciphertext
+// itself, and opening b2 with a2 yields a value the attacker already holds.
+// Both pairs link.
+attacker[passive]
+
+principal Alice[
+	knows public tag
+	generates a1, hidden1, a2, hidden2
+	b1 = ENC(a1, ENC(tag, CONCAT(tag, hidden1)))
+	inner2 = ENC(tag, hidden2)
+	b2 = ENC(a2, inner2)
+	leaks inner2
+]
+
+Alice -> Bob: a1, b1, a2, b2
+
+principal Bob[
+	_ = HASH(a1, b1, a2, b2)
+]
+
+queries[
+	unlinkability? a1, b1
+	unlinkability? a2, b2
+]

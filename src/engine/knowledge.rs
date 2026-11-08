@@ -234,10 +234,6 @@ impl Knowledge {
 		&self.capabilities
 	}
 
-	pub(crate) fn breaks(&self, p: &Primitive) -> Option<Vec<Value>> {
-		can_break_weak(p, &self.capabilities, &self.state)
-	}
-
 	pub(crate) fn disclosing(&self, keep: impl Fn(usize, &Value) -> bool) -> Knowledge {
 		let mut out = self.disclosed_where(keep);
 		out.close();

@@ -1,0 +1,37 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: c1u0u1 at one session and at two.
+//
+// Alice sends share_a and wrapped, which carries share_b and Alice's
+// signature over CONCAT(share_b, tag). The attacker splits wrapped and
+// recomposes secret from the two shares (c1). The signature confirms what
+// it signs, share_b and tag, so share_b and wrapped are linked (u1). It says
+// nothing about share_a: the only route from share_b to share_a is to
+// interpolate share_b from the secret recomposed out of share_b itself, and
+// two points always lie on some line, as in
+// unlink_shares_recomposed_secret.vp. The engine once expanded share_b,
+// held inside the signed message, through that interpolation, and called
+// share_a confirmed by the signature: u1 on share_a and wrapped (GitHub
+// issue #55). unlink_signed_nested_sibling_share_leaked.vp leaks secret
+// independently, and the link to share_a is real.
+attacker[passive]
+
+principal Alice[
+	knows public tag
+	generates secret, sk
+	pk = PUBKEY(sk)
+	share_a, share_b, share_c = THRESHOLD_SPLIT[2](secret)
+	wrapped = CONCAT(share_b, SIGN(sk, CONCAT(share_b, tag)))
+]
+
+Alice -> Bob: share_a, wrapped, pk
+
+principal Bob[
+	_ = HASH(share_a, wrapped, pk)
+]
+
+queries[
+	confidentiality? secret
+	unlinkability? share_a, wrapped
+	unlinkability? share_b, wrapped
+]

@@ -1,9 +1,19 @@
 // SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
 //
-// Expected: u1 at one and two sessions. The later key disclosure reveals
-// the existing link between the ciphertexts under s. Replaying an opaque
-// ciphertext before that disclosure does not supply its unknown key.
+// Expected: u0 at one and two sessions. Bob hashes each ciphertext under s
+// with a public constant, and s leaks in phase 1. Opening x and y with s
+// yields fresh m1 and m2, which the attacker has nothing to compare against,
+// so s confirms neither as their key (unlink_opened_fresh_content.vp), and x
+// and y stay unlinked. a and b are x and y hashed with public constants: a
+// link between a and b would be a link between x and y. The engine once
+// expanded the ciphertexts nested inside a and b through their keys, which
+// it never does for a ciphertext on its own, and linked a and b via s while
+// reporting x and y unlinked (GitHub issue #56).
+// unlink_supplied_wrapper_late_key_tagged.vp gives the plaintexts a public
+// field, so the later disclosure of s reveals a real link, and keeps the
+// regression this model was written for: replaying an opaque ciphertext
+// before the disclosure does not supply its unknown key.
 
 attacker[active]
 principal Alice[

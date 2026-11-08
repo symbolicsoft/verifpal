@@ -1,0 +1,31 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: c1u1u1 at one session and at two.
+//
+// unlink_signed_nested_sibling_share.vp with secret leaked as well. Now
+// secret is a third point the attacker holds independently of either share,
+// so it predicts share_b from share_a and secret, and the signature over
+// CONCAT(share_b, tag) confirms the prediction: share_a and wrapped are
+// linked, and so are share_b and wrapped.
+attacker[passive]
+
+principal Alice[
+	knows public tag
+	generates secret, sk
+	pk = PUBKEY(sk)
+	share_a, share_b, share_c = THRESHOLD_SPLIT[2](secret)
+	wrapped = CONCAT(share_b, SIGN(sk, CONCAT(share_b, tag)))
+	leaks secret
+]
+
+Alice -> Bob: share_a, wrapped, pk
+
+principal Bob[
+	_ = HASH(share_a, wrapped, pk)
+]
+
+queries[
+	confidentiality? secret
+	unlinkability? share_a, wrapped
+	unlinkability? share_b, wrapped
+]

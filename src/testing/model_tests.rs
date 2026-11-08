@@ -4937,7 +4937,32 @@ fn test_unlink_supplied_witness() {
 		run_model_sessions("unlink_supplied_witness_only.vp", sessions, "u0");
 		run_model_sessions("unlink_supplied_witness_masks.vp", sessions, "u1");
 		run_model_sessions("unlink_supplied_wrapped_witness.vp", sessions, "u0");
-		run_model_sessions("unlink_supplied_wrapper_late_key.vp", sessions, "u1");
+		run_model_sessions("unlink_supplied_wrapper_late_key.vp", sessions, "u0");
+		run_model_sessions("unlink_supplied_wrapper_late_key_tagged.vp", sessions, "u1");
+	}
+}
+
+#[test]
+fn a_held_value_inside_a_rebuild_keeps_only_its_own_ties() {
+	for sessions in [1, 2] {
+		run_model_sessions("unlink_signed_nested_sibling_share.vp", sessions, "c1u0u1");
+		run_model_sessions(
+			"unlink_signed_nested_sibling_share_leaked.vp",
+			sessions,
+			"c1u1u1",
+		);
+	}
+}
+
+#[test]
+fn opened_content_is_recognized_by_what_opening_reveals() {
+	for sessions in [1, 2] {
+		run_model_sessions("unlink_nested_key_not_content.vp", sessions, "u0");
+		run_model_sessions(
+			"unlink_nested_key_not_content_recognized.vp",
+			sessions,
+			"u1u1",
+		);
 	}
 }
 

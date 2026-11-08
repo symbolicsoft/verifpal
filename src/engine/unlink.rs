@@ -343,38 +343,45 @@ fn observed(scope: &Scope, cx: &Context, ex: &Execution) -> TermSet {
 			pending.push(held.value.clone());
 		}
 	}
-	let attacker = scope.attacker();
 	let mut seen = TermSet::default();
 	while let Some(value) = pending.pop() {
 		if !seen.insert(value.clone()) {
 			continue;
 		}
-		let Value::Primitive(p) = &value else {
-			continue;
-		};
-		if crate::primitive::core_reveals_arguments(p.id) {
-			pending.extend(p.arguments.iter().cloned());
-		}
-		if let Some(opened) =
-			crate::theory::can_decompose(p, scope.knowledge.capabilities(), attacker)
-		{
-			pending.extend(opened.revealed);
-		}
-		if let Some(revealed) = scope.knowledge.breaks(p) {
-			pending.extend(revealed);
-		}
-		if attacker.reused.iter().any(|pair| {
-			pair.iter().any(|member| member.equivalent(&value, true))
-				&& pair.iter().all(|member| attacker.knows(member).is_some())
-		}) {
-			pending.extend(
-				crate::theory::opened(p, scope.knowledge.capabilities(), attacker)
-					.iter()
-					.map(crate::theory::reduce_once),
-			);
-		}
+		pending.extend(opening(
+			&value,
+			scope.knowledge.capabilities(),
+			scope.attacker(),
+		));
 	}
 	seen
+}
+
+fn opening(value: &Value, capabilities: &CapabilityIndex, attacker: &AttackerState) -> Vec<Value> {
+	let Value::Primitive(p) = value else {
+		return Vec::new();
+	};
+	let mut out = Vec::new();
+	if crate::primitive::core_reveals_arguments(p.id) {
+		out.extend(p.arguments.iter().cloned());
+	}
+	if let Some(opened) = crate::theory::can_decompose(p, capabilities, attacker) {
+		out.extend(opened.revealed);
+	}
+	if let Some(revealed) = can_break_weak(p, capabilities, attacker) {
+		out.extend(revealed);
+	}
+	if attacker.reused.iter().any(|pair| {
+		pair.iter().any(|member| member.equivalent(value, true))
+			&& pair.iter().all(|member| attacker.knows(member).is_some())
+	}) {
+		out.extend(
+			crate::theory::opened(p, capabilities, attacker)
+				.iter()
+				.map(crate::theory::reduce_once),
+		);
+	}
+	out
 }
 
 fn observable(scope: &Scope, observed: &TermSet, v: &Value) -> bool {
@@ -620,7 +627,23 @@ thread_local! {
 	static LEAVES: AnalysisLocal<Leaves> = AnalysisLocal::default();
 }
 
+struct Walk {
+	stack: Vec<Value>,
+	cut: usize,
+}
+
 fn origin_leaves(scope: &Scope, v: &Value) -> Option<Vec<Value>> {
+	origin_leaves_in(
+		scope,
+		v,
+		&mut Walk {
+			stack: Vec::new(),
+			cut: usize::MAX,
+		},
+	)
+}
+
+fn origin_leaves_in(scope: &Scope, v: &Value, walk: &mut Walk) -> Option<Vec<Value>> {
 	let key = v.hash_value();
 	let group = scope.attacker().chain;
 	let remembered = LEAVES.with_current(|memo| {
@@ -634,6 +657,12 @@ fn origin_leaves(scope: &Scope, v: &Value) -> Option<Vec<Value>> {
 	if let Some(leaves) = remembered {
 		return leaves;
 	}
+	if let Some(at) = walk.stack.iter().position(|seen| seen.equivalent(v, true)) {
+		walk.cut = walk.cut.min(at);
+		return None;
+	}
+	let depth = walk.stack.len();
+	walk.stack.push(v.clone());
 	let keep: Vec<bool> = scope
 		.attacker()
 		.known
@@ -644,12 +673,12 @@ fn origin_leaves(scope: &Scope, v: &Value) -> Option<Vec<Value>> {
 	let without: &AttackerState = &without;
 	let capabilities = scope.knowledge.capabilities();
 	let mut out = Vec::new();
-	let leaves = collect_leaves(v, capabilities, without, &mut Vec::new(), &mut out)
+	let leaves = collect_leaves(scope, v, without, &mut Vec::new(), &mut out, walk)
 		.then_some(out)
 		.and_then(|leaves| {
 			let sealed = withholding(scope, v);
 			let sealed: &AttackerState = &sealed;
-			if collect_leaves(v, capabilities, sealed, &mut Vec::new(), &mut Vec::new()) {
+			if rebuildable(v, capabilities, sealed) {
 				return Some(leaves);
 			}
 			let inside = contents(v, capabilities, without)?;
@@ -661,6 +690,11 @@ fn origin_leaves(scope: &Scope, v: &Value) -> Option<Vec<Value>> {
 			}
 			Some(inside)
 		});
+	walk.stack.pop();
+	if walk.cut < depth {
+		return leaves;
+	}
+	walk.cut = usize::MAX;
 	LEAVES.with_current(|memo| {
 		memo.group(group)
 			.entry(key)
@@ -697,18 +731,41 @@ fn contents(
 		return None;
 	}
 	let mut out = Vec::new();
-	for revealed in decomposed.into_iter().chain(broken).flatten() {
-		collect_leaves(&revealed, capabilities, attacker, &mut Vec::new(), &mut out);
+	let mut pending: Vec<Value> = decomposed.into_iter().chain(broken).flatten().collect();
+	let mut seen = TermSet::default();
+	while let Some(value) = pending.pop() {
+		if !seen.insert(value.clone()) {
+			continue;
+		}
+		if attacker.knows(&value).is_some() {
+			push_leaf(&mut out, &value);
+		}
+		pending.extend(opening(&value, capabilities, attacker));
 	}
 	Some(out)
 }
 
-fn collect_leaves(
-	v: &Value,
+fn rebuilt_from(
+	p: &Arc<Primitive>,
 	capabilities: &CapabilityIndex,
+	attacker: &AttackerState,
+) -> Option<Vec<Value>> {
+	can_reconstruct_primitive(p, capabilities, attacker)
+		.map(|r| r.supplied().to_vec())
+		.or_else(|| can_recompose(p, attacker).map(|r| r.used))
+}
+
+fn rebuildable(v: &Value, capabilities: &CapabilityIndex, attacker: &AttackerState) -> bool {
+	matches!(v, Value::Primitive(p) if rebuilt_from(p, capabilities, attacker).is_some())
+}
+
+fn collect_leaves(
+	scope: &Scope,
+	v: &Value,
 	attacker: &AttackerState,
 	expanded: &mut Vec<Value>,
 	out: &mut Vec<Value>,
+	walk: &mut Walk,
 ) -> bool {
 	let held = attacker.knows(v).is_some();
 	if held {
@@ -721,14 +778,18 @@ fn collect_leaves(
 		return held;
 	}
 	expanded.push(v.clone());
-	let Some(used) = can_reconstruct_primitive(p, capabilities, attacker)
-		.map(|r| r.supplied().to_vec())
-		.or_else(|| can_recompose(p, attacker).map(|r| r.used))
-	else {
+	let Some(used) = rebuilt_from(p, scope.knowledge.capabilities(), attacker) else {
 		return held;
 	};
 	for arg in &used {
-		collect_leaves(arg, capabilities, attacker, expanded, out);
+		if attacker.knows(arg).is_none() {
+			collect_leaves(scope, arg, attacker, expanded, out, walk);
+			continue;
+		}
+		push_leaf(out, arg);
+		for leaf in origin_leaves_in(scope, arg, walk).unwrap_or_default() {
+			push_leaf(out, &leaf);
+		}
 	}
 	true
 }

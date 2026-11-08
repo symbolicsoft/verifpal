@@ -1,0 +1,31 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: u0 at one session and at two.
+//
+// Alice sends a and b = ENC(a, ENC(tag, hidden)), tag public and hidden
+// fresh. The attacker opens b with a and the result with tag, and finds
+// hidden, which it has nothing to compare against: a wrong key would also
+// give it some unknown value. tag is the inner ciphertext's key, not a field
+// of its plaintext, so it recognizes nothing, and a stays unconfirmed as b's
+// key, as in unlink_opened_fresh_content.vp. The engine once judged whether
+// opened content was recognizable by walking how the content was built,
+// found the public tag there, and linked a and b via a (GitHub issue #56).
+// unlink_nested_key_not_content_recognized.vp gives the attacker something
+// to recognize, and a links.
+attacker[passive]
+
+principal Alice[
+	knows public tag
+	generates a, hidden
+	b = ENC(a, ENC(tag, hidden))
+]
+
+Alice -> Bob: a, b
+
+principal Bob[
+	_ = HASH(a, b)
+]
+
+queries[
+	unlinkability? a, b
+]

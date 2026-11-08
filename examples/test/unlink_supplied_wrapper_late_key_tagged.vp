@@ -1,0 +1,35 @@
+// SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: u1 at one and two sessions. unlink_supplied_wrapper_late_key.vp
+// with a public field in each plaintext. Once s leaks in phase 1, opening x
+// and y yields tuples whose first fields are the public c1 and c2, which
+// confirms s as the key of both ciphertexts, and a and b, built from them,
+// link via s. Replaying an opaque ciphertext before that disclosure does not
+// supply its unknown key, so s is no attacker-supplied witness.
+
+attacker[active]
+principal Alice[
+	knows private s
+	knows public c1, c2
+	generates m1, m2
+	x = ENC(s, CONCAT(c1, m1))
+	y = ENC(s, CONCAT(c2, m2))
+	carrier = HASH(y, c2)
+]
+Alice -> Bob: x, y, [carrier]
+principal Bob[
+	a = HASH(x, c1)
+	b = HASH(y, c2)
+]
+Bob -> Dave: a, b
+principal Dave[
+	_ = HASH(a, b)
+]
+phase[1]
+principal Alice[
+	leaks s
+]
+queries[
+	unlinkability? a, b
+]
