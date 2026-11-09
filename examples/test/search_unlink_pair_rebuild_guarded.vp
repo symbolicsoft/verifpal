@@ -1,0 +1,57 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: u0 at one session and at two.
+//
+// search_unlink_pair_rebuild.vp with ed guarded: ktwo stays secret, b is
+// never rebuilt, and s alone confirms nothing about b.
+
+attacker[active]
+
+principal Alice[
+	knows private kb, kc, kd
+	generates s, kone, ktwo
+	a = HASH(s, kone)
+	b = HASH(s, ktwo)
+	witness = HASH(s, kone, ktwo)
+	es = ENC(kb, s)
+	eone = ENC(kc, kone)
+	etwo = ENC(kd, ktwo)
+	eb = ENC(kb, nil)
+	ec = ENC(kc, nil)
+	ed = ENC(kd, nil)
+]
+
+Alice -> Dave: es, eone, etwo, a, b
+
+Alice -> Bob: eb
+
+Alice -> Carol: ec
+
+Alice -> Erin: [ed]
+
+principal Bob[
+	knows private kb
+	db = DEC(kb, eb)
+	leaks db
+]
+
+principal Carol[
+	knows private kc
+	dc = DEC(kc, ec)
+	leaks dc
+]
+
+principal Erin[
+	knows private kd
+	dd = DEC(kd, ed)
+	leaks dd
+]
+
+principal Dave[
+	_ = HASH(es, eone, etwo, a, b)
+]
+
+queries[
+	unlinkability? a, b
+]

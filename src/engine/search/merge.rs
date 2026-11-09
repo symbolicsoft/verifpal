@@ -10,7 +10,8 @@ use crate::engine::program::{DeliveryIdx, Event, RunIdx};
 use crate::protocol::ProtocolTrace;
 use crate::protocol::SlotIdx;
 use crate::syntax::QueryKind;
-use crate::term::Value;
+use crate::term::hashing::TermSet;
+use crate::term::{Constant, Value};
 use crate::theory::obtainable;
 
 fn secret_arguments<'v>(held: &'v Value, km: &ProtocolTrace) -> impl Iterator<Item = &'v Value> {
@@ -21,6 +22,39 @@ fn secret_arguments<'v>(held: &'v Value, km: &ProtocolTrace) -> impl Iterator<It
 	arguments
 		.iter()
 		.filter(|a| crate::engine::unlink::depends_on_secret(a, km))
+}
+
+fn requirements(held: &Value, km: &ProtocolTrace) -> Vec<Vec<Value>> {
+	let mut routes = Vec::new();
+	let mut pending = vec![held.clone()];
+	let mut seen = TermSet::default();
+	while let Some(v) = pending.pop() {
+		if !seen.insert(v.clone()) {
+			continue;
+		}
+		routes.push(secret_arguments(&v, km).cloned().collect());
+		let Value::Primitive(p) = &v else {
+			continue;
+		};
+		routes.push(
+			crate::engine::unlink::check_inputs(p)
+				.into_iter()
+				.filter(|input| crate::engine::unlink::depends_on_secret(input, km))
+				.collect(),
+		);
+		pending.extend(p.arguments.iter().cloned());
+	}
+	routes
+}
+
+fn add_set(sets: &mut Vec<Vec<usize>>, set: Vec<usize>) {
+	if !set.is_empty() && !sets.iter().any(|other| same_set(other, &set)) {
+		sets.push(set);
+	}
+}
+
+fn same_set(a: &[usize], b: &[usize]) -> bool {
+	a.len() == b.len() && a.iter().all(|idx| b.contains(idx))
 }
 
 type Leaf = (Value, Vec<NodeIdx>);
@@ -418,31 +452,41 @@ impl<'a, 'b> Search<'a, 'b> {
 				};
 				self.index_holders(slot);
 				for (held, holder) in &self.memo.holders[&slot].values {
-					let wanted: Vec<&Value> = match q.kind {
-						QueryKind::Unlinkability => secret_arguments(held, km).collect(),
-						_ => vec![held],
-					};
-					let missing: Vec<usize> = wanted
-						.into_iter()
-						.filter_map(|v| {
-							let idx = self.union.closed.knows(v)?;
-							(idx >= self.union.closed_at.0
-								|| !self.derivable_in(*holder, v, km.max_phase))
-							.then_some(idx)
-						})
-						.collect();
-					if missing.is_empty() {
-						continue;
-					}
-					match targets.iter_mut().find(|(_, other, _)| *other == missing) {
-						Some(target) => {
-							if self.nodes[target.2].installs.len()
-								> self.nodes[*holder].installs.len()
-							{
-								target.2 = *holder;
+					let mut wanted: Vec<Vec<usize>> = Vec::new();
+					match q.kind {
+						QueryKind::Unlinkability => {
+							let ours: Vec<Vec<usize>> = requirements(held, km)
+								.iter()
+								.map(|route| self.missing(route, *holder))
+								.collect();
+							let theirs: Vec<Vec<usize>> = self
+								.partners(&q.constants, c, *holder)
+								.iter()
+								.flat_map(|partner| requirements(partner, km))
+								.map(|route| self.missing(&route, *holder))
+								.collect();
+							for route in &ours {
+								add_set(&mut wanted, route.clone());
+							}
+							for route in &ours {
+								for other in &theirs {
+									let mut joint = route.clone();
+									joint.extend(other.iter().filter(|idx| !route.contains(idx)));
+									add_set(&mut wanted, joint);
+								}
 							}
 						}
-						None => targets.push((held.clone(), missing, *holder)),
+						_ => add_set(
+							&mut wanted,
+							self.missing(std::slice::from_ref(held), *holder),
+						),
+					}
+					for missing in wanted {
+						if !targets.iter().any(|(_, other, context)| {
+							context == holder && same_set(other, &missing)
+						}) {
+							targets.push((held.clone(), missing, *holder));
+						}
 					}
 				}
 			}
@@ -522,6 +566,41 @@ impl<'a, 'b> Search<'a, 'b> {
 				plan = next;
 			}
 		}
+	}
+
+	fn missing(&self, wanted: &[Value], holder: NodeIdx) -> Vec<usize> {
+		let mut out: Vec<usize> = Vec::new();
+		for v in wanted {
+			let Some(idx) = self.union.closed.knows(v) else {
+				continue;
+			};
+			if (idx >= self.union.closed_at.0
+				|| !self.derivable_in(holder, v, self.cx.km.max_phase))
+				&& !out.contains(&idx)
+			{
+				out.push(idx);
+			}
+		}
+		out
+	}
+
+	fn partners(&self, constants: &[Constant], of: &Constant, node: NodeIdx) -> Vec<Value> {
+		let km = self.cx.km;
+		let node = &self.nodes[node];
+		let mut out: Vec<Value> = Vec::new();
+		for other in constants.iter().filter(|other| other.id != of.id) {
+			let Some(slot) = km.index_of(other) else {
+				continue;
+			};
+			for run in node.held.indices() {
+				if let Some(h) = node.held(run, slot)
+					&& !out.iter().any(|v| v.equivalent(&h.value, true))
+				{
+					out.push(h.value.clone());
+				}
+			}
+		}
+		out
 	}
 
 	pub(super) fn holds_unsourced(&mut self, ex: &Execution) -> bool {

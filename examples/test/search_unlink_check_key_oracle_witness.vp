@@ -1,0 +1,65 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-FileCopyrightText: © 2026 Mounir IDRASSI <mounir.idrassi@amcrypto.jp>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1u1 at one session and at two (GitHub issue #59).
+//
+// search_unlink_check_key_oracle.vp also asking confidentiality? witness,
+// where witness = HASH(message, pkone, pktwo) is declared but never sent.
+// Recovering it needs all three oracles in one execution (c1), the same
+// execution that links the signatures (u1).
+
+attacker[active]
+
+principal Alice[
+	knows private kb, kc, kd, skone, sktwo
+	generates x, y
+	message = HASH(x, y)
+	sigone = SIGN(skone, message)
+	sigtwo = SIGN(sktwo, message)
+	pkone = PUBKEY(skone)
+	pktwo = PUBKEY(sktwo)
+	witness = HASH(message, pkone, pktwo)
+	ex = ENC(kb, x)
+	ey = ENC(kc, y)
+	ekeys = ENC(kd, CONCAT(pkone, pktwo))
+	eb = ENC(kb, nil)
+	ec = ENC(kc, nil)
+	ed = ENC(kd, nil)
+]
+
+Alice -> Dave: ex, ey, ekeys, sigone, sigtwo
+
+Alice -> Bob: eb
+
+Alice -> Carol: ec
+
+Alice -> Erin: ed
+
+principal Bob[
+	knows private kb
+	db = DEC(kb, eb)
+	leaks db
+]
+
+principal Carol[
+	knows private kc
+	dc = DEC(kc, ec)
+	leaks dc
+]
+
+principal Erin[
+	knows private kd
+	dd = DEC(kd, ed)
+	leaks dd
+]
+
+principal Dave[
+	_ = HASH(ex, ey, ekeys, sigone)
+	_ = HASH(sigtwo)
+]
+
+queries[
+	confidentiality? witness
+	unlinkability? sigone, sigtwo
+]

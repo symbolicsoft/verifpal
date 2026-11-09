@@ -1,0 +1,63 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-FileCopyrightText: © 2026 Mounir IDRASSI <mounir.idrassi@amcrypto.jp>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: u1 at one session and at two (GitHub issue #59).
+//
+// search_unlink_check_key_oracle.vp with pkone and pktwo also sent to Dave.
+// The keys are on the wire, so the link needs only message, from Bob and
+// Carol, as in search_unlink_check_route_unsent_keys.vp.
+
+attacker[active]
+
+principal Alice[
+	knows private kb, kc, kd, skone, sktwo
+	generates x, y
+	message = HASH(x, y)
+	sigone = SIGN(skone, message)
+	sigtwo = SIGN(sktwo, message)
+	pkone = PUBKEY(skone)
+	pktwo = PUBKEY(sktwo)
+	witness = HASH(message, pkone, pktwo)
+	ex = ENC(kb, x)
+	ey = ENC(kc, y)
+	ekeys = ENC(kd, CONCAT(pkone, pktwo))
+	eb = ENC(kb, nil)
+	ec = ENC(kc, nil)
+	ed = ENC(kd, nil)
+]
+
+Alice -> Dave: ex, ey, pkone, pktwo, ekeys, sigone, sigtwo
+
+Alice -> Bob: eb
+
+Alice -> Carol: ec
+
+Alice -> Erin: ed
+
+principal Bob[
+	knows private kb
+	db = DEC(kb, eb)
+	leaks db
+]
+
+principal Carol[
+	knows private kc
+	dc = DEC(kc, ec)
+	leaks dc
+]
+
+principal Erin[
+	knows private kd
+	dd = DEC(kd, ed)
+	leaks dd
+]
+
+principal Dave[
+	_ = HASH(ex, ey, pkone, pktwo, sigone)
+	_ = HASH(sigtwo, ekeys)
+]
+
+queries[
+	unlinkability? sigone, sigtwo
+]

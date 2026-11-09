@@ -1,0 +1,61 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: u1 at one session and at two.
+//
+// a = HASH(s, kone) and b = HASH(s, ktwo) share s. Bob, Carol and Erin open
+// es, eone and etwo, so one execution rebuilds both hashes and links them via
+// s. Rebuilding a needs s and kone and rebuilding b needs s and ktwo, so what
+// either value needs alone leaves the other unrebuilt: the merge joins the
+// two.
+// search_unlink_pair_rebuild_guarded.vp guards ed and holds.
+
+attacker[active]
+
+principal Alice[
+	knows private kb, kc, kd
+	generates s, kone, ktwo
+	a = HASH(s, kone)
+	b = HASH(s, ktwo)
+	witness = HASH(s, kone, ktwo)
+	es = ENC(kb, s)
+	eone = ENC(kc, kone)
+	etwo = ENC(kd, ktwo)
+	eb = ENC(kb, nil)
+	ec = ENC(kc, nil)
+	ed = ENC(kd, nil)
+]
+
+Alice -> Dave: es, eone, etwo, a, b
+
+Alice -> Bob: eb
+
+Alice -> Carol: ec
+
+Alice -> Erin: ed
+
+principal Bob[
+	knows private kb
+	db = DEC(kb, eb)
+	leaks db
+]
+
+principal Carol[
+	knows private kc
+	dc = DEC(kc, ec)
+	leaks dc
+]
+
+principal Erin[
+	knows private kd
+	dd = DEC(kd, ed)
+	leaks dd
+]
+
+principal Dave[
+	_ = HASH(es, eone, etwo, a, b)
+]
+
+queries[
+	unlinkability? a, b
+]

@@ -1,0 +1,77 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-FileCopyrightText: © 2026 Mounir IDRASSI <mounir.idrassi@amcrypto.jp>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: u1 at one session and at two.
+//
+// search_unlink_check_key_oracle.vp with each public key in its own
+// ciphertext, ekone opened by Erin and ektwo by Frank. Checking sigone needs
+// message and PUBKEY(skone), checking sigtwo needs message and
+// PUBKEY(sktwo), and a link needs both checks in one execution, so the merge
+// joins what one queried value needs with what the other needs. Either
+// value's needs alone leave the other signature unchecked.
+// search_unlink_pair_check_keys_guarded.vp guards ef and holds.
+
+attacker[active]
+
+principal Alice[
+	knows private kb, kc, kd, kf, skone, sktwo
+	generates x, y
+	message = HASH(x, y)
+	sigone = SIGN(skone, message)
+	sigtwo = SIGN(sktwo, message)
+	pkone = PUBKEY(skone)
+	pktwo = PUBKEY(sktwo)
+	witness = HASH(message, pkone, pktwo)
+	ex = ENC(kb, x)
+	ey = ENC(kc, y)
+	ekone = ENC(kd, pkone)
+	ektwo = ENC(kf, pktwo)
+	eb = ENC(kb, nil)
+	ec = ENC(kc, nil)
+	ed = ENC(kd, nil)
+	ef = ENC(kf, nil)
+]
+
+Alice -> Dave: ex, ey, ekone, ektwo, sigone, sigtwo
+
+Alice -> Bob: eb
+
+Alice -> Carol: ec
+
+Alice -> Erin: ed
+
+Alice -> Frank: ef
+
+principal Bob[
+	knows private kb
+	db = DEC(kb, eb)
+	leaks db
+]
+
+principal Carol[
+	knows private kc
+	dc = DEC(kc, ec)
+	leaks dc
+]
+
+principal Erin[
+	knows private kd
+	dd = DEC(kd, ed)
+	leaks dd
+]
+
+principal Frank[
+	knows private kf
+	df = DEC(kf, ef)
+	leaks df
+]
+
+principal Dave[
+	_ = HASH(ex, ey, ekone, sigone)
+	_ = HASH(sigtwo, ektwo)
+]
+
+queries[
+	unlinkability? sigone, sigtwo
+]

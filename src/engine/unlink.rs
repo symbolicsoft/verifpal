@@ -577,8 +577,43 @@ fn check_input(
 	None
 }
 
+fn undoes(rule: &RewriteRule, p: &Primitive) -> bool {
+	rule.id == p.id && rule.from_output.is_none_or(|output| output == p.output)
+}
+
+fn inputs_at(
+	check: &PrimitiveSpec,
+	rule: &RewriteRule,
+	position: usize,
+	targets: &[usize],
+	p: &Primitive,
+) -> impl Iterator<Item = (usize, Value)> {
+	targets.iter().filter_map(move |&target| {
+		let input = check_input(check, rule, position, target, p.arguments.get(target)?)?;
+		Some((target, input))
+	})
+}
+
+pub(crate) fn check_inputs(p: &Primitive) -> Vec<Value> {
+	let Some((check, rule)) = crate::primitive::check_undoing(p.id) else {
+		return Vec::new();
+	};
+	if !undoes(rule, p) {
+		return Vec::new();
+	}
+	let mut out: Vec<Value> = Vec::new();
+	for (position, targets) in &rule.matching {
+		for (_, input) in inputs_at(check, rule, *position, targets, p) {
+			if !out.iter().any(|held| held.equivalent(&input, true)) {
+				out.push(input);
+			}
+		}
+	}
+	out
+}
+
 fn runnable(scope: &Scope, check: &PrimitiveSpec, rule: &RewriteRule, p: &Primitive) -> bool {
-	if rule.id != p.id || rule.from_output.is_some_and(|output| output != p.output) {
+	if !undoes(rule, p) {
 		return false;
 	}
 	let Some(&arity) = check.arity.last() else {
@@ -591,12 +626,8 @@ fn runnable(scope: &Scope, check: &PrimitiveSpec, rule: &RewriteRule, p: &Primit
 	*source = Value::Primitive(Arc::new(p.clone()));
 	let mut candidates = vec![(arguments, Vec::new())];
 	for (position, targets) in &rule.matching {
-		let inputs: Vec<_> = targets
-			.iter()
-			.filter_map(|&target| {
-				let input = check_input(check, rule, *position, target, p.arguments.get(target)?)?;
-				scope.obtainable(&input).then_some((target, input))
-			})
+		let inputs: Vec<_> = inputs_at(check, rule, *position, targets, p)
+			.filter(|(_, input)| scope.obtainable(input))
 			.collect();
 		let mut next = Vec::new();
 		for (arguments, taken) in &candidates {

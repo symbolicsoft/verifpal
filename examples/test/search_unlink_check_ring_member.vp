@@ -1,0 +1,69 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-FileCopyrightText: © 2026 Mounir IDRASSI <mounir.idrassi@amcrypto.jp>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: u1 at one session and at two (GitHub issue #60).
+//
+// Two ring signatures over message = HASH(x, y) share the ring members
+// PUBKEY(skaux) and PUBKEY(nil). RINGSIGNVERIF needs every member's public
+// key and message: pkone is on the wire, PUBKEY(nil) is public, Erin reveals
+// PUBKEY(skaux) from eaux, and Bob and Carol leak x and y. Those two of the
+// three missing arguments link the signatures without skone or sktwo, which
+// at one session Bob and Carol could leak only instead of x and y.
+// _unsent_keys, _witness and _guarded are the counterweights.
+
+attacker[active]
+
+principal Alice[
+	knows private kb, kc, kd, skone, sktwo, skaux
+	generates x, y
+	message = HASH(x, y)
+	sigone = RINGSIGN(skone, PUBKEY(skaux), PUBKEY(nil), message)
+	sigtwo = RINGSIGN(sktwo, PUBKEY(skaux), PUBKEY(nil), message)
+	pkone = PUBKEY(skone)
+	pktwo = PUBKEY(sktwo)
+	witness = HASH(message, PUBKEY(skaux))
+	ex = ENC(kb, x)
+	ey = ENC(kc, y)
+	eskone = ENC(kb, skone)
+	esktwo = ENC(kc, sktwo)
+	eaux = ENC(kd, PUBKEY(skaux))
+	eb = ENC(kb, nil)
+	ec = ENC(kc, nil)
+	ed = ENC(kd, nil)
+]
+
+Alice -> Dave: ex, ey, pkone, pktwo, eaux, sigone, sigtwo, eskone, esktwo
+
+Alice -> Bob: eb
+
+Alice -> Carol: ec
+
+Alice -> Erin: ed
+
+principal Bob[
+	knows private kb
+	db = DEC(kb, eb)
+	leaks db
+]
+
+principal Carol[
+	knows private kc
+	dc = DEC(kc, ec)
+	leaks dc
+]
+
+principal Erin[
+	knows private kd
+	dd = DEC(kd, ed)
+	leaks dd
+]
+
+principal Dave[
+	_ = HASH(CONCAT(ex, ey), pkone, pktwo, eaux, sigone)
+	_ = HASH(sigtwo, eskone, esktwo)
+]
+
+queries[
+	unlinkability? sigone, sigtwo
+]

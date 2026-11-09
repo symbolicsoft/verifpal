@@ -5544,6 +5544,64 @@ fn test_unlink_supplied_by_the_queried_values() {
 }
 
 #[test]
+fn test_search_unlink_check_inputs() {
+	for sessions in [1, 2] {
+		for (model, code) in [
+			("search_unlink_check_route.vp", "u1"),
+			("search_unlink_check_route_unsent_keys.vp", "u1"),
+			("search_unlink_check_route_message_query.vp", "c1u1"),
+			("search_unlink_check_route_guarded.vp", "u0"),
+			("search_unlink_check_key_oracle.vp", "u1"),
+			("search_unlink_check_key_oracle_public_keys.vp", "u1"),
+			("search_unlink_check_key_oracle_witness.vp", "c1u1"),
+			("search_unlink_check_key_oracle_message_query.vp", "c1u1"),
+			("search_unlink_check_key_oracle_guarded.vp", "u0"),
+			("search_unlink_check_ring_member.vp", "u1"),
+			("search_unlink_check_ring_member_unsent_keys.vp", "u1"),
+			("search_unlink_check_ring_member_witness.vp", "c1u1"),
+			("search_unlink_check_ring_member_guarded.vp", "u0"),
+			("search_unlink_check_inside_tuple.vp", "u1"),
+			("search_unlink_check_inside_tuple_message_query.vp", "c1u1"),
+			("search_unlink_check_inside_tuple_guarded.vp", "u0"),
+			("search_unlink_check_inside_hash.vp", "u1"),
+			("search_unlink_check_inside_hash_message_query.vp", "c1u1"),
+			("search_unlink_check_inside_hash_guarded.vp", "u0"),
+		] {
+			run_model_sessions(model, sessions, code);
+		}
+	}
+}
+
+#[test]
+fn test_search_unlink_pair_routes() {
+	for sessions in [1, 2] {
+		run_model_sessions("search_unlink_pair_check_keys.vp", sessions, "u1");
+		run_model_sessions("search_unlink_pair_check_keys_guarded.vp", sessions, "u0");
+		run_model_sessions("search_unlink_pair_rebuild.vp", sessions, "u1");
+		run_model_sessions("search_unlink_pair_rebuild_guarded.vp", sessions, "u0");
+	}
+}
+
+#[test]
+fn test_search_merge_target_context() {
+	for sessions in [1, 2] {
+		run_model_sessions("search_merge_target_context.vp", sessions, "u0c1");
+		run_model_sessions("search_merge_target_context_reversed.vp", sessions, "c1u0");
+		run_model_sessions("search_merge_target_context_alone.vp", sessions, "c1");
+		run_model_sessions(
+			"search_merge_target_context_guarded_key.vp",
+			sessions,
+			"u0c0",
+		);
+		run_model_sessions(
+			"search_merge_target_context_guarded_ciphertext.vp",
+			sessions,
+			"u0c0",
+		);
+	}
+}
+
+#[test]
 fn test_unlink_relay_echo_not_observed() {
 	for sessions in [1, 2] {
 		run_model_sessions("unlink_relay_echo_not_observed.vp", sessions, "u0");

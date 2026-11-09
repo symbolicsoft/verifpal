@@ -1,0 +1,56 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-FileCopyrightText: © 2026 Mounir IDRASSI <mounir.idrassi@amcrypto.jp>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1u1 at one session and at two.
+//
+// search_unlink_check_inside_hash.vp also asking confidentiality? message:
+// the execution that discloses message (c1) links the hashes (u1).
+
+attacker[active]
+
+principal Alice[
+	knows private kb, kc, skone, sktwo
+	generates x, y
+	message = HASH(x, y)
+	sigone = SIGN(skone, message)
+	sigtwo = SIGN(sktwo, message)
+	pkone = PUBKEY(skone)
+	pktwo = PUBKEY(sktwo)
+	ex = ENC(kb, x)
+	ey = ENC(kc, y)
+	eskone = ENC(kb, skone)
+	esktwo = ENC(kc, sktwo)
+	eb = ENC(kb, nil)
+	ec = ENC(kc, nil)
+	hone = HASH(sigone, nil)
+	htwo = HASH(sigtwo, nil)
+]
+
+Alice -> Dave: ex, ey, pkone, pktwo, sigone, sigtwo, hone, htwo, eskone, esktwo
+
+Alice -> Bob: eb
+
+Alice -> Carol: ec
+
+principal Bob[
+	knows private kb
+	db = DEC(kb, eb)
+	leaks db
+]
+
+principal Carol[
+	knows private kc
+	dc = DEC(kc, ec)
+	leaks dc
+]
+
+principal Dave[
+	_ = HASH(ex, ey, pkone, pktwo, sigone)
+	_ = HASH(sigtwo, eskone, esktwo, hone, htwo)
+]
+
+queries[
+	confidentiality? message
+	unlinkability? hone, htwo
+]

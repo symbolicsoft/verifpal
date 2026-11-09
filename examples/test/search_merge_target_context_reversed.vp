@@ -1,0 +1,50 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-FileCopyrightText: © 2026 Mounir IDRASSI <mounir.idrassi@amcrypto.jp>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1u0 at one session and at two.
+//
+// search_merge_target_context.vp with the queries in the other order: each
+// merge target keeps its own context, whichever query is met first.
+
+attacker[active]
+
+principal Carol[
+	knows private c
+	gc = PUBKEY(c)
+]
+
+Carol -> Alice: gc
+
+principal Alice[
+	knows private kb
+	generates sone, stwo, unrelated
+	cone = ENC(kb, sone)
+	e = PKE_ENC(gc, CONCAT(sone, stwo))
+	a = HASH(sone, nil)
+	b = HASH(unrelated)
+]
+
+Alice -> Carol: cone, e, a, b
+
+principal Carol[
+	x = PKE_DEC(c, e)
+]
+
+principal Dave[
+	knows private kb
+	generates sd
+	cd = ENC(kb, sd)
+]
+
+Dave -> Bob: cd
+
+principal Bob[
+	knows private kb
+	d = DEC(kb, cd)
+]
+
+queries[
+	confidentiality? d
+	unlinkability? a, b
+]
