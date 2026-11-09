@@ -1,0 +1,55 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-FileCopyrightText: © 2026 Mounir IDRASSI <mounir.idrassi@amcrypto.jp>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: u1 at one session and at two.
+//
+// search_unlink_single_argument.vp with eskone and esktwo never sent. Alice
+// still computes them, but no oracle can leak a signing key, so the union
+// derives only message among the secret arguments of each signature. The
+// joint target is then message alone, which Bob's oracle on ex and Carol's
+// on ey supply together, and the signatures link via message as before.
+// This case was always found: sending the two key boxes gives the attacker
+// more options, and it must not lose the link that this model finds.
+attacker[active]
+
+principal Alice[
+	knows private kb, kc, skone, sktwo
+	generates x, y
+	message = HASH(x, y)
+	sigone = SIGN(skone, message)
+	sigtwo = SIGN(sktwo, message)
+	pkone = PUBKEY(skone)
+	pktwo = PUBKEY(sktwo)
+	ex = ENC(kb, x)
+	ey = ENC(kc, y)
+	eskone = ENC(kb, skone)
+	esktwo = ENC(kc, sktwo)
+	eb = ENC(kb, nil)
+	ec = ENC(kc, nil)
+]
+
+Alice -> Dave: ex, ey, pkone, pktwo, sigone, sigtwo
+Alice -> Bob: eb
+Alice -> Carol: ec
+
+principal Bob[
+	knows private kb
+	db = DEC(kb, eb)
+	leaks db
+]
+
+principal Carol[
+	knows private kc
+	dc = DEC(kc, ec)
+	leaks dc
+]
+
+principal Dave[
+	_ = HASH(ex, ey, pkone, pktwo, sigone)
+	_ = HASH(sigtwo)
+]
+
+queries[
+	unlinkability? sigone, sigtwo
+]

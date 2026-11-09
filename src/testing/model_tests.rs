@@ -5544,6 +5544,48 @@ fn test_unlink_supplied_by_the_queried_values() {
 }
 
 #[test]
+fn a_link_may_need_one_argument_without_the_others() {
+	for sessions in [1, 2] {
+		run_model_sessions("search_unlink_single_argument.vp", sessions, "u1");
+		run_model_sessions(
+			"search_unlink_single_argument_unsent_keys.vp",
+			sessions,
+			"u1",
+		);
+		run_model_sessions(
+			"search_unlink_single_argument_message_query.vp",
+			sessions,
+			"c1u1",
+		);
+		run_model_sessions("search_unlink_single_argument_guarded.vp", sessions, "u0");
+	}
+}
+
+#[test]
+fn merge_targets_keep_their_contexts() {
+	for sessions in [1, 2] {
+		run_model_sessions("search_merge_target_context.vp", sessions, "u0c1");
+		run_model_sessions("search_merge_target_context_reversed.vp", sessions, "c1u0");
+		run_model_sessions("search_merge_target_context_alone.vp", sessions, "c1");
+		run_model_sessions(
+			"search_merge_target_context_one_argument.vp",
+			sessions,
+			"u0c1",
+		);
+		run_model_sessions(
+			"search_merge_target_context_guarded_key.vp",
+			sessions,
+			"u0c0",
+		);
+		run_model_sessions(
+			"search_merge_target_context_guarded_ciphertext.vp",
+			sessions,
+			"u0c0",
+		);
+	}
+}
+
+#[test]
 fn test_unlink_relay_echo_not_observed() {
 	for sessions in [1, 2] {
 		run_model_sessions("unlink_relay_echo_not_observed.vp", sessions, "u0");

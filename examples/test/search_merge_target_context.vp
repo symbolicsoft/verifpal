@@ -1,0 +1,64 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-FileCopyrightText: © 2026 Mounir IDRASSI <mounir.idrassi@amcrypto.jp>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: u0c1 at one session and at two.
+//
+// Replacing gc with PUBKEY(nil) makes Alice encrypt CONCAT(sone, stwo) to
+// the attacker, and replacing cd with cone makes Bob decrypt sone into d,
+// which the attacker reads by opening e. a and b share no secret and never
+// link.
+//
+// Both queries make sone a merge target: confidentiality? d in the
+// execution where Bob holds it, and unlinkability? a, b as an argument of a,
+// which is merged on its own since GitHub issue #57. Targets that wanted the
+// same values were once a single target whose context was the holder with
+// fewer installs, so the honest execution displaced Bob's, the merge never
+// gave Bob cone, and the attack was missed. A context is what makes its own
+// query's subject hold the value, so a target is now its values together
+// with its context. search_merge_target_context_one_argument.vp lost the
+// attack even before #57.
+//
+// _reversed asks the queries in the other order and _alone asks only about
+// d; _guarded_key and _guarded_ciphertext guard gc and cd and hold.
+attacker[active]
+
+principal Carol[
+	knows private c
+	gc = PUBKEY(c)
+]
+
+Carol -> Alice: gc
+
+principal Alice[
+	knows private kb
+	generates sone, stwo, unrelated
+	cone = ENC(kb, sone)
+	e = PKE_ENC(gc, CONCAT(sone, stwo))
+	a = HASH(sone, stwo)
+	b = HASH(unrelated)
+]
+
+Alice -> Carol: cone, e, a, b
+
+principal Carol[
+	x = PKE_DEC(c, e)
+]
+
+principal Dave[
+	knows private kb
+	generates sd
+	cd = ENC(kb, sd)
+]
+
+Dave -> Bob: cd
+
+principal Bob[
+	knows private kb
+	d = DEC(kb, cd)
+]
+
+queries[
+	unlinkability? a, b
+	confidentiality? d
+]

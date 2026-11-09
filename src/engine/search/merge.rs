@@ -434,15 +434,19 @@ impl<'a, 'b> Search<'a, 'b> {
 					if missing.is_empty() {
 						continue;
 					}
-					match targets.iter_mut().find(|(_, other, _)| *other == missing) {
-						Some(target) => {
-							if self.nodes[target.2].installs.len()
-								> self.nodes[*holder].installs.len()
-							{
-								target.2 = *holder;
-							}
+					let alone: Vec<Vec<usize>> = match q.kind {
+						QueryKind::Unlinkability if missing.len() > 1 => {
+							missing.iter().map(|&idx| vec![idx]).collect()
 						}
-						None => targets.push((held.clone(), missing, *holder)),
+						_ => Vec::new(),
+					};
+					for missing in std::iter::once(missing).chain(alone) {
+						if !targets
+							.iter()
+							.any(|(_, other, context)| *other == missing && context == holder)
+						{
+							targets.push((held.clone(), missing, *holder));
+						}
 					}
 				}
 			}
