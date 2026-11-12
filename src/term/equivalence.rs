@@ -6,7 +6,7 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Weak};
 
 use super::{Primitive, Value};
-use crate::util::{IdMap, IdSet};
+use crate::util::IdMap;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum Pairing {
@@ -32,7 +32,7 @@ type PairKey = (usize, usize, Pairing);
 #[derive(Default)]
 struct PairMemo {
 	depth: usize,
-	equal: IdSet<PairKey>,
+	answered: IdMap<PairKey, bool>,
 	recent: IdMap<PairKey, [Weak<Primitive>; 2]>,
 	order: VecDeque<PairKey>,
 }
@@ -53,19 +53,21 @@ pub(crate) fn memoised_pair(
 		let mut memo = memo.borrow_mut();
 		memo.depth += 1;
 		let nested = memo.depth > 1;
-		(
-			(nested && memo.equal.contains(&key))
-				|| (kind == Pairing::Identical && memo.recent.contains_key(&key)),
-			nested,
-		)
+		let answered = if nested {
+			memo.answered.get(&key).copied()
+		} else {
+			None
+		};
+		let recent = kind == Pairing::Identical && memo.recent.contains_key(&key);
+		(answered.or(recent.then_some(true)), nested)
 	});
-	let result = known || compute();
+	let result = known.unwrap_or_else(compute);
 	PAIRS.with(|memo| {
 		let mut memo = memo.borrow_mut();
-		if result && nested && !known {
-			memo.equal.insert(key);
+		if nested && known.is_none() {
+			memo.answered.insert(key, result);
 		}
-		if result && kind == Pairing::Identical && !known {
+		if result && kind == Pairing::Identical && known.is_none() {
 			if memo.recent.len() >= RECENT_IDENTICAL_PAIRS
 				&& let Some(oldest) = memo.order.pop_front()
 			{
@@ -76,8 +78,8 @@ pub(crate) fn memoised_pair(
 			memo.order.push_back(key);
 		}
 		memo.depth -= 1;
-		if memo.depth == 0 && !memo.equal.is_empty() {
-			memo.equal = IdSet::default();
+		if memo.depth == 0 && !memo.answered.is_empty() {
+			memo.answered = IdMap::default();
 		}
 	});
 	result
@@ -146,8 +148,33 @@ mod tests {
 	use super::*;
 	use crate::primitive::Capabilities;
 	use crate::primitive::*;
-	use crate::term::{Application, Value};
+	use crate::term::{Application, Constant, Value};
 	use crate::testing::*;
+
+	#[test]
+	fn unequal_terms_with_equal_hashes_are_compared_once_per_pair_of_nodes() {
+		let constant = |id: u32| match make_constant("eqc_leaf") {
+			Value::Constant(c) => Value::Constant(Constant { id, ..c }),
+			other => other,
+		};
+		let hash = |arguments: Vec<Value>| make_primitive(PRIM_HASH, arguments, 0);
+		let mut a = hash(vec![constant(2_000_000), constant(2_000_032)]);
+		let mut b = hash(vec![constant(2_000_001), constant(2_000_001)]);
+		assert_eq!(a.hash_value(), b.hash_value(), "the leaves must collide");
+		for _ in 0..200 {
+			let (ha, hb) = (hash(vec![a]), hash(vec![b]));
+			a = dh_kex(ha.clone(), ha);
+			b = dh_kex(hb.clone(), hb);
+		}
+		assert_eq!(
+			a.hash_value(),
+			b.hash_value(),
+			"the towers must collide at every level, or this test compares nothing"
+		);
+		assert!(!a.equivalent(&b, true));
+		assert!(!a.equivalent(&b, false));
+		assert!(a.equivalent(&a.clone(), true));
+	}
 
 	#[test]
 	fn transient_checked_terms_remain_structurally_distinct_after_cache_eviction() {

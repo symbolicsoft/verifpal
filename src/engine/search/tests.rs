@@ -43,7 +43,7 @@ fn removing_inputs_after_relevant_actions_preserves_query_violations() {
 		let program = crate::engine::program::Program::of(&model, &km);
 		let cx = Context::new(&program, &km);
 		let ctx = VerifyContext::new(&model, Vec::new(), 1, None, Vec::new(), Vec::new());
-		let root = execute(&cx, &Vec::new());
+		let root = execute(&cx, &Vec::new()).expect("uncancelled");
 		let search = Search::new(&ctx, &cx, root);
 		let mut choices: Installs = program
 			.deliveries
@@ -76,11 +76,11 @@ fn removing_inputs_after_relevant_actions_preserves_query_violations() {
 					continue;
 				}
 				removed += 1;
-				let original = execute(&cx, &plan);
+				let original = execute(&cx, &plan).expect("uncancelled");
 				if !original.stuck.is_empty() {
 					continue;
 				}
-				let after = execute(&cx, &projected);
+				let after = execute(&cx, &projected).expect("uncancelled");
 				assert!(after.stuck.is_empty(), "{name}");
 				for phase in 0..=km.max_phase {
 					let claims = |principal| ctx.claims_at(principal, phase);
@@ -156,7 +156,7 @@ fn a_repeated_execution_keeps_its_repair_continuation() {
 	let program = crate::engine::program::Program::of(&model, &km);
 	let cx = Context::new(&program, &km);
 	let ctx = VerifyContext::new(&model, Vec::new(), 1, None, Vec::new(), Vec::new());
-	let root = execute(&cx, &Vec::new());
+	let root = execute(&cx, &Vec::new()).expect("uncancelled");
 	let mut search = Search::new(&ctx, &cx, root);
 	let bob = program.runs.position(|run| run.name == "Bob").unwrap();
 	let slot = km

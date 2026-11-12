@@ -919,6 +919,38 @@ mod tests {
 	}
 
 	#[test]
+	fn a_leaked_secret_is_suggested_and_analyzed_under_a_scenario_binding() {
+		for model in [
+			"auto_queries_identity_scenario.vp",
+			"auto_queries_shared_rebound.vp",
+		] {
+			let source = corpus(model);
+			let payload = json(wasm_suggest_queries(&source));
+			assert_eq!(payload["ok"], true, "{model}: {payload}");
+			assert!(
+				payload["queries"]
+					.as_array()
+					.expect("queries")
+					.iter()
+					.any(|q| q == "confidentiality? secret"),
+				"{model}: {payload}"
+			);
+			let analyzed = json(wasm_analyze(
+				&source,
+				r#"{"sessions":1,"autoQueries":true}"#,
+			));
+			assert_eq!(analyzed["ok"], true, "{model}: {analyzed}");
+			assert!(
+				analyzed["code"]
+					.as_str()
+					.is_some_and(|code| code.contains("c1")),
+				"{model}: the generated queries must find the leak, got {}",
+				analyzed["code"]
+			);
+		}
+	}
+
+	#[test]
 	fn queries_are_suggested_for_a_model_that_asks_none_yet() {
 		let body = &PASSIVE[..PASSIVE.find("queries[").expect("a queries block")];
 		for source in [

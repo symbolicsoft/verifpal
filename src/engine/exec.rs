@@ -2,6 +2,7 @@
  * SPDX-License-Identifier: GPL-3.0-only */
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use super::knowledge::{Knowledge, Origin};
 use super::program::{DeliveryIdx, Event, Program, RunIdx, StepIdx};
@@ -140,10 +141,14 @@ impl Execution {
 	}
 }
 
+#[derive(Debug)]
+pub(crate) struct Cancelled;
+
 pub(crate) struct Context<'a> {
 	pub(crate) program: &'a Program,
 	pub(crate) km: &'a ProtocolTrace,
 	pub(crate) initial: Knowledge,
+	cancel: Option<&'a AtomicBool>,
 }
 
 impl<'a> Context<'a> {
@@ -160,7 +165,18 @@ impl<'a> Context<'a> {
 			program,
 			km,
 			initial,
+			cancel: None,
 		}
+	}
+
+	pub(crate) fn cancellable(mut self, cancel: &'a AtomicBool) -> Context<'a> {
+		self.cancel = Some(cancel);
+		self
+	}
+
+	pub(crate) fn cancelled(&self) -> bool {
+		self.cancel
+			.is_some_and(|cancel| cancel.load(Ordering::Relaxed))
 	}
 }
 
@@ -277,7 +293,7 @@ fn lacks(cx: &Context, r: RunIdx, state: &RunState, event: Event) -> bool {
 	}
 }
 
-pub(crate) fn execute(cx: &Context, installs: &Installs) -> Execution {
+pub(crate) fn execute(cx: &Context, installs: &Installs) -> Result<Execution, Cancelled> {
 	let program = cx.program;
 	let km = cx.km;
 	let n = km.slots.len();
@@ -304,10 +320,14 @@ pub(crate) fn execute(cx: &Context, installs: &Installs) -> Execution {
 		barriers: Vec::new(),
 	};
 	let mut barriers = Vec::new();
+	let stop = || cx.cancelled();
 	for phase in 0..=km.max_phase {
 		ex.knowledge.set_phase(phase);
 		let mut early = false;
 		loop {
+			if stop() {
+				return Err(Cancelled);
+			}
 			let progress = if early {
 				let mut waiting: Vec<(DeliveryIdx, RunIdx)> = program
 					.runs
@@ -338,13 +358,17 @@ pub(crate) fn execute(cx: &Context, installs: &Installs) -> Execution {
 		}
 		freeze(cx, &mut ex, installs, phase);
 		if phase < km.max_phase {
-			ex.knowledge.close();
+			if !ex.knowledge.close_unless(&stop) {
+				return Err(Cancelled);
+			}
 			barriers.push(ex.clone());
 		}
 	}
-	ex.knowledge.close();
+	if !ex.knowledge.close_unless(&stop) || stop() {
+		return Err(Cancelled);
+	}
 	ex.barriers = barriers;
-	ex
+	Ok(ex)
 }
 
 fn advance(
@@ -448,7 +472,7 @@ fn freeze(cx: &Context, ex: &mut Execution, installs: &Installs, phase: i32) {
 				}
 				if let Some(t) = delivered(installs, r, slot)
 					&& !ex.stuck.contains(&(r, slot))
-					&& !(deliverable(&t) && ex.knowledge.derivable(&t))
+					&& !(deliverable(&t) && ex.knowledge.derivable(&t, &|| cx.cancelled()))
 				{
 					ex.stuck.push((r, slot))
 				}
@@ -597,7 +621,7 @@ fn step_run(
 							received.push((slot, t, false));
 							continue;
 						}
-						if !deliverable(&t) || !ex.knowledge.derivable(&t) {
+						if !deliverable(&t) || !ex.knowledge.derivable(&t, &|| cx.cancelled()) {
 							return false;
 						}
 						received.push((slot, t, true));
@@ -672,7 +696,7 @@ mod tests {
 				value: Value::primitive(crate::primitive::PRIM_HASH, vec![nil], 0),
 			},
 		];
-		let ex = execute(&cx, &installs);
+		let ex = execute(&cx, &installs).expect("uncancelled");
 		assert!(ex.stuck.is_empty());
 		let held = ex.runs[run("Ech_c")].held(slot("ech_y")).expect("received");
 		assert!(
@@ -707,12 +731,12 @@ mod tests {
 			run: charlie,
 			slot: slot("ack"),
 		};
-		let ex = execute(&cx, &vec![replaced.clone(), drop.clone()]);
+		let ex = execute(&cx, &vec![replaced.clone(), drop.clone()]).expect("uncancelled");
 		assert!(
 			ex.runs[charlie].held(slot("right")).is_none(),
 			"Bob halts and never sends ack, so Charlie still waits for it"
 		);
-		let ex = execute(&cx, &vec![drop]);
+		let ex = execute(&cx, &vec![drop]).expect("uncancelled");
 		assert!(
 			ex.runs[charlie].held(slot("ack")).is_none()
 				&& ex.runs[charlie].held(slot("right")).is_some(),

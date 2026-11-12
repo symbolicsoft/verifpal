@@ -22,8 +22,8 @@ use program::Program;
 
 pub(crate) fn verify(ctx: &VerifyContext, m: &Model, km: &ProtocolTrace) -> VResult<()> {
 	let program = Program::of(m, km);
-	let cx = Context::new(&program, km);
-	let root = execute(&cx, &Vec::new());
+	let cx = Context::new(&program, km).cancellable(ctx.cancel());
+	let root = execute(&cx, &Vec::new()).map_err(|_| VerifpalError::cancelled())?;
 	check_honest_run(ctx, km, &program, &root)?;
 	crate::console::message(
 		&format!("Attacker is configured as {}.", m.attacker),
@@ -117,7 +117,7 @@ fn minimal(
 				.filter(|&(k, _)| k != i && k != j)
 				.map(|(_, install)| install.clone())
 				.collect();
-			let ex = execute(cx, &trial);
+			let ex = execute(cx, &trial).ok()?;
 			if !ex.stuck.is_empty() {
 				return None;
 			}
@@ -142,6 +142,9 @@ pub(crate) fn judge(
 		let claims = |p: PrincipalId| ctx.claims_at(p, phase);
 		let violation = |ex: &Execution, q: &Query| Judge::at(cx, ex, phase, &claims).evaluate(q);
 		for (index, queries) in ctx.unresolved() {
+			if cx.cancelled() {
+				return;
+			}
 			for q in &queries {
 				let Some(first) = violation(ex, q) else {
 					continue;
@@ -152,7 +155,7 @@ pub(crate) fn judge(
 					None => (ex, &first),
 				};
 				let out = VerifyResult::new(&queries[0], index);
-				report(ctx, cx, ex.at(phase), honest, out, q, found);
+				report(ctx, cx, (ex, phase), honest, out, q, found);
 				break;
 			}
 		}
@@ -162,7 +165,7 @@ pub(crate) fn judge(
 fn report(
 	ctx: &VerifyContext,
 	cx: &Context,
-	ex: &Execution,
+	(ex, phase): (&Execution, i32),
 	honest: &Execution,
 	mut out: VerifyResult,
 	q: &Query,
@@ -182,9 +185,10 @@ fn report(
 			})
 		})
 		.collect();
-	let mut narrator = narrate::Narrator::new(cx, ex, honest);
+	let mut narrator = narrate::Narrator::new(cx, ex.at(phase), honest);
 	narrator.installs();
 	let (conclusion, subtype) = narrator.conclude(q, v);
+	let mut narrator = narrator.continued(ex);
 	out.subtype = subtype;
 	out.set_summary(
 		&narrator.trace(),

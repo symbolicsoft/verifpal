@@ -4,6 +4,7 @@
 use std::borrow::Cow;
 use std::cmp::Reverse;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
 use super::sanity::MAX_PRINCIPALS;
 use super::sessions::{ModelCopy, map_constants};
@@ -21,7 +22,7 @@ use crate::util::text::{did_you_mean, quoted_list};
 use crate::util::{IdMap, IdSet};
 use crate::verify::{Expansion, ScenarioSummary};
 
-pub(crate) fn expand_scenarios(m: &Model, sessions: u8) -> VResult<Expansion> {
+pub(crate) fn expand_scenarios(m: &Model, sessions: u8, cancel: &AtomicBool) -> VResult<Expansion> {
 	let count = m.scenarios.len();
 	if count == 0 {
 		return Ok(Expansion {
@@ -41,8 +42,11 @@ pub(crate) fn expand_scenarios(m: &Model, sessions: u8) -> VResult<Expansion> {
 
 	let freshen = m.freshened_constants();
 	let copies = scenario_copies(m, &freshen, sessions)?;
-	let mut scenarios: Vec<(&Scenario, i32)> =
-		m.scenarios.iter().zip(corruption(m, &copies)).collect();
+	let mut scenarios: Vec<(&Scenario, i32)> = m
+		.scenarios
+		.iter()
+		.zip(corruption(m, &copies, cancel)?)
+		.collect();
 	scenarios.sort_by_key(|&(_, corrupt_from)| Reverse(corrupt_from));
 
 	let blocks = scenario_blocks(m, &copies, &scenarios);
@@ -220,6 +224,14 @@ fn rebindings(scenario: &Scenario) -> impl Iterator<Item = &(Constant, Constant)
 		.filter(|(target, value)| target.id != value.id)
 }
 
+pub(crate) fn keeps(m: &Model, principal: PrincipalId, id: ValueId) -> bool {
+	m.scenarios.is_empty()
+		|| m.scenarios.iter().any(|scenario| {
+			scenario.principal != principal
+				|| !rebindings(scenario).any(|(target, _)| target.id == id)
+		})
+}
+
 fn bound<'p>(p: &'p Principal, scenario: &Scenario) -> Cow<'p, Principal> {
 	if scenario.principal != p.id {
 		return Cow::Borrowed(p);
@@ -297,7 +309,7 @@ pub(crate) fn honesty_profile(m: &Model) -> std::collections::BTreeMap<String, i
 	};
 	m.scenarios
 		.iter()
-		.zip(corruption(m, &copies))
+		.zip(corruption(m, &copies, &AtomicBool::new(false)).expect("uncancelled"))
 		.map(|(s, corrupt_from)| {
 			let bindings: Vec<String> = s
 				.bindings
@@ -505,7 +517,7 @@ fn declared_constants(m: &Model) -> Vec<(ValueId, String)> {
 	out
 }
 
-fn corruption(m: &Model, copies: &[ModelCopy]) -> Vec<i32> {
+fn corruption(m: &Model, copies: &[ModelCopy], cancel: &AtomicBool) -> VResult<Vec<i32>> {
 	let declared: Vec<(&Scenario, i32)> = m.scenarios.iter().map(|s| (s, i32::MAX)).collect();
 	let model = Model {
 		blocks: scenario_blocks(m, copies, &declared),
@@ -513,11 +525,15 @@ fn corruption(m: &Model, copies: &[ModelCopy]) -> Vec<i32> {
 		..m.clone()
 	};
 	let Ok(km) = super::sanity::sanity(&model) else {
-		return vec![i32::MAX; declared.len()];
+		return Ok(vec![i32::MAX; declared.len()]);
 	};
 	let program = Program::of(&model, &km);
-	let honest = execute(&Context::new(&program, &km), &Vec::new());
-	m.scenarios
+	let honest = execute(
+		&Context::new(&program, &km).cancellable(cancel),
+		&Vec::new(),
+	)
+	.map_err(|_| VerifpalError::cancelled())?;
+	Ok(m.scenarios
 		.iter()
 		.zip(copies)
 		.map(|(scenario, copy)| {
@@ -545,7 +561,7 @@ fn corruption(m: &Model, copies: &[ModelCopy]) -> Vec<i32> {
 				})
 				.unwrap_or(i32::MAX)
 		})
-		.collect()
+		.collect())
 }
 
 fn declares_private(m: &Model, principal: PrincipalId, id: ValueId) -> bool {
@@ -616,7 +632,7 @@ mod tests {
 	#[test]
 	fn a_two_scenario_model_clones_every_principal_once_per_scenario() {
 		let m = parse_string("scx.vp", SRC).expect("parses");
-		let e = expand_scenarios(&m, 1).expect("expands");
+		let e = expand_scenarios(&m, 1, &AtomicBool::new(false)).expect("expands");
 		let principals = e
 			.model
 			.blocks
@@ -629,7 +645,7 @@ mod tests {
 	#[test]
 	fn a_scenario_bound_to_a_leaked_peer_is_not_honest() {
 		let m = parse_string("scx.vp", SRC).expect("parses");
-		let e = expand_scenarios(&m, 1).expect("expands");
+		let e = expand_scenarios(&m, 1, &AtomicBool::new(false)).expect("expands");
 		assert_eq!(e.corrupt_from.map(|c| c.len()), Some(3));
 	}
 
@@ -637,7 +653,7 @@ mod tests {
 	fn a_scenario_naming_a_principal_the_model_does_not_declare_is_an_error() {
 		let src = SRC.replace("Alice[scx_gpeer = scx_gm]", "Carol[scx_gpeer = scx_gm]");
 		let m = parse_string("scx.vp", &src).expect("parses");
-		let Err(e) = expand_scenarios(&m, 1) else {
+		let Err(e) = expand_scenarios(&m, 1, &AtomicBool::new(false)) else {
 			panic!("must be rejected");
 		};
 		assert!(e.message.contains("does not declare"), "{}", e.message);
@@ -647,7 +663,7 @@ mod tests {
 	fn a_scenario_binding_a_constant_the_principal_does_not_know_is_an_error() {
 		let src = SRC.replace("Alice[scx_gpeer = scx_gb]", "Alice[scx_ni = scx_gb]");
 		let m = parse_string("scx.vp", &src).expect("parses");
-		let Err(e) = expand_scenarios(&m, 1) else {
+		let Err(e) = expand_scenarios(&m, 1, &AtomicBool::new(false)) else {
 			panic!("must be rejected");
 		};
 		assert!(e.message.contains("`knows`"), "{}", e.message);
@@ -657,7 +673,7 @@ mod tests {
 	fn a_scenario_binding_to_a_constant_no_principal_declares_is_an_error() {
 		let src = SRC.replace("Alice[scx_gpeer = scx_gb]", "Alice[scx_gpeer = scx_absent]");
 		let m = parse_string("scx.vp", &src).expect("parses");
-		let Err(e) = expand_scenarios(&m, 1) else {
+		let Err(e) = expand_scenarios(&m, 1, &AtomicBool::new(false)) else {
 			panic!("must be rejected");
 		};
 		assert!(e.message.contains("no principal declares"), "{}", e.message);
@@ -667,7 +683,7 @@ mod tests {
 	fn a_scenario_set_with_no_honest_member_is_still_analysable() {
 		let src = SRC.replace("Alice[scx_gpeer = scx_gb]\n", "");
 		let m = parse_string("scx.vp", &src).expect("parses");
-		let e = expand_scenarios(&m, 1).expect("expands");
+		let e = expand_scenarios(&m, 1, &AtomicBool::new(false)).expect("expands");
 		assert!(e.corrupt_from.as_ref().is_some_and(|c| c.is_empty()));
 		assert_eq!(e.scenarios.len(), 1);
 		assert!(!starts_honest(&e.scenarios[0]));
@@ -677,7 +693,7 @@ mod tests {
 	fn a_scenario_binding_a_constant_to_itself_keeps_its_declaration() {
 		let src = SRC.replace("Alice[scx_gpeer = scx_gb]", "Alice[scx_gpeer = scx_gpeer]");
 		let m = parse_string("scx.vp", &src).expect("parses");
-		let e = expand_scenarios(&m, 1).expect("expands");
+		let e = expand_scenarios(&m, 1, &AtomicBool::new(false)).expect("expands");
 		let kept = e.model.blocks.iter().any(|b| match b {
 			Block::Principal(p) => p.expressions.iter().any(|expr| {
 				expr.kind == Declaration::Knows
@@ -695,7 +711,7 @@ mod tests {
 			"Alice -> Bob: scx_m1\nAlice -> Bob: scx_gpeer\n",
 		);
 		let m = parse_string("scx.vp", &src).expect("parses");
-		let Err(e) = expand_scenarios(&m, 1) else {
+		let Err(e) = expand_scenarios(&m, 1, &AtomicBool::new(false)) else {
 			panic!("must be rejected");
 		};
 		assert!(e.message.contains("over the wire"), "{}", e.message);
@@ -708,7 +724,7 @@ mod tests {
 			"knows public scx_gpeer, scx_tag\n",
 		);
 		let m = parse_string("scx.vp", &src).expect("parses");
-		let e = expand_scenarios(&m, 1).expect("expands");
+		let e = expand_scenarios(&m, 1, &AtomicBool::new(false)).expect("expands");
 		let mut kept = 0;
 		let mut dropped = 0;
 		for block in &e.model.blocks {
@@ -736,7 +752,7 @@ mod tests {
 	fn leaking_a_public_key_does_not_make_a_scenario_corrupt() {
 		let src = SRC.replace("leaks scx_mk", "leaks scx_gm");
 		let m = parse_string("scx.vp", &src).expect("parses");
-		let e = expand_scenarios(&m, 1).expect("expands");
+		let e = expand_scenarios(&m, 1, &AtomicBool::new(false)).expect("expands");
 		assert!(
 			e.scenarios.iter().all(starts_honest),
 			"only a leaked secret marks a peer corrupt: {:?}",
@@ -748,7 +764,7 @@ mod tests {
 	fn an_inline_derived_private_key_marks_its_peer_only_once_its_seed_leaks() {
 		let inline = SRC.replace("scx_gm = PUBKEY(scx_mk)", "scx_gm = PUBKEY(HASH(scx_mk))");
 		let m = parse_string("scx.vp", &inline).expect("parses");
-		let e = expand_scenarios(&m, 1).expect("expands");
+		let e = expand_scenarios(&m, 1, &AtomicBool::new(false)).expect("expands");
 		assert!(
 			!starts_honest(&e.scenarios[1]),
 			"HASH(scx_mk) is Mallory's private key and scx_mk leaks: {:?}",
@@ -756,7 +772,7 @@ mod tests {
 		);
 		let kept = inline.replace("leaks scx_mk", "leaks scx_gm");
 		let m = parse_string("scx.vp", &kept).expect("parses");
-		let e = expand_scenarios(&m, 1).expect("expands");
+		let e = expand_scenarios(&m, 1, &AtomicBool::new(false)).expect("expands");
 		assert!(
 			e.scenarios.iter().all(starts_honest),
 			"leaking the public key computes nothing: {:?}",
@@ -782,7 +798,7 @@ mod tests {
 				)
 				.replace("leaks scx_mk", &format!("leaks {leaks}"));
 			let m = parse_string("scx.vp", &src).expect("parses");
-			let e = expand_scenarios(&m, 1).expect("expands");
+			let e = expand_scenarios(&m, 1, &AtomicBool::new(false)).expect("expands");
 			assert_eq!(
 				starts_honest(&e.scenarios[1]),
 				honest,
@@ -816,7 +832,7 @@ mod tests {
 		] {
 			let src = wrapped(wrap, extra);
 			let m = parse_string("scx.vp", &src).expect("parses");
-			let e = expand_scenarios(&m, 1).expect("expands");
+			let e = expand_scenarios(&m, 1, &AtomicBool::new(false)).expect("expands");
 			assert_eq!(
 				starts_honest(&e.scenarios[1]),
 				honest,
@@ -848,7 +864,7 @@ mod tests {
 			confidentiality? sbk_m\n\
 			]\n";
 		let m = parse_string("sbk.vp", src).expect("parses");
-		let e = expand_scenarios(&m, 1).expect("expands");
+		let e = expand_scenarios(&m, 1, &AtomicBool::new(false)).expect("expands");
 		assert!(starts_honest(&e.scenarios[0]));
 		assert!(
 			!starts_honest(&e.scenarios[1]),
@@ -867,9 +883,13 @@ mod tests {
 				"knows private sbk_t\n\t\t\tsbk_so = DEC(sbk_t, sbk_w)\n\t\t\tsbk_km = HASH(sbk_so)\n",
 			);
 		let m = parse_string("sbk.vp", &sealed).expect("parses");
-		crate::protocol::sanity::sanity(&expand_scenarios(&m, 1).expect("expands").model)
-			.expect("sane");
-		let e = expand_scenarios(&m, 1).expect("expands");
+		crate::protocol::sanity::sanity(
+			&expand_scenarios(&m, 1, &AtomicBool::new(false))
+				.expect("expands")
+				.model,
+		)
+		.expect("sane");
+		let e = expand_scenarios(&m, 1, &AtomicBool::new(false)).expect("expands");
 		assert!(
 			e.scenarios.iter().all(starts_honest),
 			"an ingredient never disclosed leaves the bound key secret: {:?}",
@@ -904,7 +924,7 @@ mod tests {
 			confidentiality? ppk_m\n\
 			]\n";
 		let m = parse_string("ppk.vp", src).expect("parses");
-		let e = expand_scenarios(&m, 1).expect("expands");
+		let e = expand_scenarios(&m, 1, &AtomicBool::new(false)).expect("expands");
 		assert!(
 			e.scenarios.iter().all(starts_honest),
 			"a public key on the wire gives the attacker no control of its owner: {:?}",
@@ -915,7 +935,7 @@ mod tests {
 			"ppk_gm = PUBKEY(ppk_mk)\n\t\t\tleaks ppk_mk\n",
 		);
 		let m = parse_string("ppk.vp", &leaked).expect("parses");
-		let e = expand_scenarios(&m, 1).expect("expands");
+		let e = expand_scenarios(&m, 1, &AtomicBool::new(false)).expect("expands");
 		assert!(starts_honest(&e.scenarios[0]));
 		assert!(!starts_honest(&e.scenarios[1]), "{:?}", e.scenarios);
 	}
@@ -929,7 +949,7 @@ mod tests {
 			)
 			.replace("leaks scx_mk", "leaks scx_mk2");
 		let m = parse_string("scx.vp", &src).expect("parses");
-		let e = expand_scenarios(&m, 1).expect("expands");
+		let e = expand_scenarios(&m, 1, &AtomicBool::new(false)).expect("expands");
 		assert!(starts_honest(&e.scenarios[0]));
 		assert!(
 			!starts_honest(&e.scenarios[1]),
@@ -1027,7 +1047,7 @@ mod tests {
 	#[test]
 	fn a_leaked_private_key_still_makes_its_scenario_corrupt() {
 		let m = parse_string("scx.vp", SRC).expect("parses");
-		let e = expand_scenarios(&m, 1).expect("expands");
+		let e = expand_scenarios(&m, 1, &AtomicBool::new(false)).expect("expands");
 		assert!(starts_honest(&e.scenarios[0]));
 		assert!(!starts_honest(&e.scenarios[1]));
 	}
@@ -1087,7 +1107,7 @@ mod tests {
 			 could have answered"
 		);
 
-		let e = expand_scenarios(&m, 1).expect("expands");
+		let e = expand_scenarios(&m, 1, &AtomicBool::new(false)).expect("expands");
 		assert!(
 			e.corrupt_from
 				.as_ref()
@@ -1109,7 +1129,7 @@ mod tests {
 	#[test]
 	fn every_session_clone_of_an_honest_scenario_stays_honest() {
 		let m = parse_string("scx.vp", SRC).expect("parses");
-		let expanded = crate::verify::expand(&m, 2).expect("expands");
+		let expanded = crate::verify::expand(&m, 2, &AtomicBool::new(false)).expect("expands");
 		let honest = expanded.corrupt_from.expect("scenarios mark honesty");
 		assert_eq!(honest.len(), 6);
 		let corrupt = expanded
@@ -1130,7 +1150,7 @@ mod tests {
 	#[test]
 	fn scenario_and_session_copies_never_share_an_id() {
 		let m = parse_string("scx.vp", SRC).expect("parses");
-		let expanded = crate::verify::expand(&m, 2).expect("expands");
+		let expanded = crate::verify::expand(&m, 2, &AtomicBool::new(false)).expect("expands");
 		let mut seen: IdSet<ValueId> = IdSet::default();
 		for block in &expanded.model.blocks {
 			let Block::Principal(p) = block else {

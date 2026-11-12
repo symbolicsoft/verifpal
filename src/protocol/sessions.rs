@@ -340,7 +340,7 @@ mod tests {
 
 	fn expanded() -> Expansion {
 		let m = parse_string("sessions.vp", SRC).expect("parse");
-		crate::verify::expand(&m, 2).expect("expand")
+		crate::verify::expand(&m, 2, &std::sync::atomic::AtomicBool::new(false)).expect("expand")
 	}
 
 	fn principal<'e>(e: &'e Expansion, name: &str) -> &'e Principal {
@@ -492,7 +492,8 @@ mod tests {
 		}
 		src += "queries[\nconfidentiality? cap_s0\n]\n";
 		let m = parse_string("cap.vp", &src).expect("parse");
-		let Err(err) = crate::verify::expand(&m, 2) else {
+		let Err(err) = crate::verify::expand(&m, 2, &std::sync::atomic::AtomicBool::new(false))
+		else {
 			panic!("65 * 2 > 128");
 		};
 		assert!(format!("{err}").contains("--sessions"));

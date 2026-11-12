@@ -248,7 +248,9 @@ impl<'a, 'b> Search<'a, 'b> {
 			{
 				continue;
 			}
-			let ex = self.execute_counted(&installs);
+			let Some(ex) = self.execute_counted(&installs) else {
+				return;
+			};
 			let accepted = self.as_family(Family::Rerouted, |search| search.accept(installs, ex));
 			self.tally(Family::Rerouted, accepted);
 		}

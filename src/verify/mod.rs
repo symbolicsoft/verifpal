@@ -44,9 +44,9 @@ pub(crate) struct Expansion {
 	pub(crate) dependent: IdSet<ValueId>,
 }
 
-pub(crate) fn expand(m: &Model, sessions: u8) -> VResult<Expansion> {
+pub(crate) fn expand(m: &Model, sessions: u8, cancel: &AtomicBool) -> VResult<Expansion> {
 	let sessions = sessions.max(1);
-	let e = crate::protocol::scenario::expand_scenarios(m, sessions)?;
+	let e = crate::protocol::scenario::expand_scenarios(m, sessions, cancel)?;
 	if sessions == 1 {
 		return Ok(e);
 	}
@@ -71,7 +71,7 @@ pub(crate) fn analyze_sessions_cancellable(
 		interchangeable,
 		actors,
 		dependent,
-	} = expand(m, sessions)?;
+	} = expand(m, sessions, &cancel)?;
 	let m = &model;
 	let mut trace = sanity(m)?;
 	trace.session_siblings = siblings;

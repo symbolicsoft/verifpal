@@ -32,6 +32,7 @@ pub(crate) struct Link {
 	pub(crate) kind: LinkKind,
 	pub(crate) value: Value,
 	pub(crate) components: Option<[Value; 2]>,
+	pub(crate) checks: [Option<Value>; 2],
 }
 
 struct Scope<'a> {
@@ -104,7 +105,8 @@ fn link<'s>(
 	let km = scope.km;
 	let (av, bv) = (&ha.value, &hb.value);
 	let observed = observed();
-	if !observable(scope, observed, av) || !observable(scope, observed, bv) {
+	let mut seen = IdMap::default();
+	if !observable(scope, observed, av, &mut seen) || !observable(scope, observed, bv, &mut seen) {
 		return None;
 	}
 	let same = honest_reduct(km, a).equivalent(&honest_reduct(km, b), true);
@@ -139,23 +141,25 @@ struct Tied {
 	term: Value,
 	tie: Tie,
 	via: Option<Value>,
+	check: Option<Value>,
 }
 
 fn ties(scope: &Scope, v: &Value, via: Option<&Value>) -> Vec<Tied> {
 	let known = scope.attacker().knows(v).is_some();
 	let mut out: Vec<Tied> = Vec::new();
-	let mut tie = |term: Value, tie: Tie| {
+	let mut tie = |term: Value, tie: Tie, check: Option<&Value>| {
 		out.push(Tied {
 			term,
 			tie,
 			via: via.cloned(),
+			check: check.cloned(),
 		})
 	};
 	if known {
-		tie(v.clone(), Tie::Itself);
+		tie(v.clone(), Tie::Itself, None);
 	}
 	for leaf in origin_leaves(scope, v).unwrap_or_default() {
-		tie(leaf, Tie::Built);
+		tie(leaf, Tie::Built, None);
 	}
 	let Value::Primitive(p) = v else {
 		return out;
@@ -163,9 +167,10 @@ fn ties(scope: &Scope, v: &Value, via: Option<&Value>) -> Vec<Tied> {
 	let Some((check, rule)) = crate::primitive::check_undoing(p.id) else {
 		return out;
 	};
-	if !runnable(scope, check, rule, p) {
+	let Some(run) = runnable(scope, check, rule, p) else {
 		return out;
-	}
+	};
+	let run = Some(&run);
 	if let Some(&identifying) = check.identifying_positions.first()
 		&& let Some(&key) = rule
 			.matching
@@ -178,7 +183,7 @@ fn ties(scope: &Scope, v: &Value, via: Option<&Value>) -> Vec<Tied> {
 			.and_then(|produced| check_input(check, rule, identifying, key, produced))
 		&& scope.obtainable(&identifier)
 	{
-		tie(identifier, Tie::Key(check.id));
+		tie(identifier, Tie::Key(check.id), run);
 	}
 	if known {
 		for arg in rule
@@ -191,9 +196,9 @@ fn ties(scope: &Scope, v: &Value, via: Option<&Value>) -> Vec<Tied> {
 			if !scope.obtainable(arg) {
 				continue;
 			}
-			tie(arg.clone(), Tie::Confirms(check.id));
+			tie(arg.clone(), Tie::Confirms(check.id), run);
 			for leaf in origin_leaves(scope, arg).unwrap_or_default() {
-				tie(leaf, Tie::Confirms(check.id));
+				tie(leaf, Tie::Confirms(check.id), run);
 			}
 		}
 	}
@@ -266,6 +271,7 @@ fn strongest(
 					kind,
 					value: w.clone(),
 					components,
+					checks: [a.check.clone(), b.check.clone()],
 				},
 			));
 		}
@@ -384,15 +390,29 @@ fn opening(value: &Value, capabilities: &CapabilityIndex, attacker: &AttackerSta
 	out
 }
 
-fn observable(scope: &Scope, observed: &TermSet, v: &Value) -> bool {
+fn observable(scope: &Scope, observed: &TermSet, v: &Value, seen: &mut IdMap<usize, bool>) -> bool {
 	if scope.attacker().knows(v).is_none() {
 		return false;
 	}
 	if observed.contains(v) || public(v, scope.km) {
 		return true;
 	}
-	matches!(v, Value::Primitive(p) if crate::primitive::core_reveals_arguments(p.id)
-		&& p.arguments.iter().all(|arg| observable(scope, observed, arg)))
+	let Value::Primitive(p) = v else {
+		return false;
+	};
+	if !crate::primitive::core_reveals_arguments(p.id) {
+		return false;
+	}
+	let key = Arc::as_ptr(p) as usize;
+	if let Some(&hit) = seen.get(&key) {
+		return hit;
+	}
+	let out = p
+		.arguments
+		.iter()
+		.all(|arg| observable(scope, observed, arg, seen));
+	seen.insert(key, out);
+	out
 }
 
 fn projected(v: &Value, memo: &mut IdMap<usize, Value>) -> Value {
@@ -612,17 +632,18 @@ pub(crate) fn check_inputs(p: &Primitive) -> Vec<Value> {
 	out
 }
 
-fn runnable(scope: &Scope, check: &PrimitiveSpec, rule: &RewriteRule, p: &Primitive) -> bool {
+fn runnable(
+	scope: &Scope,
+	check: &PrimitiveSpec,
+	rule: &RewriteRule,
+	p: &Primitive,
+) -> Option<Value> {
 	if !undoes(rule, p) {
-		return false;
+		return None;
 	}
-	let Some(&arity) = check.arity.last() else {
-		return false;
-	};
+	let &arity = check.arity.last()?;
 	let mut arguments = vec![crate::term::value_nil(); arity as usize];
-	let Some(source) = arguments.get_mut(rule.from) else {
-		return false;
-	};
+	let source = arguments.get_mut(rule.from)?;
 	*source = Value::Primitive(Arc::new(p.clone()));
 	let mut candidates = vec![(arguments, Vec::new())];
 	for (position, targets) in &rule.matching {
@@ -643,12 +664,15 @@ fn runnable(scope: &Scope, check: &PrimitiveSpec, rule: &RewriteRule, p: &Primit
 			}
 		}
 		if next.is_empty() {
-			return false;
+			return None;
 		}
 		candidates = next;
 	}
-	candidates.into_iter().any(|(arguments, _)| {
-		crate::theory::can_rewrite(&Arc::new(Primitive::new(check.id, arguments, 0))).0
+	candidates.into_iter().find_map(|(arguments, _)| {
+		let run = Arc::new(Primitive::new(check.id, arguments, 0));
+		crate::theory::can_rewrite(&run)
+			.0
+			.then_some(Value::Primitive(run))
 	})
 }
 
@@ -855,7 +879,7 @@ mod tests {
 				.position(|s| s.constant.name.as_ref() == name)
 				.unwrap()
 		};
-		let honest = execute(&cx, &vec![]);
+		let honest = execute(&cx, &vec![]).expect("uncancelled");
 		let y = honest.runs[bob].held(slot("y")).unwrap().value.clone();
 		let s = crate::testing::trace_constant(&km, "s");
 		let wrap = |v: Value| Value::primitive(PRIM_HASH, vec![v, crate::term::value_nil()], 0);
@@ -868,7 +892,8 @@ mod tests {
 					slot: slot("x"),
 					value: value.clone(),
 				}],
-			);
+			)
+			.expect("uncancelled");
 			assert!(ex.runs[bob].held(slot("x")).unwrap().installed.is_some());
 			assert!(ex.knowledge.state.knows(&s).is_some());
 			let supplied = supplied(&cx, &ex, [(bob, slot("a")), (bob, slot("b"))]);
@@ -909,7 +934,7 @@ mod tests {
 				.position(|s| s.constant.name.as_ref() == name)
 				.unwrap()
 		};
-		let gb = execute(&cx, &vec![]).runs[bob]
+		let gb = execute(&cx, &vec![]).expect("uncancelled").runs[bob]
 			.held(slot("gb"))
 			.unwrap()
 			.value
@@ -922,7 +947,7 @@ mod tests {
 			})
 			.into_iter()
 			.collect();
-		let ex = execute(&cx, &installs);
+		let ex = execute(&cx, &installs).expect("uncancelled");
 		assert!(ex.stuck.is_empty());
 		let claims = |_| Some(0);
 		crate::engine::judgment::Judge::at(&cx, &ex, 0, &claims)
@@ -962,7 +987,7 @@ mod tests {
 			})
 			.into_iter()
 			.collect();
-		let ex = execute(&cx, &installs);
+		let ex = execute(&cx, &installs).expect("uncancelled");
 		let ex = ex.at(phase);
 		let scope = Scope {
 			km: &km,
@@ -972,7 +997,12 @@ mod tests {
 			&km.slots[slot(target)].constant,
 			&km,
 		));
-		observable(&scope, &observed(&scope, &cx, ex), &value)
+		observable(
+			&scope,
+			&observed(&scope, &cx, ex),
+			&value,
+			&mut IdMap::default(),
+		)
 	}
 
 	#[test]

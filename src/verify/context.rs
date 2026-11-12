@@ -84,6 +84,10 @@ impl VerifyContext {
 		self.cancel.load(Ordering::Relaxed)
 	}
 
+	pub(crate) fn cancel(&self) -> &AtomicBool {
+		&self.cancel
+	}
+
 	pub(crate) fn note_truncation(&self, kind: Truncation) {
 		if read_lock(&self.truncations).contains_key(&kind) {
 			return;

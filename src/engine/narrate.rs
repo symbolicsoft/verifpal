@@ -7,6 +7,7 @@ use super::exec::{Context, Execution, Taken};
 use super::judgment::Violation;
 use super::knowledge::{Knowledge, Origin};
 use super::program::{DeliveryIdx, Event, RunIdx};
+use super::unlink::Link;
 use crate::primitive::Capability;
 use crate::protocol::{ProtocolTrace, SlotIdx};
 use crate::syntax::names::copy_base_name;
@@ -29,6 +30,7 @@ pub(crate) struct Narrator<'a, 'b> {
 	pub(crate) steps: Vec<TraceStep>,
 	explained: crate::term::hashing::TermSet,
 	forged: crate::term::hashing::TermSet,
+	rebuilt: crate::term::hashing::TermSet,
 	pending: Vec<Value>,
 }
 
@@ -141,8 +143,34 @@ impl<'a, 'b> Narrator<'a, 'b> {
 			steps: Vec::new(),
 			explained: crate::term::hashing::TermSet::default(),
 			forged: crate::term::hashing::TermSet::default(),
+			rebuilt: crate::term::hashing::TermSet::default(),
 			pending: Vec::new(),
 		}
+	}
+
+	pub(crate) fn continued(mut self, whole: &'a Execution) -> Self {
+		let program = self.cx.program;
+		let from = self.ex.order.len();
+		let acts = whole.order.iter().skip(from).any(|taken| {
+			match program.runs[taken.run].steps[taken.step].event {
+				Event::Recv(d) => program.deliveries[d].slots.iter().any(|&(slot, _)| {
+					whole.runs[taken.run]
+						.held(slot)
+						.is_none_or(|held| held.installed.is_some())
+				}),
+				_ => false,
+			}
+		});
+		if !acts {
+			return self;
+		}
+		let mut later = Narrator::new(self.cx, whole, self.honest);
+		later.steps = std::mem::take(&mut self.steps);
+		later.explained = std::mem::take(&mut self.explained);
+		later.forged = std::mem::take(&mut self.forged);
+		later.gated = std::mem::take(&mut self.gated);
+		later.actions(from);
+		later
 	}
 
 	fn prefix(&self) -> usize {
@@ -647,7 +675,12 @@ impl<'a, 'b> Narrator<'a, 'b> {
 				self.steps.push(step);
 			}
 		}
-		for (at, &Taken { run, step, .. }) in self.ex.order.iter().enumerate() {
+		self.actions(0);
+	}
+
+	fn actions(&mut self, from: usize) {
+		let program = self.cx.program;
+		for (at, &Taken { run, step, .. }) in self.ex.order.iter().enumerate().skip(from) {
 			match program.runs[run].steps[step].event {
 				Event::Recv(d) => self.delivery(at, run, d),
 				Event::Assign(slot) if self.influenced(run, slot, &mut Vec::new()) => {
@@ -656,6 +689,104 @@ impl<'a, 'b> Narrator<'a, 'b> {
 				_ => {}
 			}
 		}
+	}
+
+	fn constructed(&self, v: &Value) -> bool {
+		let (knowledge, len) = self.view();
+		knowledge.knows(v).is_some_and(|i| {
+			i < len
+				&& self.disclosure(v).is_none()
+				&& matches!(
+					knowledge.origin(i),
+					Origin::Derived(DerivationRecord::Reconstructed { .. })
+				)
+		})
+	}
+
+	fn opened_out_of(&self, outer: &Value, inner: &Value) -> bool {
+		let (knowledge, len) = self.view();
+		knowledge.knows(inner).is_some_and(|i| {
+			i < len
+				&& self.disclosure(inner).is_none()
+				&& match knowledge.origin(i) {
+					Origin::Derived(
+						DerivationRecord::Decomposed { of, .. }
+						| DerivationRecord::Fragment { of }
+						| DerivationRecord::Broken {
+							of,
+							capability: Capability::Weak,
+							..
+						}
+						| DerivationRecord::Reused { of, .. },
+					) => of.equivalent(outer, true),
+					_ => false,
+				}
+		})
+	}
+
+	fn recognizes(&mut self, outer: &Value, inner: &Value) {
+		if inner.equivalent(outer, true) || self.constructed(outer) {
+			return;
+		}
+		let built = match outer {
+			Value::Primitive(p) if !self.opened_out_of(outer, inner) => self.oriented(p),
+			_ => None,
+		};
+		let Some(built) = built else {
+			self.visit(inner, false);
+			return;
+		};
+		if !self.rebuilt.insert(outer.clone()) {
+			return;
+		}
+		let mut from: Vec<String> = Vec::new();
+		for argument in &built.arguments {
+			self.visit(argument, false);
+			let shown = self.term(argument, &[]);
+			if !from.contains(&shown) {
+				from.push(shown);
+			}
+		}
+		let shown = self.term(outer, &[]);
+		let from = match from.split_last() {
+			Some((last, rest)) if !rest.is_empty() => format!("{} and {last}", rest.join(", ")),
+			_ => from.join(", "),
+		};
+		self.say(format!(
+			"Attacker rebuilds {shown} from {from}, which matches the value it holds."
+		));
+	}
+
+	fn confirmed(&mut self, check: &Value) {
+		let Value::Primitive(p) = check else {
+			return;
+		};
+		if !self.rebuilt.insert(check.clone()) {
+			return;
+		}
+		for argument in &p.arguments {
+			self.visit(argument, false);
+		}
+		let shown = self.spelled(check, &[]);
+		self.say(format!("Attacker runs {shown}, which succeeds."));
+	}
+
+	fn linked(&mut self, link: &Link, resolved: &[(Constant, Value)]) {
+		for (side, (_, whole)) in resolved.iter().enumerate().take(2) {
+			self.visit(whole, false);
+			let subject = match &link.components {
+				Some(parts) => {
+					self.recognizes(whole, &parts[side]);
+					&parts[side]
+				}
+				None => whole,
+			};
+			match &link.checks[side] {
+				Some(check) => self.confirmed(check),
+				None => self.recognizes(subject, &link.value),
+			}
+		}
+		self.visit(&link.value, false);
 	}
 
 	fn delivery(&mut self, at: usize, run: RunIdx, d: DeliveryIdx) {
@@ -1043,6 +1174,7 @@ impl<'a, 'b> Narrator<'a, 'b> {
 			} => self.stale(*run, *slot, value, *used, *repeated),
 			Violation::Linked { link, resolved } => {
 				self.resolves(resolved);
+				self.linked(link, resolved);
 				let [a, b] = [&resolved[0].0, &resolved[1].0].map(ToString::to_string);
 				format!(
 					"Attacker links {a} and {b} {}.",

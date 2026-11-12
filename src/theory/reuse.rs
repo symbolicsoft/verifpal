@@ -6,7 +6,9 @@ use super::decompose::revealed;
 use super::obtain::obtainable;
 use crate::primitive::{CapabilityIndex, ReuseRule, is_tuple, reuse_rule};
 use crate::term::equivalence::equivalent_primitives;
-use crate::term::{Primitive, PrimitiveId, Value};
+use crate::term::{Primitive, Value};
+use crate::util::{IdMap, IdSet};
+use std::sync::Arc;
 
 pub(crate) struct Forgery {
 	pub(crate) pair: [Value; 2],
@@ -54,71 +56,88 @@ pub(crate) fn fields<'a>(v: &'a Value, like: &Value) -> Option<&'a [Value]> {
 	}
 }
 
-pub(crate) type Keystream = Vec<(Vec<(PrimitiveId, usize)>, Value)>;
+type Pair = (usize, usize);
 
-fn spans(known: &Value, want: &Value) -> bool {
-	match (fields(known, want), fields(want, known)) {
-		(Some(have), Some(wanted)) => {
-			have.len() >= wanted.len() && wanted.iter().zip(have).all(|(w, k)| spans(k, w))
+fn pair(a: &Value, b: &Value) -> Option<Pair> {
+	match (a, b) {
+		(Value::Primitive(a), Value::Primitive(b)) => {
+			Some((Arc::as_ptr(a) as usize, Arc::as_ptr(b) as usize))
 		}
-		_ => true,
+		_ => None,
 	}
 }
 
-fn aligned(known: &Value, under: &Value, out: &mut Vec<(Value, Vec<Value>)>) {
-	if spans(known, under) {
-		out.push((under.clone(), vec![known.clone()]));
+fn spans(known: &Value, want: &Value, memo: &mut IdMap<Pair, bool>) -> bool {
+	let (Some(have), Some(wanted), Some(key)) =
+		(fields(known, want), fields(want, known), pair(known, want))
+	else {
+		return true;
+	};
+	if let Some(&hit) = memo.get(&key) {
+		return hit;
+	}
+	let out = have.len() >= wanted.len() && wanted.iter().zip(have).all(|(w, k)| spans(k, w, memo));
+	memo.insert(key, out);
+	out
+}
+
+#[derive(Default)]
+struct Unmasking {
+	spans: IdMap<Pair, bool>,
+	aligned: IdSet<Pair>,
+	read: IdSet<Pair>,
+	out: Vec<(Value, Vec<Value>)>,
+}
+
+fn aligned(known: &Value, under: &Value, walk: &mut Unmasking) {
+	if let Some(key) = pair(known, under)
+		&& !walk.aligned.insert(key)
+	{
+		return;
+	}
+	if spans(known, under, &mut walk.spans) {
+		walk.out.push((under.clone(), vec![known.clone()]));
 		return;
 	}
 	if let (Some(have), Some(wanted)) = (fields(known, under), fields(under, known)) {
 		for (k, w) in have.iter().zip(wanted) {
-			aligned(k, w, out);
+			aligned(k, w, walk);
 		}
 	}
 }
 
-fn readable(
-	v: &Value,
-	path: &mut Vec<(PrimitiveId, usize)>,
+fn unmasked(
+	known: &Value,
+	under: &Value,
 	capabilities: &CapabilityIndex,
 	attacker: &AttackerState,
-	out: &mut Keystream,
+	walk: &mut Unmasking,
 ) {
-	if obtainable(v, capabilities, attacker) {
-		out.push((path.clone(), v.clone()));
+	if obtainable(known, capabilities, attacker) {
+		aligned(known, under, walk);
 		return;
 	}
-	if let Value::Primitive(tuple) = v
-		&& is_tuple(tuple.id)
-	{
-		for (i, field) in tuple.arguments.iter().enumerate() {
-			path.push((tuple.id, i));
-			readable(field, path, capabilities, attacker, out);
-			path.pop();
-		}
+	let (Some(have), Some(wanted), Some(key)) = (
+		fields(known, under),
+		fields(under, known),
+		pair(known, under),
+	) else {
+		return;
+	};
+	if !walk.read.insert(key) {
+		return;
+	}
+	for (k, w) in have.iter().zip(wanted) {
+		unmasked(k, w, capabilities, attacker, walk);
 	}
 }
 
-pub(crate) fn keystream_of(
-	member: &Value,
+pub(crate) fn opened_by(
+	of: &Primitive,
+	partner: &Value,
 	capabilities: &CapabilityIndex,
 	attacker: &AttackerState,
-) -> Keystream {
-	let mut out = Vec::new();
-	if let Some(plaintext) = masked(member) {
-		readable(plaintext, &mut Vec::new(), capabilities, attacker, &mut out);
-	}
-	out
-}
-
-fn beneath<'a>(v: &'a Value, path: &[(PrimitiveId, usize)]) -> Option<&'a Value> {
-	path.iter().try_fold(v, |v, &(id, i)| match v {
-		Value::Primitive(tuple) if tuple.id == id => tuple.arguments.get(i),
-		_ => None,
-	})
-}
-
-pub(crate) fn opened_with(of: &Primitive, keystream: &Keystream) -> Vec<(Value, Vec<Value>)> {
+) -> Vec<(Value, Vec<Value>)> {
 	let Some(rule) = reuse_rule(of.id) else {
 		return Vec::new();
 	};
@@ -128,25 +147,12 @@ pub(crate) fn opened_with(of: &Primitive, keystream: &Keystream) -> Vec<(Value, 
 			.map(|v| (v, Vec::new()))
 			.collect();
 	};
-	let Some(plaintext) = of.arguments.get(at) else {
+	let (Some(plaintext), Some(known)) = (of.arguments.get(at), masked(partner)) else {
 		return Vec::new();
 	};
-	let mut out = Vec::new();
-	for (path, known) in keystream {
-		if let Some(under) = beneath(plaintext, path) {
-			aligned(known, under, &mut out);
-		}
-	}
-	out
-}
-
-fn opened_by(
-	of: &Primitive,
-	partner: &Value,
-	capabilities: &CapabilityIndex,
-	attacker: &AttackerState,
-) -> Vec<(Value, Vec<Value>)> {
-	opened_with(of, &keystream_of(partner, capabilities, attacker))
+	let mut walk = Unmasking::default();
+	unmasked(known, plaintext, capabilities, attacker, &mut walk);
+	walk.out
 }
 
 fn pairs_of<'a>(
@@ -188,6 +194,16 @@ pub(crate) fn opened(
 struct Cover {
 	base: Option<Value>,
 	using: Vec<Value>,
+	spans: IdMap<Pair, bool>,
+	covered: IdMap<Vec<usize>, bool>,
+}
+
+fn node(v: &Value) -> [usize; 2] {
+	match v {
+		Value::Primitive(p) => [0, Arc::as_ptr(p) as usize],
+		Value::Constant(c) => [1, c.id as usize],
+		Value::Variable(_) => [2, v.hash_value() as usize],
+	}
 }
 
 fn covers(
@@ -200,7 +216,7 @@ fn covers(
 ) -> bool {
 	if let Some((_, known)) = under
 		.iter()
-		.find(|(_, field)| attacker.knows(field).is_some() && spans(field, want))
+		.find(|(_, field)| attacker.knows(field).is_some() && spans(field, want, &mut cover.spans))
 		&& obtainable(want, capabilities, attacker)
 	{
 		cover.using.push((*known).clone());
@@ -223,13 +239,27 @@ fn covers(
 	if !is_tuple(tuple.id) {
 		return false;
 	}
-	tuple.arguments.iter().enumerate().all(|(i, field)| {
+	let key: Vec<usize> = node(want)
+		.into_iter()
+		.chain([usize::from(written)])
+		.chain(
+			under
+				.iter()
+				.flat_map(|&(member, v)| node(member).into_iter().chain(node(v))),
+		)
+		.collect();
+	if let Some(&hit) = cover.covered.get(&key) {
+		return hit;
+	}
+	let out = tuple.arguments.iter().enumerate().all(|(i, field)| {
 		let inner: Vec<(&Value, &Value)> = under
 			.iter()
 			.filter_map(|&(member, v)| Some((member, fields(v, want)?.get(i)?)))
 			.collect();
 		!inner.is_empty() && covers(field, &inner, true, capabilities, attacker, cover)
-	})
+	});
+	cover.covered.insert(key, out);
+	out
 }
 
 pub(crate) fn forgery(
@@ -286,9 +316,10 @@ pub(crate) fn forgery(
 
 pub(crate) fn keystream(p: &Primitive, attacker: &AttackerState) -> Option<Value> {
 	let want = p.arguments.get(reuse_rule(p.id)?.masked?)?;
+	let mut memo = IdMap::default();
 	pairs_of(p, attacker)
 		.flatten()
 		.filter_map(masked)
-		.find(|known| attacker.knows(known).is_some() && spans(known, want))
+		.find(|known| attacker.knows(known).is_some() && spans(known, want, &mut memo))
 		.cloned()
 }

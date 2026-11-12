@@ -10,6 +10,7 @@ use crate::protocol::trace::mentions_across_principals;
 use crate::syntax::{PrincipalId, Query, QueryKind};
 use crate::term::{Constant, Value, ValueId};
 use crate::theory::{can_rewrite, obtainable};
+use crate::util::IdMap;
 
 #[derive(Clone, Debug)]
 pub(crate) enum Violation {
@@ -351,6 +352,7 @@ impl<'a, 'b> Judge<'a, 'b> {
 		let c = q.subject().ok()?;
 		let slot = km.index_of(c)?;
 		let siblings = self.km().sibling_slots(slot);
+		let mut replayed = IdMap::default();
 		self.claimed_runs().find_map(|r| {
 			let state = self.state(r)?;
 			let h = state.held(slot)?;
@@ -360,7 +362,7 @@ impl<'a, 'b> Judge<'a, 'b> {
 			});
 			let repeated = match fresh {
 				false => None,
-				true if !self.replayed_into(state, r, slot) => return None,
+				true if !self.replayed_into(state, r, slot, &mut replayed) => return None,
 				true => Some(
 					self.accepting(self.cx.program.runs[r].id, &siblings, &h.value)
 						.map(|(other, _)| other)
@@ -378,7 +380,13 @@ impl<'a, 'b> Judge<'a, 'b> {
 		})
 	}
 
-	fn replayed_into(&self, state: &RunState, r: RunIdx, slot: SlotIdx) -> bool {
+	fn replayed_into(
+		&self,
+		state: &RunState,
+		r: RunIdx,
+		slot: SlotIdx,
+		seen: &mut IdMap<(usize, SlotIdx), bool>,
+	) -> bool {
 		let km = self.km();
 		let program = &self.cx.program.runs[r];
 		let Some(held) = state.held(slot) else {
@@ -387,24 +395,30 @@ impl<'a, 'b> Judge<'a, 'b> {
 		if held.authored {
 			return true;
 		}
-		if km.slots[slot].creator != program.id {
-			return held
-				.sender
-				.is_some_and(|sender| self.replayed_into(&self.ex.runs[sender], sender, slot));
+		let key = (std::ptr::from_ref(state) as usize, slot);
+		if let Some(&hit) = seen.get(&key) {
+			return hit;
 		}
-		let value = &km.slots[slot].initial_value;
-		program.steps.iter().any(|step| match step.event {
-			Event::Recv(d) => self.cx.program.deliveries[d].slots.iter().any(|&(t, _)| {
-				mentions(
-					km,
-					value,
-					km.slots[t].constant.id,
-					program.id,
-					&mut Vec::new(),
-				) && self.replayed_into(state, r, t)
-			}),
-			_ => false,
-		})
+		let out = if km.slots[slot].creator != program.id {
+			held.sender
+				.is_some_and(|sender| self.replayed_into(&self.ex.runs[sender], sender, slot, seen))
+		} else {
+			let value = &km.slots[slot].initial_value;
+			program.steps.iter().any(|step| match step.event {
+				Event::Recv(d) => self.cx.program.deliveries[d].slots.iter().any(|&(t, _)| {
+					mentions(
+						km,
+						value,
+						km.slots[t].constant.id,
+						program.id,
+						&mut Vec::new(),
+					) && self.replayed_into(state, r, t, seen)
+				}),
+				_ => false,
+			})
+		};
+		seen.insert(key, out);
+		out
 	}
 
 	fn equivalence(&self, q: &Query) -> Option<Violation> {

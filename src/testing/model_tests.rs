@@ -6066,3 +6066,174 @@ fn test_search_late_disclosure_is_no_source() {
 		run_model_sessions(model, 2, "a1");
 	}
 }
+
+#[test]
+fn test_search_unlink_nested_requirements() {
+	for sessions in [1, 2] {
+		for (model, code) in [
+			("search_unlink_nested_requirements.vp", "u1"),
+			("search_unlink_nested_requirements_public_salts.vp", "u1"),
+			("search_unlink_nested_requirements_message_query.vp", "c1u1"),
+			("search_unlink_nested_requirements_guarded.vp", "u0"),
+		] {
+			run_model_sessions(model, sessions, code);
+		}
+	}
+}
+
+#[test]
+fn a_link_is_narrated_with_the_disclosures_and_checks_it_rests_on() {
+	for sessions in [1, 2] {
+		for model in [
+			"search_unlink_nested_requirements.vp",
+			"search_unlink_nested_requirements_message_query.vp",
+		] {
+			let (results, _) =
+				crate::verify::verify_with_sessions(&format!("examples/test/{model}"), sessions)
+					.expect("verify");
+			let linked = results.last().expect("the unlinkability query");
+			let trace = &linked.summary;
+			let line = |text: &str| {
+				trace
+					.lines()
+					.position(|l| l.contains(text))
+					.unwrap_or_else(|| {
+						panic!(
+							"{model} at {sessions}: the trace must say `{text}`. Narrated: {trace}"
+						)
+					})
+			};
+			for (salt, hash, signature, key) in [
+				("ra", "hone", "sigone", "pkone"),
+				("rb", "htwo", "sigtwo", "pktwo"),
+			] {
+				let handed = line(&format!("Attacker is handed {salt} by a leaks declaration"));
+				let rebuilt = line(&format!("Attacker rebuilds {hash} from {signature} and "));
+				let message = line("Attacker is handed rm by a leaks declaration in Mary.");
+				let checked = line(&format!(
+					"Attacker runs SIGNVERIF({key}, m, {signature}), which succeeds."
+				));
+				assert!(
+					handed < rebuilt && rebuilt < checked && message < checked,
+					"{model} at {sessions}: a salt is disclosed before its hash is rebuilt, \
+					 and the message before a signature is checked. Narrated: {trace}"
+				);
+			}
+			for text in [
+				"Attacker is handed rm by a leaks declaration in Mary.",
+				"Attacker rebuilds htwo from sigtwo and salttwo",
+				"Attacker runs SIGNVERIF(pktwo, m, sigtwo), which succeeds.",
+			] {
+				assert!(
+					linked.steps.iter().any(|step| step.text.contains(text)),
+					"{model} at {sessions}: the structured steps carry the same evidence"
+				);
+			}
+			assert!(
+				linked
+					.conclusion
+					.contains("through sigone and sigtwo, linked via m, which SIGNVERIF confirms"),
+				"{}",
+				linked.conclusion
+			);
+		}
+	}
+}
+
+#[test]
+fn test_precondition_later_phase_action() {
+	for sessions in [1, 2] {
+		for (model, code) in [
+			("precondition_later_phase_action.vp", "c1"),
+			("precondition_later_phase_action_guarded.vp", "c0"),
+			("precondition_later_phase_action_unconditional.vp", "c1"),
+		] {
+			run_model_sessions(model, sessions, code);
+		}
+	}
+}
+
+#[test]
+fn a_trace_shows_the_later_phase_actions_its_verdict_needs() {
+	let traced = |model: &str, sessions: u8| {
+		let (results, _) =
+			crate::verify::verify_with_sessions(&format!("examples/test/{model}"), sessions)
+				.expect("verify");
+		results.into_iter().next().expect("one query")
+	};
+	for sessions in [1, 2] {
+		let needed = traced("precondition_later_phase_action.vp", sessions);
+		let trace = &needed.summary;
+		let line = |text: &str| trace.lines().position(|l| l.contains(text));
+		let (Some(disclosed), Some(built), Some(replaced), Some(passed)) = (
+			line("Attacker opens e with nil, obtaining m."),
+			line("Attacker constructs SIGN(nil, m)."),
+			line("Attacker replaces sig (sent by Bob to Alice) with SIGN(nil, m)."),
+			line("Alice's SIGNVERIF(PUBKEY(nil), m, SIGN(nil, m))? passes"),
+		) else {
+			panic!(
+				"Alice sends receipt only after a signature check that Bob's signature fails \
+				 under the replaced key, so the trace must replace sig too. Narrated: {trace}"
+			);
+		};
+		assert!(disclosed < built && built < replaced && replaced < passed);
+		assert!(
+			needed.steps.iter().any(|step| step.kind == "mutations"
+				&& step.values.iter().any(|value| value.name == "sig")),
+			"the structured steps carry the phase 1 replacement"
+		);
+		assert_eq!(needed.options.len(), 1);
+		let unneeded = traced("precondition_later_phase_action_unconditional.vp", sessions);
+		assert!(
+			!unneeded.summary.contains("sig") && unneeded.steps.len() == 4,
+			"without the precondition nothing in phase 1 is part of the attack. Narrated: {}",
+			unneeded.summary
+		);
+	}
+}
+
+#[test]
+fn a_shared_plaintext_under_a_reused_nonce_is_walked_by_node() {
+	for sessions in [1, 2] {
+		run_model_sessions("aead_nonce_reuse_shared_dag.vp", sessions, "c0c0");
+		run_model_sessions("aead_nonce_reuse_shared_dag_known.vp", sessions, "c1");
+		run_model_sessions(
+			"aead_nonce_reuse_shared_dag_known_fresh_nonce.vp",
+			sessions,
+			"c0",
+		);
+	}
+}
+
+#[test]
+fn observability_walks_a_shared_tuple_by_node() {
+	for sessions in [1, 2] {
+		run_model_sessions("unlink_observable_shared_dag.vp", sessions, "u0");
+		run_model_sessions("unlink_observable_shared_dag_roots.vp", sessions, "u0");
+		run_model_sessions("unlink_observable_shared_dag_shared.vp", sessions, "u1");
+	}
+}
+
+#[test]
+fn replay_provenance_is_decided_once_per_run_and_value() {
+	for sessions in [1, 2] {
+		run_model_sessions("freshness_converging_dependencies.vp", sessions, "f0");
+	}
+	run_model_sessions("freshness_converging_dependencies_replayed.vp", 1, "f0");
+	run_model_sessions("freshness_converging_dependencies_replayed.vp", 2, "f1");
+}
+
+#[test]
+fn unequal_values_with_colliding_index_hashes_are_compared_by_node() {
+	for sessions in [1, 2] {
+		run_model_sessions("equivalence_colliding_hashes.vp", sessions, "c0");
+	}
+}
+
+#[test]
+fn test_auto_queries_under_scenario_bindings() {
+	for sessions in [1, 2] {
+		run_model_sessions("auto_queries_identity_scenario.vp", sessions, "c1");
+		run_model_sessions("auto_queries_shared_rebound.vp", sessions, "c1");
+	}
+}

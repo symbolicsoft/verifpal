@@ -24,27 +24,14 @@ fn secret_arguments<'v>(held: &'v Value, km: &ProtocolTrace) -> impl Iterator<It
 		.filter(|a| crate::engine::unlink::depends_on_secret(a, km))
 }
 
-fn requirements(held: &Value, km: &ProtocolTrace) -> Vec<Vec<Value>> {
-	let mut routes = Vec::new();
-	let mut pending = vec![held.clone()];
-	let mut seen = TermSet::default();
-	while let Some(v) = pending.pop() {
-		if !seen.insert(v.clone()) {
-			continue;
+fn joined(along: &[usize], more: Vec<usize>) -> Vec<usize> {
+	let mut out = along.to_vec();
+	for idx in more {
+		if !out.contains(&idx) {
+			out.push(idx);
 		}
-		routes.push(secret_arguments(&v, km).cloned().collect());
-		let Value::Primitive(p) = &v else {
-			continue;
-		};
-		routes.push(
-			crate::engine::unlink::check_inputs(p)
-				.into_iter()
-				.filter(|input| crate::engine::unlink::depends_on_secret(input, km))
-				.collect(),
-		);
-		pending.extend(p.arguments.iter().cloned());
 	}
-	routes
+	out
 }
 
 fn add_set(sets: &mut Vec<Vec<usize>>, set: Vec<usize>) {
@@ -455,15 +442,11 @@ impl<'a, 'b> Search<'a, 'b> {
 					let mut wanted: Vec<Vec<usize>> = Vec::new();
 					match q.kind {
 						QueryKind::Unlinkability => {
-							let ours: Vec<Vec<usize>> = requirements(held, km)
-								.iter()
-								.map(|route| self.missing(route, *holder))
-								.collect();
+							let ours = self.routes(held, *holder);
 							let theirs: Vec<Vec<usize>> = self
 								.partners(&q.constants, c, *holder)
 								.iter()
-								.flat_map(|partner| requirements(partner, km))
-								.map(|route| self.missing(&route, *holder))
+								.flat_map(|partner| self.routes(partner, *holder))
 								.collect();
 							for route in &ours {
 								add_set(&mut wanted, route.clone());
@@ -566,6 +549,43 @@ impl<'a, 'b> Search<'a, 'b> {
 				plan = next;
 			}
 		}
+	}
+
+	fn routes(&self, held: &Value, holder: NodeIdx) -> Vec<Vec<usize>> {
+		let km = self.cx.km;
+		let mut routes: Vec<Vec<usize>> = Vec::new();
+		let mut pending: Vec<(Value, Vec<usize>)> = vec![(held.clone(), Vec::new())];
+		let mut seen: Vec<(Vec<usize>, TermSet)> = Vec::new();
+		while let Some((v, along)) = pending.pop() {
+			let at = match seen.iter().position(|(other, _)| same_set(other, &along)) {
+				Some(at) => at,
+				None => {
+					seen.push((along.clone(), TermSet::default()));
+					seen.len() - 1
+				}
+			};
+			if !seen[at].1.insert(v.clone()) {
+				continue;
+			}
+			let arguments: Vec<Value> = secret_arguments(&v, km).cloned().collect();
+			let rebuilt = joined(&along, self.missing(&arguments, holder));
+			add_set(&mut routes, rebuilt.clone());
+			let Value::Primitive(p) = &v else {
+				continue;
+			};
+			let inputs: Vec<Value> = crate::engine::unlink::check_inputs(p)
+				.into_iter()
+				.filter(|input| crate::engine::unlink::depends_on_secret(input, km))
+				.collect();
+			add_set(&mut routes, joined(&along, self.missing(&inputs, holder)));
+			let below = if crate::primitive::core_reveals_arguments(p.id) {
+				along
+			} else {
+				rebuilt
+			};
+			pending.extend(p.arguments.iter().map(|a| (a.clone(), below.clone())));
+		}
+		routes
 	}
 
 	fn missing(&self, wanted: &[Value], holder: NodeIdx) -> Vec<usize> {

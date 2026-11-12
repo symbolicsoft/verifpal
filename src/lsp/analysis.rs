@@ -102,9 +102,12 @@ impl Job {
 	}
 }
 
+type Worker = std::thread::JoinHandle<()>;
+
 pub(crate) struct Runner {
 	sender: crossbeam_channel::Sender<Message>,
-	running: HashMap<String, Arc<Live>>,
+	running: HashMap<String, (Arc<Live>, Worker)>,
+	retiring: Vec<Worker>,
 	verdicts: Verdicts,
 }
 
@@ -113,6 +116,7 @@ impl Runner {
 		Runner {
 			sender,
 			running: HashMap::new(),
+			retiring: Vec::new(),
 			verdicts: Arc::default(),
 		}
 	}
@@ -121,7 +125,7 @@ impl Runner {
 		let uri = self
 			.running
 			.iter()
-			.find(|(_, live)| live.token == token)
+			.find(|(_, (live, _))| live.token == token)
 			.map(|(uri, _)| uri.clone());
 		uri.is_some_and(|uri| self.cancel(&uri))
 	}
@@ -143,34 +147,46 @@ impl Runner {
 	}
 
 	pub(crate) fn cancel(&mut self, uri: &str) -> bool {
-		let Some(live) = self.running.remove(uri) else {
+		let Some((live, worker)) = self.running.remove(uri) else {
 			return false;
 		};
-		live.cancel()
+		let cancelled = live.cancel();
+		self.retiring.retain(|retired| !retired.is_finished());
+		self.retiring.push(worker);
+		cancelled
 	}
 
 	pub(crate) fn cancel_all(&mut self) {
-		for (_, live) in self.running.drain() {
+		for (_, (live, worker)) in self.running.drain() {
 			live.cancel();
+			self.retiring.push(worker);
 		}
 	}
 
 	pub(crate) fn start(&mut self, job: Job) {
 		let key = job.uri.as_str().to_string();
 		self.cancel(&key);
-		self.running.retain(|_, live| live.is_running());
+		self.running.retain(|_, (live, _)| live.is_running());
+		let retiring: Vec<Worker> = std::mem::take(&mut self.retiring)
+			.into_iter()
+			.filter(|worker| !worker.is_finished())
+			.collect();
 		let cancel = Arc::new(AtomicBool::new(false));
 		let live = Arc::new(Live {
 			cancel: Arc::clone(&cancel),
 			state: Mutex::new(LiveState::Running),
 			token: job.token.clone(),
 		});
-		self.running.insert(key.clone(), Arc::clone(&live));
+		let running = Arc::clone(&live);
 		let sender = self.sender.clone();
 		let verdicts = Arc::clone(&self.verdicts);
 		let worker = std::thread::Builder::new().stack_size(ANALYSIS_STACK);
+		let uri = key.clone();
 		let spawned = worker.spawn(move || {
 			let _done = Finished(Arc::clone(&live));
+			for worker in retiring {
+				let _ = worker.join();
+			}
 			crate::console::set_verbosity(crate::console::Verbosity::Silent);
 			let name = crate::lsp::state::file_name(&job.uri);
 			if job.progress {
@@ -215,7 +231,8 @@ impl Runner {
 				notify(&sender, "verifpal/analysisReport", job.report(Err(None)));
 			}
 		});
-		spawned.expect("spawn the analysis worker");
+		let worker = spawned.expect("spawn the analysis worker");
+		self.running.insert(uri, (running, worker));
 	}
 }
 
@@ -292,11 +309,14 @@ mod tests {
 		let mut runner = Runner::new(sender);
 		runner.running.insert(
 			"file:///ct.vp".to_string(),
-			Arc::new(Live {
-				cancel: Arc::new(AtomicBool::new(false)),
-				state: Mutex::new(LiveState::Running),
-				token: "ct1".to_string(),
-			}),
+			(
+				Arc::new(Live {
+					cancel: Arc::new(AtomicBool::new(false)),
+					state: Mutex::new(LiveState::Running),
+					token: "ct1".to_string(),
+				}),
+				std::thread::spawn(|| {}),
+			),
 		);
 		assert!(!runner.cancel_token("other"));
 		assert!(runner.cancel_token("ct1"));
@@ -372,7 +392,7 @@ mod tests {
 			&& runner
 				.running
 				.get(&uri)
-				.is_some_and(|live| live.is_running())
+				.is_some_and(|(live, _)| live.is_running())
 		{
 			std::thread::yield_now();
 		}
@@ -419,5 +439,49 @@ mod tests {
 		assert!(published);
 		assert!(!completed.cancel());
 		assert!(!cancel.load(Ordering::Acquire));
+	}
+
+	#[test]
+	fn a_replacement_analysis_waits_for_the_one_it_cancelled() {
+		let (sender, receiver) = crossbeam_channel::unbounded();
+		let mut runner = Runner::new(sender);
+		let uri = "file:///rw.vp";
+		let cancel = Arc::new(AtomicBool::new(false));
+		let (release, held) = crossbeam_channel::bounded::<()>(0);
+		let (exited, observed) = crossbeam_channel::unbounded::<()>();
+		runner.running.insert(
+			uri.to_string(),
+			(
+				Arc::new(Live {
+					cancel: Arc::clone(&cancel),
+					state: Mutex::new(LiveState::Running),
+					token: "old".to_string(),
+				}),
+				std::thread::spawn(move || {
+					let _ = held.recv();
+					let _ = exited.send(());
+				}),
+			),
+		);
+		runner.start(job(uri, "new"));
+		assert!(
+			cancel.load(Ordering::Acquire),
+			"starting a replacement cancels the analysis it replaces"
+		);
+		assert!(
+			receiver
+				.recv_timeout(std::time::Duration::from_millis(300))
+				.is_err(),
+			"the replacement must not analyze while the cancelled worker still runs"
+		);
+		assert!(observed.try_recv().is_err());
+		release.send(()).expect("the old worker is waiting");
+		let report = await_report(&receiver);
+		assert_eq!(report["token"], "new", "{report}");
+		assert_eq!(report["ok"], true, "{report}");
+		assert!(
+			observed.try_recv().is_ok(),
+			"the old worker exited before the replacement reported"
+		);
 	}
 }

@@ -3,7 +3,7 @@
 
 use super::ProtocolTrace;
 use crate::syntax::{Block, LineComments, Message, Model, Query, QueryKind, Span};
-use crate::term::{Constant, ValueId};
+use crate::term::Constant;
 
 pub(crate) fn auto_queries(m: &Model, km: &ProtocolTrace) -> Vec<Query> {
 	let mut out: Vec<Query> = secret_constants(m)
@@ -53,18 +53,15 @@ pub(crate) fn auto_queries(m: &Model, km: &ProtocolTrace) -> Vec<Query> {
 
 fn secret_constants(m: &Model) -> Vec<Constant> {
 	let mut out: Vec<Constant> = Vec::new();
-	let rebound: Vec<ValueId> = m
-		.scenarios
-		.iter()
-		.flat_map(|scenario| scenario.bindings.iter().map(|(target, _)| target.id))
-		.collect();
 	for block in &m.blocks {
 		let Block::Principal(p) = block else {
 			continue;
 		};
 		for expression in p.expressions.iter().filter(|e| e.declares_secret()) {
 			for c in &expression.constants {
-				if !rebound.contains(&c.id) && !out.iter().any(|prior| prior.id == c.id) {
+				if super::scenario::keeps(m, p.id, c.id)
+					&& !out.iter().any(|prior| prior.id == c.id)
+				{
 					out.push(c.clone());
 				}
 			}
@@ -137,5 +134,102 @@ mod tests {
 			generated > written,
 			"auto queries ({generated}) should exceed the {written} written by hand"
 		);
+	}
+
+	fn asked(source: &str) -> Vec<String> {
+		let m = crate::syntax::parser::parse_string("aq.vp", source).expect("parses");
+		let km = crate::protocol::sanity::sanity(&m).expect("sane");
+		auto_queries(&m, &km)
+			.iter()
+			.filter(|q| q.kind == QueryKind::Confidentiality)
+			.map(|q| q.constants[0].name.to_string())
+			.collect()
+	}
+
+	const PEERS: &str = "attacker[active]\n\
+		principal Bob[\n\
+		knows private aq_b\n\
+		aq_gb = PUBKEY(aq_b)\n\
+		]\n\
+		principal Mallory[\n\
+		knows private aq_x\n\
+		aq_gx = PUBKEY(aq_x)\n\
+		leaks aq_x\n\
+		]\n\
+		Bob -> Alice: [aq_gb]\n\
+		Mallory -> Alice: [aq_gx]\n\
+		principal Alice[\n\
+		knows private aq_peer, aq_m\n\
+		aq_e = PKE_ENC(aq_peer, aq_m)\n\
+		]\n\
+		Alice -> Bob: aq_e\n";
+
+	#[test]
+	fn a_scenario_target_is_asked_about_wherever_a_copy_still_holds_it() {
+		let every = |scenarios: &str| {
+			asked(&format!(
+				"{PEERS}scenarios[{scenarios}]\nqueries[\nconfidentiality? aq_m\n]\n"
+			))
+		};
+		assert_eq!(
+			every("Alice[aq_peer = aq_gb] Alice[aq_peer = aq_gx]"),
+			["aq_b", "aq_x", "aq_m"],
+			"a placeholder every copy of its holder rebinds is in no copy, and a query on \
+			 it would not pass sanity"
+		);
+		assert_eq!(
+			every("Alice[aq_peer = aq_gb] Bob[aq_b = aq_b]"),
+			["aq_b", "aq_x", "aq_peer", "aq_m"],
+			"an identity binding rebinds nothing, and Bob's scenario leaves Alice's \
+			 placeholder in place"
+		);
+		assert_eq!(
+			every("Alice[aq_peer = aq_peer]"),
+			["aq_b", "aq_x", "aq_peer", "aq_m"]
+		);
+	}
+
+	#[test]
+	fn generated_queries_cover_what_the_written_ones_find_under_scenarios() {
+		for model in [
+			"auto_queries_identity_scenario.vp",
+			"auto_queries_shared_rebound.vp",
+		] {
+			let path = format!("examples/test/{model}");
+			for sessions in [1, 2] {
+				let (_, written) =
+					crate::verify::verify_with_sessions(&path, sessions).expect("verifies");
+				assert_eq!(written, "c1", "{model} at {sessions}");
+				let (results, _) =
+					crate::verify::verify_auto_queries(&path, sessions).expect("verifies");
+				let secret = results
+					.iter()
+					.find(|r| r.query.to_string() == "confidentiality? secret")
+					.unwrap_or_else(|| panic!("{model}: no generated query asks about secret"));
+				assert!(
+					secret.resolved,
+					"{model} at {sessions}: the leaked secret must be found disclosed"
+				);
+			}
+			let m = crate::syntax::parser::parse_file(&path).expect("parses");
+			let without = crate::syntax::Model {
+				scenarios: Vec::new(),
+				..m.clone()
+			};
+			let generated = |m: &Model| {
+				let km = crate::protocol::sanity::sanity(m).expect("sane");
+				let mut queries: Vec<String> = auto_queries(m, &km)
+					.iter()
+					.map(ToString::to_string)
+					.collect();
+				queries.sort();
+				queries
+			};
+			assert_eq!(
+				generated(&m),
+				generated(&without),
+				"{model}: every secret survives the binding"
+			);
+		}
 	}
 }

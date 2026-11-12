@@ -10,9 +10,9 @@ use crate::term::hashing::TermSet;
 use crate::term::{Primitive, Value};
 use crate::theory::attacker::next_chain;
 use crate::theory::{
-	AttackerState, DerivationRecord, Keystream, can_break_weak, can_decompose, can_recompose,
-	can_reconstruct_primitive, can_rewrite, keystream_of, masked, obtainable, opened_with,
-	reduce_once, reused_pair,
+	AttackerState, DerivationRecord, can_break_weak, can_decompose, can_recompose,
+	can_reconstruct_primitive, can_rewrite, masked, obtainable, opened_by, reduce_once,
+	reused_pair,
 };
 use crate::util::{IdMap, IdSet};
 
@@ -243,7 +243,7 @@ impl Knowledge {
 	pub(crate) fn withholding(&self, v: &Value) -> Knowledge {
 		let mut out = self.disclosed(Some(v));
 		let capabilities = Arc::clone(&self.capabilities);
-		out.closing(&capabilities, Some(v));
+		out.closing(&capabilities, Some(v), &|| false);
 		out
 	}
 
@@ -252,10 +252,12 @@ impl Knowledge {
 		v: &Value,
 		capabilities: &CapabilityIndex,
 		withheld: Option<&Value>,
-	) -> bool {
+		stop: &dyn Fn() -> bool,
+	) -> Option<bool> {
 		let mut world = self.disclosed(withheld);
-		world.closing(&capabilities.without_forging(v), withheld);
-		world.state.knows(v).is_some()
+		world
+			.closing(&capabilities.without_forging(v), withheld, stop)
+			.then(|| world.state.knows(v).is_some())
 	}
 
 	pub(crate) fn proven(&self, v: &Value) -> bool {
@@ -268,7 +270,7 @@ impl Knowledge {
 		disclosed: impl Fn(usize, &Value) -> bool,
 	) -> Option<Knowledge> {
 		let mut world = self.disclosed_where(disclosed);
-		world.closing(&self.capabilities.without_forging(v), None);
+		world.closing(&self.capabilities.without_forging(v), None, &|| false);
 		world.state.knows(v).is_some().then_some(world)
 	}
 
@@ -325,31 +327,33 @@ impl Knowledge {
 		}
 	}
 
-	pub(crate) fn derivable(&mut self, v: &Value) -> bool {
-		self.close();
+	pub(crate) fn derivable(&mut self, v: &Value, stop: &dyn Fn() -> bool) -> bool {
+		self.close_unless(stop);
 		obtainable(v, &self.capabilities, &self.state)
 	}
 
 	pub(crate) fn close(&mut self) {
-		let capabilities = Arc::clone(&self.capabilities);
-		self.closing(&capabilities, None);
+		self.close_unless(&|| false);
 	}
 
-	fn closing(&mut self, capabilities: &CapabilityIndex, withheld: Option<&Value>) {
+	pub(crate) fn close_unless(&mut self, stop: &dyn Fn() -> bool) -> bool {
+		let capabilities = Arc::clone(&self.capabilities);
+		self.closing(&capabilities, None, stop)
+	}
+
+	fn closing(
+		&mut self,
+		capabilities: &CapabilityIndex,
+		withheld: Option<&Value>,
+		stop: &dyn Fn() -> bool,
+	) -> bool {
 		if self.closed {
-			return;
+			return true;
 		}
 		let admitted = |v: &Value| withheld.is_none_or(|w| !w.equivalent(v, true));
 		let mut refuted: Vec<Value> = Vec::new();
 		loop {
-			let Found {
-				learned,
-				grown,
-				settling,
-				unproven,
-				pairs,
-				..
-			} = {
+			let pass = {
 				let snapshot = Arc::clone(&self.state);
 				let _memo = crate::theory::DeductionMemo::scoped(capabilities, &snapshot);
 				Pass {
@@ -358,8 +362,20 @@ impl Knowledge {
 					built: &self.built,
 					pools: &self.pools,
 					genuine: &self.genuine,
+					stop,
 				}
 				.run(&self.candidates, &self.settled)
+			};
+			let Some(Found {
+				learned,
+				grown,
+				settling,
+				unproven,
+				pairs,
+				..
+			}) = pass
+			else {
+				return false;
 			};
 			if !grown.is_empty() {
 				Arc::make_mut(&mut self.pools).extend(grown);
@@ -396,9 +412,13 @@ impl Knowledge {
 				if refuted.iter().any(|r| r.equivalent(&v, true)) {
 					continue;
 				}
-				if !self.unforged(&v, capabilities, withheld) {
-					refuted.push(v);
-					continue;
+				match self.unforged(&v, capabilities, withheld, stop) {
+					None => return false,
+					Some(false) => {
+						refuted.push(v);
+						continue;
+					}
+					Some(true) => {}
 				}
 				Arc::make_mut(&mut self.genuine).insert(v);
 				Arc::make_mut(&mut self.state).chain = next_chain();
@@ -409,6 +429,7 @@ impl Knowledge {
 			}
 		}
 		self.closed = true;
+		true
 	}
 }
 
@@ -427,6 +448,7 @@ struct Pass<'s> {
 	built: &'s TermSet,
 	pools: &'s IdMap<(usize, usize), usize>,
 	genuine: &'s TermSet,
+	stop: &'s dyn Fn() -> bool,
 }
 
 type NotedPair = ([Value; 2], Vec<(Value, DerivationRecord)>);
@@ -471,9 +493,12 @@ fn settled_now(p: &Primitive, attacker: &AttackerState) -> u8 {
 }
 
 impl Pass<'_> {
-	fn run(&self, candidates: &Candidates, settled: &[u8]) -> Found {
+	fn run(&self, candidates: &Candidates, settled: &[u8]) -> Option<Found> {
 		let mut found = Found::default();
 		for (at, known) in self.attacker.known.iter().enumerate() {
+			if (self.stop)() {
+				return None;
+			}
 			let flags = settled.get(at).copied().unwrap_or(0);
 			if flags != SETTLED {
 				self.held(&mut found, at, known, flags);
@@ -483,7 +508,7 @@ impl Pass<'_> {
 		self.recompositions(&mut found, candidates);
 		self.forward_rewrites(&mut found, candidates);
 		self.reuse_pairs(&mut found);
-		found
+		(!(self.stop)()).then_some(found)
 	}
 
 	fn held(&self, found: &mut Found, at: usize, known: &Value, flags: u8) {
@@ -663,10 +688,6 @@ impl Pass<'_> {
 			if members.len() < 2 {
 				continue;
 			}
-			let keystreams: Vec<Keystream> = members
-				.iter()
-				.map(|&j| keystream_of(&attacker.known[j], capabilities, attacker))
-				.collect();
 			for &i in members {
 				let of = &attacker.known[i];
 				let Value::Primitive(p) = of else {
@@ -675,14 +696,13 @@ impl Pass<'_> {
 				let mut first = None;
 				let mut unmasking = None;
 				let mut reveals: Vec<(Value, DerivationRecord)> = Vec::new();
-				for (partner, keystream) in members
+				for partner in members
 					.iter()
 					.map(|&j| &attacker.known[j])
-					.zip(&keystreams)
-					.filter(|(partner, _)| reused_pair(of, partner))
+					.filter(|partner| reused_pair(of, partner))
 				{
 					first.get_or_insert(partner);
-					let opened = opened_with(p, keystream);
+					let opened = opened_by(p, partner, capabilities, attacker);
 					let whole = match masked(of) {
 						Some(plaintext) => {
 							opened.iter().any(|(field, _)| field.same_term(plaintext))
@@ -892,7 +912,7 @@ mod tests {
 		} else {
 			Vec::new()
 		};
-		let ex = execute(&cx, &installs);
+		let ex = execute(&cx, &installs).expect("uncancelled");
 		assert!(ex.stuck.is_empty());
 		obtainable(&honest("kmf_s1"), &km.capabilities, &ex.knowledge.state)
 	}
@@ -977,7 +997,8 @@ mod tests {
 					slot: slot("ard_x"),
 					value: honest("ard_p"),
 				}],
-			);
+			)
+			.expect("uncancelled");
 			assert!(ex.stuck.is_empty());
 			assert_eq!(
 				obtainable(
@@ -1059,7 +1080,8 @@ mod tests {
 				slot: slot("nrd_p"),
 				value: unreduced,
 			}],
-		);
+		)
+		.expect("uncancelled");
 		assert!(ex.stuck.is_empty());
 		let held = ex.runs[bob].held(slot("nrd_p")).expect("received");
 		assert!(held.installed.is_none() && !held.authored);
@@ -1117,7 +1139,7 @@ mod tests {
 					),
 				},
 			];
-			let ex = execute(&cx, &installs);
+			let ex = execute(&cx, &installs).expect("uncancelled");
 			assert!(
 				!obtainable(&share, &km.capabilities, &ex.at(0).knowledge.state),
 				"the partial the attacker forged in phase 0 reveals nothing about the share"
@@ -1162,5 +1184,109 @@ mod tests {
 				Some((crate::engine::judgment::Violation::Forged { .. }, _))
 			));
 		}
+	}
+
+	#[test]
+	fn an_interrupted_closure_says_so_and_resumes_to_the_same_knowledge() {
+		let _generation = crate::util::generation::GenerationGuard::enter();
+		let source = "attacker[passive]\n\
+			principal Alice[\n\
+			knows private kic_a, kic_b, kic_c, kic_m\n\
+			kic_ea = ENC(kic_a, kic_b)\n\
+			kic_eb = ENC(kic_b, kic_c)\n\
+			kic_ec = ENC(kic_c, kic_m)\n\
+			leaks kic_a\n\
+			]\n\
+			Alice -> Bob: kic_ea, kic_eb, kic_ec\n\
+			principal Bob[\n\
+			_ = HASH(kic_ea, kic_eb, kic_ec)\n\
+			]\n\
+			queries[\n\
+			confidentiality? kic_m\n\
+			]\n";
+		let m = crate::syntax::parser::parse_string("kic.vp", source).expect("parses");
+		let km = crate::protocol::sanity::sanity(&m).expect("sane");
+		let program = Program::of(&m, &km);
+		let cx = Context::new(&program, &km);
+		let ex = execute(&cx, &Vec::new()).expect("uncancelled");
+		let secret = Value::Constant(
+			km.slots
+				.iter()
+				.find(|s| s.constant.name.as_ref() == "kic_m")
+				.expect("declared")
+				.constant
+				.clone(),
+		);
+		assert!(ex.knowledge.knows(&secret).is_some());
+		let passes = |limit: usize| {
+			let mut world = ex.knowledge.disclosed_where(|_, _| true);
+			let asked = std::cell::Cell::new(0usize);
+			let closed = world.close_unless(&|| {
+				asked.set(asked.get() + 1);
+				asked.get() > limit
+			});
+			(world, closed, asked.get())
+		};
+		let (_, closed, needed) = passes(usize::MAX);
+		assert!(
+			closed && needed > 4,
+			"the closure asks before every held value"
+		);
+		for limit in 0..needed {
+			let (mut world, closed, _) = passes(limit);
+			assert!(
+				!closed,
+				"a closure stopped after {limit} checks is not closed"
+			);
+			assert!(
+				world.knows(&secret).is_none() || limit > 0,
+				"nothing is derived before the first check"
+			);
+			assert!(world.close_unless(&|| false), "and it resumes");
+			assert_eq!(world.len(), ex.knowledge.len());
+			assert!(world.knows(&secret).is_some());
+		}
+	}
+
+	#[test]
+	fn a_cancelled_execution_is_an_outcome_of_its_own() {
+		let _generation = crate::util::generation::GenerationGuard::enter();
+		let source = "attacker[passive]\n\
+			principal Alice[\n\
+			knows private kce_k, kce_m\n\
+			kce_e = ENC(kce_k, kce_m)\n\
+			leaks kce_k\n\
+			]\n\
+			Alice -> Bob: kce_e\n\
+			principal Bob[\n\
+			_ = HASH(kce_e)\n\
+			]\n\
+			phase[1]\n\
+			principal Alice[\n\
+			leaks kce_m\n\
+			]\n\
+			queries[\n\
+			confidentiality? kce_m\n\
+			]\n";
+		let m = crate::syntax::parser::parse_string("kce.vp", source).expect("parses");
+		let km = crate::protocol::sanity::sanity(&m).expect("sane");
+		let program = Program::of(&m, &km);
+		let cancel = std::sync::atomic::AtomicBool::new(false);
+		let cx = Context::new(&program, &km).cancellable(&cancel);
+		assert!(execute(&cx, &Vec::new()).is_ok());
+		cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+		assert!(
+			execute(&cx, &Vec::new()).is_err(),
+			"a cancelled execution returns no execution, partial or whole"
+		);
+		let cancelled = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+		let outcome = crate::verify::analyze_sessions_cancellable(&m, 1, cancelled);
+		assert_eq!(
+			outcome
+				.err()
+				.expect("a cancelled analysis is an error")
+				.kind,
+			crate::syntax::ErrorKind::Cancelled
+		);
 	}
 }

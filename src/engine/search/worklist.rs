@@ -132,7 +132,7 @@ impl<'a, 'b> Search<'a, 'b> {
 		out
 	}
 
-	pub(super) fn execute_counted(&mut self, installs: &Installs) -> Execution {
+	pub(super) fn execute_counted(&mut self, installs: &Installs) -> Option<Execution> {
 		self.attempts.executed += 1;
 		self.ctx.analysis_count_increment();
 		let executed = self.attempts.executed;
@@ -148,7 +148,7 @@ impl<'a, 'b> Search<'a, 'b> {
 				),
 			)
 		});
-		execute(self.cx, installs)
+		execute(self.cx, installs).ok()
 	}
 
 	pub(super) fn consider(&mut self, installs: Installs) -> AttemptIdx {
@@ -210,7 +210,9 @@ impl<'a, 'b> Search<'a, 'b> {
 		let installs = self.attempts.tried.entries[at].0.clone();
 		let family = self.attempts.tried.entries[at].1.family;
 		self.as_family(family, |search| {
-			let ex = search.execute_counted(&installs);
+			let Some(ex) = search.execute_counted(&installs) else {
+				return;
+			};
 			let stuck = !ex.stuck.is_empty();
 			search.attempts.tried.entries[at].1.outcome = Some(Outcome {
 				halts: halts_of(&ex),

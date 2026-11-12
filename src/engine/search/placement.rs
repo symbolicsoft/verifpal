@@ -81,7 +81,9 @@ impl<'a, 'b> Search<'a, 'b> {
 					}
 					with
 				});
-				if obtainable(value, with.capabilities(), &with.state) || with.derivable(value) {
+				if obtainable(value, with.capabilities(), &with.state)
+					|| with.derivable(value, &|| false)
+				{
 					continue;
 				}
 				return None;
@@ -563,7 +565,9 @@ impl<'a, 'b> Search<'a, 'b> {
 		if !self.attempts.probed.insert(&installs) {
 			return;
 		}
-		let ex = self.execute_counted(&installs);
+		let Some(ex) = self.execute_counted(&installs) else {
+			return;
+		};
 		self.tally(Family::Shared, false);
 		if self.log.debug {
 			eprintln!(

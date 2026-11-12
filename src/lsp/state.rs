@@ -34,9 +34,13 @@ impl Document {
 				let (trace, error) = match crate::protocol::sanity::sanity(&m) {
 					Ok(t) => (
 						Some(t),
-						crate::verify::expand(&m, crate::protocol::sessions::DEFAULT_SESSIONS)
-							.and_then(|e| crate::protocol::sanity::sanity(&e.model))
-							.err(),
+						crate::verify::expand(
+							&m,
+							crate::protocol::sessions::DEFAULT_SESSIONS,
+							&std::sync::atomic::AtomicBool::new(false),
+						)
+						.and_then(|e| crate::protocol::sanity::sanity(&e.model))
+						.err(),
 					),
 					Err(e) => (None, Some(e)),
 				};
