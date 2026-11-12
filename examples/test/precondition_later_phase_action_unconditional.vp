@@ -1,0 +1,37 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: c1 at one session and at two.
+//
+// precondition_later_phase_action_guarded.vp without the precondition.
+// Replacing pk discloses m in phase 0, whether or not Alice later halts at
+// her signature check, and nothing in phase 1 is part of the attack.
+attacker[active]
+principal Bob[
+	knows private sk
+	pk = PUBKEY(sk)
+]
+Bob -> Alice: pk
+principal Alice[
+	generates m
+	e = PKE_ENC(pk, m)
+]
+Alice -> Bob: [e]
+principal Bob[
+	d = PKE_DEC(sk, e)
+]
+phase[1]
+principal Bob[
+	sig = SIGN(sk, d)
+]
+Bob -> Alice: [sig]
+principal Alice[
+	_ = SIGNVERIF(pk, m, sig)?
+	receipt = HASH(m)
+]
+Alice -> Carol: [receipt]
+principal Carol[
+	_ = HASH(receipt)
+]
+queries[
+	confidentiality? m
+]

@@ -1,0 +1,56 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: c1u1 at one session and at two.
+//
+// search_unlink_nested_requirements.vp with a confidentiality query on
+// witness = HASH(m, saltone, salttwo), which Alice computes and never sends.
+// The attacker constructs it once the three oracles have leaked m and both
+// salts, and that same execution links hone and htwo. The unlinkability trace
+// must itself show what the link rests on: the three leaks, each hash rebuilt
+// from its signature and salt, and SIGNVERIF succeeding on both signatures
+// with the one message.
+attacker[active]
+principal Alice[
+	knows private km, ka, kb, skone, sktwo
+	generates m, saltone, salttwo
+	sigone = SIGN(skone, m)
+	sigtwo = SIGN(sktwo, m)
+	pkone = PUBKEY(skone)
+	pktwo = PUBKEY(sktwo)
+	hone = HASH(sigone, saltone)
+	htwo = HASH(sigtwo, salttwo)
+	witness = HASH(m, saltone, salttwo)
+	em = ENC(km, m)
+	ea = ENC(ka, saltone)
+	eb = ENC(kb, salttwo)
+	dm = ENC(km, nil)
+	da = ENC(ka, nil)
+	db = ENC(kb, nil)
+]
+Alice -> Dave: em, ea, eb, sigone, sigtwo, pkone, pktwo, hone, htwo
+Alice -> Mary: dm
+Alice -> Bob: da
+Alice -> Carol: db
+principal Mary[
+	knows private km
+	rm = DEC(km, dm)
+	leaks rm
+]
+principal Bob[
+	knows private ka
+	ra = DEC(ka, da)
+	leaks ra
+]
+principal Carol[
+	knows private kb
+	rb = DEC(kb, db)
+	leaks rb
+]
+principal Dave[
+	_ = HASH(em, ea, eb, sigone, sigtwo)
+	_ = HASH(pkone, pktwo, hone, htwo)
+]
+queries[
+	confidentiality? witness
+	unlinkability? hone, htwo
+]

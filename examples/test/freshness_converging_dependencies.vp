@@ -1,0 +1,221 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: f0 at one session and at two.
+//
+// Forty principals in a row each receive two guarded values and compute two
+// hashes that both take both of them, which they pass on. Every value
+// descends from the fresh a0 and b0 through guarded messages, nothing is
+// replayed, and a40 is fresh. The run that computes a40 has forty stages
+// behind it and each stage's two outputs depend on the same two inputs, so
+// following a value back to what it was computed from once took 2^40 steps,
+// one per path; whether a held value is replayed is now decided once per run
+// and value. freshness_converging_dependencies_replayed.vp leaves the first
+// message unguarded under an active attacker.
+attacker[passive]
+principal Pzero[
+	generates a0, b0
+]
+Pzero -> P1: [a0], [b0]
+principal P1[
+	a1 = HASH(a0, b0)
+	b1 = HASH(a0, b0)
+]
+P1 -> P2: [a1], [b1]
+principal P2[
+	a2 = HASH(a1, b1)
+	b2 = HASH(a1, b1)
+]
+P2 -> P3: [a2], [b2]
+principal P3[
+	a3 = HASH(a2, b2)
+	b3 = HASH(a2, b2)
+]
+P3 -> P4: [a3], [b3]
+principal P4[
+	a4 = HASH(a3, b3)
+	b4 = HASH(a3, b3)
+]
+P4 -> P5: [a4], [b4]
+principal P5[
+	a5 = HASH(a4, b4)
+	b5 = HASH(a4, b4)
+]
+P5 -> P6: [a5], [b5]
+principal P6[
+	a6 = HASH(a5, b5)
+	b6 = HASH(a5, b5)
+]
+P6 -> P7: [a6], [b6]
+principal P7[
+	a7 = HASH(a6, b6)
+	b7 = HASH(a6, b6)
+]
+P7 -> P8: [a7], [b7]
+principal P8[
+	a8 = HASH(a7, b7)
+	b8 = HASH(a7, b7)
+]
+P8 -> P9: [a8], [b8]
+principal P9[
+	a9 = HASH(a8, b8)
+	b9 = HASH(a8, b8)
+]
+P9 -> P10: [a9], [b9]
+principal P10[
+	a10 = HASH(a9, b9)
+	b10 = HASH(a9, b9)
+]
+P10 -> P11: [a10], [b10]
+principal P11[
+	a11 = HASH(a10, b10)
+	b11 = HASH(a10, b10)
+]
+P11 -> P12: [a11], [b11]
+principal P12[
+	a12 = HASH(a11, b11)
+	b12 = HASH(a11, b11)
+]
+P12 -> P13: [a12], [b12]
+principal P13[
+	a13 = HASH(a12, b12)
+	b13 = HASH(a12, b12)
+]
+P13 -> P14: [a13], [b13]
+principal P14[
+	a14 = HASH(a13, b13)
+	b14 = HASH(a13, b13)
+]
+P14 -> P15: [a14], [b14]
+principal P15[
+	a15 = HASH(a14, b14)
+	b15 = HASH(a14, b14)
+]
+P15 -> P16: [a15], [b15]
+principal P16[
+	a16 = HASH(a15, b15)
+	b16 = HASH(a15, b15)
+]
+P16 -> P17: [a16], [b16]
+principal P17[
+	a17 = HASH(a16, b16)
+	b17 = HASH(a16, b16)
+]
+P17 -> P18: [a17], [b17]
+principal P18[
+	a18 = HASH(a17, b17)
+	b18 = HASH(a17, b17)
+]
+P18 -> P19: [a18], [b18]
+principal P19[
+	a19 = HASH(a18, b18)
+	b19 = HASH(a18, b18)
+]
+P19 -> P20: [a19], [b19]
+principal P20[
+	a20 = HASH(a19, b19)
+	b20 = HASH(a19, b19)
+]
+P20 -> P21: [a20], [b20]
+principal P21[
+	a21 = HASH(a20, b20)
+	b21 = HASH(a20, b20)
+]
+P21 -> P22: [a21], [b21]
+principal P22[
+	a22 = HASH(a21, b21)
+	b22 = HASH(a21, b21)
+]
+P22 -> P23: [a22], [b22]
+principal P23[
+	a23 = HASH(a22, b22)
+	b23 = HASH(a22, b22)
+]
+P23 -> P24: [a23], [b23]
+principal P24[
+	a24 = HASH(a23, b23)
+	b24 = HASH(a23, b23)
+]
+P24 -> P25: [a24], [b24]
+principal P25[
+	a25 = HASH(a24, b24)
+	b25 = HASH(a24, b24)
+]
+P25 -> P26: [a25], [b25]
+principal P26[
+	a26 = HASH(a25, b25)
+	b26 = HASH(a25, b25)
+]
+P26 -> P27: [a26], [b26]
+principal P27[
+	a27 = HASH(a26, b26)
+	b27 = HASH(a26, b26)
+]
+P27 -> P28: [a27], [b27]
+principal P28[
+	a28 = HASH(a27, b27)
+	b28 = HASH(a27, b27)
+]
+P28 -> P29: [a28], [b28]
+principal P29[
+	a29 = HASH(a28, b28)
+	b29 = HASH(a28, b28)
+]
+P29 -> P30: [a29], [b29]
+principal P30[
+	a30 = HASH(a29, b29)
+	b30 = HASH(a29, b29)
+]
+P30 -> P31: [a30], [b30]
+principal P31[
+	a31 = HASH(a30, b30)
+	b31 = HASH(a30, b30)
+]
+P31 -> P32: [a31], [b31]
+principal P32[
+	a32 = HASH(a31, b31)
+	b32 = HASH(a31, b31)
+]
+P32 -> P33: [a32], [b32]
+principal P33[
+	a33 = HASH(a32, b32)
+	b33 = HASH(a32, b32)
+]
+P33 -> P34: [a33], [b33]
+principal P34[
+	a34 = HASH(a33, b33)
+	b34 = HASH(a33, b33)
+]
+P34 -> P35: [a34], [b34]
+principal P35[
+	a35 = HASH(a34, b34)
+	b35 = HASH(a34, b34)
+]
+P35 -> P36: [a35], [b35]
+principal P36[
+	a36 = HASH(a35, b35)
+	b36 = HASH(a35, b35)
+]
+P36 -> P37: [a36], [b36]
+principal P37[
+	a37 = HASH(a36, b36)
+	b37 = HASH(a36, b36)
+]
+P37 -> P38: [a37], [b37]
+principal P38[
+	a38 = HASH(a37, b37)
+	b38 = HASH(a37, b37)
+]
+P38 -> P39: [a38], [b38]
+principal P39[
+	a39 = HASH(a38, b38)
+	b39 = HASH(a38, b38)
+]
+P39 -> P40: [a39], [b39]
+principal P40[
+	a40 = HASH(a39, b39)
+	b40 = HASH(a39, b39)
+	_ = HASH(a40)
+]
+queries[
+	freshness? a40
+]

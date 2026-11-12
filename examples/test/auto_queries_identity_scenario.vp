@@ -1,0 +1,18 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: c1 at one session and at two, also under --auto-queries.
+//
+// Alice leaks her only secret, and the scenario binds it to itself, which
+// changes nothing: every copy of Alice still holds and leaks secret. The
+// automatic queries once left out every constant a scenario names as a
+// target, so this model was analyzed with no query at all and
+// --fail-on-attack exited successfully.
+attacker[passive]
+principal Alice[
+	knows private secret
+	leaks secret
+]
+scenarios[Alice[secret = secret]]
+queries[
+	confidentiality? secret
+]

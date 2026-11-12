@@ -1,0 +1,49 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: u1 at one session and at two.
+//
+// unlink_observable_shared_dag.vp cut to sixteen levels, with
+// b0 = CONCAT(y, x). Both tuples are now built from x, which Alice leaks:
+// the attacker rebuilds each from x and y, both are observable through their
+// disclosed fields, and x is a secret the two honestly share and the
+// attacker ties to both.
+attacker[passive]
+principal Alice[
+	generates x, y
+	a0 = CONCAT(x, x)
+	a1 = CONCAT(a0, a0)
+	a2 = CONCAT(a1, a1)
+	a3 = CONCAT(a2, a2)
+	a4 = CONCAT(a3, a3)
+	a5 = CONCAT(a4, a4)
+	a6 = CONCAT(a5, a5)
+	a7 = CONCAT(a6, a6)
+	a8 = CONCAT(a7, a7)
+	a9 = CONCAT(a8, a8)
+	a10 = CONCAT(a9, a9)
+	a11 = CONCAT(a10, a10)
+	a12 = CONCAT(a11, a11)
+	a13 = CONCAT(a12, a12)
+	a14 = CONCAT(a13, a13)
+	a15 = CONCAT(a14, a14)
+	b0 = CONCAT(y, x)
+	b1 = CONCAT(b0, b0)
+	b2 = CONCAT(b1, b1)
+	b3 = CONCAT(b2, b2)
+	b4 = CONCAT(b3, b3)
+	b5 = CONCAT(b4, b4)
+	b6 = CONCAT(b5, b5)
+	b7 = CONCAT(b6, b6)
+	b8 = CONCAT(b7, b7)
+	b9 = CONCAT(b8, b8)
+	b10 = CONCAT(b9, b9)
+	b11 = CONCAT(b10, b10)
+	b12 = CONCAT(b11, b11)
+	b13 = CONCAT(b12, b12)
+	b14 = CONCAT(b13, b13)
+	b15 = CONCAT(b14, b14)
+	leaks x, y
+]
+queries[
+	unlinkability? a15, b15
+]

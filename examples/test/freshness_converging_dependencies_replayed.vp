@@ -1,0 +1,55 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: f0 at one session, f1 at two.
+//
+// freshness_converging_dependencies.vp cut to six stages under an active
+// attacker. Pzero signs a0 and b0, sends them unguarded, and Pone checks the
+// signature, so only values Pzero signed get through. With two sessions the
+// attacker gives the second Pone the a0, b0 and signature the first Pzero
+// sent. Both runs of every later principal then compute the same hashes from
+// those replayed inputs, through guarded messages all the way down, and both
+// runs of Psix use the same a6: a value computed from a replayed input stays
+// replayed however many runs it converges through. With one session there is
+// no other signed pair to replay and no second run to accept it.
+attacker[active]
+principal Pzero[
+	knows private sk
+	generates a0, b0
+	pk = PUBKEY(sk)
+	s = SIGN(sk, CONCAT(a0, b0))
+]
+Pzero -> Pone: [pk], a0, b0, s
+principal Pone[
+	_ = SIGNVERIF(pk, CONCAT(a0, b0), s)?
+	a1 = HASH(a0, b0)
+	b1 = HASH(a0, b0)
+]
+Pone -> Ptwo: [a1], [b1]
+principal Ptwo[
+	a2 = HASH(a1, b1)
+	b2 = HASH(a1, b1)
+]
+Ptwo -> Pthree: [a2], [b2]
+principal Pthree[
+	a3 = HASH(a2, b2)
+	b3 = HASH(a2, b2)
+]
+Pthree -> Pfour: [a3], [b3]
+principal Pfour[
+	a4 = HASH(a3, b3)
+	b4 = HASH(a3, b3)
+]
+Pfour -> Pfive: [a4], [b4]
+principal Pfive[
+	a5 = HASH(a4, b4)
+	b5 = HASH(a4, b4)
+]
+Pfive -> Psix: [a5], [b5]
+principal Psix[
+	a6 = HASH(a5, b5)
+	b6 = HASH(a5, b5)
+	_ = HASH(a6)
+]
+queries[
+	freshness? a6
+]

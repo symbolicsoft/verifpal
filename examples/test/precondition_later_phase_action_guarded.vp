@@ -1,0 +1,39 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: c0 at one session and at two.
+//
+// precondition_later_phase_action.vp with sig guarded. The attacker still
+// learns m by replacing pk, but Alice then holds its key and Bob's guarded
+// signature fails her check: she halts before sending receipt, in every
+// execution that discloses m, so the precondition is never met.
+// precondition_later_phase_action_unconditional.vp drops the precondition.
+attacker[active]
+principal Bob[
+	knows private sk
+	pk = PUBKEY(sk)
+]
+Bob -> Alice: pk
+principal Alice[
+	generates m
+	e = PKE_ENC(pk, m)
+]
+Alice -> Bob: [e]
+principal Bob[
+	d = PKE_DEC(sk, e)
+]
+phase[1]
+principal Bob[
+	sig = SIGN(sk, d)
+]
+Bob -> Alice: [sig]
+principal Alice[
+	_ = SIGNVERIF(pk, m, sig)?
+	receipt = HASH(m)
+]
+Alice -> Carol: [receipt]
+principal Carol[
+	_ = HASH(receipt)
+]
+queries[
+	confidentiality? m[precondition[Alice -> Carol: receipt]]
+]

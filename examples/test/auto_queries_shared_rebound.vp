@@ -1,0 +1,20 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: c1 at one session and at two, also under --auto-queries.
+//
+// The scenario rebinds secret to other in Alice only. Bob still knows the
+// original secret and leaks it. The automatic queries once dropped secret
+// because a scenario names it, asked only about other, and passed.
+attacker[passive]
+principal Alice[
+	knows private secret, other
+	_ = HASH(secret)
+]
+principal Bob[
+	knows private secret
+	leaks secret
+]
+scenarios[Alice[secret = other]]
+queries[
+	confidentiality? secret
+]

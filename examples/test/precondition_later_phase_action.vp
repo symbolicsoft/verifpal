@@ -1,0 +1,43 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: c1 at one session and at two.
+//
+// The attacker replaces pk with its own public key, so Alice encrypts m to
+// it and m is disclosed in phase 0. The query counts only executions in which
+// Alice sends receipt, which she does in phase 1 after checking Bob's
+// signature under the pk she holds. Bob's signature is under sk and fails
+// that check, so the attacker must also replace sig with SIGN(nil, m), built
+// from the m it already has. The claim is a phase 0 claim, but the trace must
+// show that phase 1 replacement and the check it passes: without them Alice
+// halts and the precondition is never met.
+// precondition_later_phase_action_guarded.vp guards sig.
+attacker[active]
+principal Bob[
+	knows private sk
+	pk = PUBKEY(sk)
+]
+Bob -> Alice: pk
+principal Alice[
+	generates m
+	e = PKE_ENC(pk, m)
+]
+Alice -> Bob: [e]
+principal Bob[
+	d = PKE_DEC(sk, e)
+]
+phase[1]
+principal Bob[
+	sig = SIGN(sk, d)
+]
+Bob -> Alice: sig
+principal Alice[
+	_ = SIGNVERIF(pk, m, sig)?
+	receipt = HASH(m)
+]
+Alice -> Carol: [receipt]
+principal Carol[
+	_ = HASH(receipt)
+]
+queries[
+	confidentiality? m[precondition[Alice -> Carol: receipt]]
+]

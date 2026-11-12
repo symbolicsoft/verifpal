@@ -1,0 +1,105 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: c0 at one session and at two.
+//
+// Alice leaks a40 and b40, two towers of Diffie-Hellman values over the
+// hashes a0 = HASH(q0, q32) and b0 = HASH(q1, q1). Nothing opens a hash or a
+// shared secret, so q0 stays hidden. The two towers are different terms whose
+// internal index hashes are equal at every level: constants hash to their
+// declaration order, arguments are folded with a multiplier of 31, and
+// 31 * 2 + 34 = 31 * 3 + 3 for q0, q32 and q1. Equal index hashes send the
+// two leaked values to a full comparison, which tries a Diffie-Hellman pair
+// in both orders; each order compared the level below afresh, 2^40
+// comparisons to learn that the towers differ. A comparison now keeps every
+// answer it reaches, whichever way it came out, for as long as it runs. The
+// collision is in the engine's index, not in the HASH primitive.
+attacker[passive]
+principal Alice[
+	knows private q0, q1, q2, q3, q4, q5, q6, q7, q8, q9, q10, q11, q12, q13, q14, q15, q16, q17, q18, q19, q20, q21, q22, q23, q24, q25, q26, q27, q28, q29, q30, q31, q32
+	a0 = HASH(q0, q32)
+	b0 = HASH(q1, q1)
+	a1 = DH_KEX(PUBKEY(HASH(a0)), HASH(a0))
+	b1 = DH_KEX(PUBKEY(HASH(b0)), HASH(b0))
+	a2 = DH_KEX(PUBKEY(HASH(a1)), HASH(a1))
+	b2 = DH_KEX(PUBKEY(HASH(b1)), HASH(b1))
+	a3 = DH_KEX(PUBKEY(HASH(a2)), HASH(a2))
+	b3 = DH_KEX(PUBKEY(HASH(b2)), HASH(b2))
+	a4 = DH_KEX(PUBKEY(HASH(a3)), HASH(a3))
+	b4 = DH_KEX(PUBKEY(HASH(b3)), HASH(b3))
+	a5 = DH_KEX(PUBKEY(HASH(a4)), HASH(a4))
+	b5 = DH_KEX(PUBKEY(HASH(b4)), HASH(b4))
+	a6 = DH_KEX(PUBKEY(HASH(a5)), HASH(a5))
+	b6 = DH_KEX(PUBKEY(HASH(b5)), HASH(b5))
+	a7 = DH_KEX(PUBKEY(HASH(a6)), HASH(a6))
+	b7 = DH_KEX(PUBKEY(HASH(b6)), HASH(b6))
+	a8 = DH_KEX(PUBKEY(HASH(a7)), HASH(a7))
+	b8 = DH_KEX(PUBKEY(HASH(b7)), HASH(b7))
+	a9 = DH_KEX(PUBKEY(HASH(a8)), HASH(a8))
+	b9 = DH_KEX(PUBKEY(HASH(b8)), HASH(b8))
+	a10 = DH_KEX(PUBKEY(HASH(a9)), HASH(a9))
+	b10 = DH_KEX(PUBKEY(HASH(b9)), HASH(b9))
+	a11 = DH_KEX(PUBKEY(HASH(a10)), HASH(a10))
+	b11 = DH_KEX(PUBKEY(HASH(b10)), HASH(b10))
+	a12 = DH_KEX(PUBKEY(HASH(a11)), HASH(a11))
+	b12 = DH_KEX(PUBKEY(HASH(b11)), HASH(b11))
+	a13 = DH_KEX(PUBKEY(HASH(a12)), HASH(a12))
+	b13 = DH_KEX(PUBKEY(HASH(b12)), HASH(b12))
+	a14 = DH_KEX(PUBKEY(HASH(a13)), HASH(a13))
+	b14 = DH_KEX(PUBKEY(HASH(b13)), HASH(b13))
+	a15 = DH_KEX(PUBKEY(HASH(a14)), HASH(a14))
+	b15 = DH_KEX(PUBKEY(HASH(b14)), HASH(b14))
+	a16 = DH_KEX(PUBKEY(HASH(a15)), HASH(a15))
+	b16 = DH_KEX(PUBKEY(HASH(b15)), HASH(b15))
+	a17 = DH_KEX(PUBKEY(HASH(a16)), HASH(a16))
+	b17 = DH_KEX(PUBKEY(HASH(b16)), HASH(b16))
+	a18 = DH_KEX(PUBKEY(HASH(a17)), HASH(a17))
+	b18 = DH_KEX(PUBKEY(HASH(b17)), HASH(b17))
+	a19 = DH_KEX(PUBKEY(HASH(a18)), HASH(a18))
+	b19 = DH_KEX(PUBKEY(HASH(b18)), HASH(b18))
+	a20 = DH_KEX(PUBKEY(HASH(a19)), HASH(a19))
+	b20 = DH_KEX(PUBKEY(HASH(b19)), HASH(b19))
+	a21 = DH_KEX(PUBKEY(HASH(a20)), HASH(a20))
+	b21 = DH_KEX(PUBKEY(HASH(b20)), HASH(b20))
+	a22 = DH_KEX(PUBKEY(HASH(a21)), HASH(a21))
+	b22 = DH_KEX(PUBKEY(HASH(b21)), HASH(b21))
+	a23 = DH_KEX(PUBKEY(HASH(a22)), HASH(a22))
+	b23 = DH_KEX(PUBKEY(HASH(b22)), HASH(b22))
+	a24 = DH_KEX(PUBKEY(HASH(a23)), HASH(a23))
+	b24 = DH_KEX(PUBKEY(HASH(b23)), HASH(b23))
+	a25 = DH_KEX(PUBKEY(HASH(a24)), HASH(a24))
+	b25 = DH_KEX(PUBKEY(HASH(b24)), HASH(b24))
+	a26 = DH_KEX(PUBKEY(HASH(a25)), HASH(a25))
+	b26 = DH_KEX(PUBKEY(HASH(b25)), HASH(b25))
+	a27 = DH_KEX(PUBKEY(HASH(a26)), HASH(a26))
+	b27 = DH_KEX(PUBKEY(HASH(b26)), HASH(b26))
+	a28 = DH_KEX(PUBKEY(HASH(a27)), HASH(a27))
+	b28 = DH_KEX(PUBKEY(HASH(b27)), HASH(b27))
+	a29 = DH_KEX(PUBKEY(HASH(a28)), HASH(a28))
+	b29 = DH_KEX(PUBKEY(HASH(b28)), HASH(b28))
+	a30 = DH_KEX(PUBKEY(HASH(a29)), HASH(a29))
+	b30 = DH_KEX(PUBKEY(HASH(b29)), HASH(b29))
+	a31 = DH_KEX(PUBKEY(HASH(a30)), HASH(a30))
+	b31 = DH_KEX(PUBKEY(HASH(b30)), HASH(b30))
+	a32 = DH_KEX(PUBKEY(HASH(a31)), HASH(a31))
+	b32 = DH_KEX(PUBKEY(HASH(b31)), HASH(b31))
+	a33 = DH_KEX(PUBKEY(HASH(a32)), HASH(a32))
+	b33 = DH_KEX(PUBKEY(HASH(b32)), HASH(b32))
+	a34 = DH_KEX(PUBKEY(HASH(a33)), HASH(a33))
+	b34 = DH_KEX(PUBKEY(HASH(b33)), HASH(b33))
+	a35 = DH_KEX(PUBKEY(HASH(a34)), HASH(a34))
+	b35 = DH_KEX(PUBKEY(HASH(b34)), HASH(b34))
+	a36 = DH_KEX(PUBKEY(HASH(a35)), HASH(a35))
+	b36 = DH_KEX(PUBKEY(HASH(b35)), HASH(b35))
+	a37 = DH_KEX(PUBKEY(HASH(a36)), HASH(a36))
+	b37 = DH_KEX(PUBKEY(HASH(b36)), HASH(b36))
+	a38 = DH_KEX(PUBKEY(HASH(a37)), HASH(a37))
+	b38 = DH_KEX(PUBKEY(HASH(b37)), HASH(b37))
+	a39 = DH_KEX(PUBKEY(HASH(a38)), HASH(a38))
+	b39 = DH_KEX(PUBKEY(HASH(b38)), HASH(b38))
+	a40 = DH_KEX(PUBKEY(HASH(a39)), HASH(a39))
+	b40 = DH_KEX(PUBKEY(HASH(b39)), HASH(b39))
+	leaks a40, b40
+]
+queries[
+	confidentiality? q0
+]

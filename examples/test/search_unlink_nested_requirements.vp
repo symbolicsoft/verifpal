@@ -1,0 +1,61 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+// Expected: u1 at one session and at two.
+//
+// hone and htwo hash two signatures of one message m, each with its own salt.
+// Mary, Bob and Carol each decrypt what they receive and leak it, so the
+// attacker replaces dm, da and db with the ciphertexts of m, saltone and
+// salttwo it read on the wire and is handed all three. With saltone it
+// rebuilds hone from the sigone it observed, which shows it that sigone is
+// what hone hashes; with salttwo, the same for htwo and sigtwo; with m and the
+// two public keys on the wire, SIGNVERIF confirms that both signatures sign
+// the same message. The link needs all three disclosures in one execution:
+// each hash's salt, to reach the signature inside it, and the message, to
+// check that signature. The search once planned what reaching a signature
+// needs and what checking it needs as separate targets, joined them only one
+// from each queried value, and so never ran the three oracles together.
+// search_unlink_nested_requirements_guarded.vp guards dm, so m stays hidden.
+attacker[active]
+principal Alice[
+	knows private km, ka, kb, skone, sktwo
+	generates m, saltone, salttwo
+	sigone = SIGN(skone, m)
+	sigtwo = SIGN(sktwo, m)
+	pkone = PUBKEY(skone)
+	pktwo = PUBKEY(sktwo)
+	hone = HASH(sigone, saltone)
+	htwo = HASH(sigtwo, salttwo)
+	witness = HASH(m, saltone, salttwo)
+	em = ENC(km, m)
+	ea = ENC(ka, saltone)
+	eb = ENC(kb, salttwo)
+	dm = ENC(km, nil)
+	da = ENC(ka, nil)
+	db = ENC(kb, nil)
+]
+Alice -> Dave: em, ea, eb, sigone, sigtwo, pkone, pktwo, hone, htwo
+Alice -> Mary: dm
+Alice -> Bob: da
+Alice -> Carol: db
+principal Mary[
+	knows private km
+	rm = DEC(km, dm)
+	leaks rm
+]
+principal Bob[
+	knows private ka
+	ra = DEC(ka, da)
+	leaks ra
+]
+principal Carol[
+	knows private kb
+	rb = DEC(kb, db)
+	leaks rb
+]
+principal Dave[
+	_ = HASH(em, ea, eb, sigone, sigtwo)
+	_ = HASH(pkone, pktwo, hone, htwo)
+]
+queries[
+	unlinkability? hone, htwo
+]
