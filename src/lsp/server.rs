@@ -531,7 +531,8 @@ impl Server {
 			.sessions
 			.map_or(crate::protocol::sessions::DEFAULT_SESSIONS, |s| {
 				s.round()
-					.clamp(1.0, f64::from(crate::protocol::sessions::MAX_SESSIONS)) as u8
+					.clamp(1.0, f64::from(crate::protocol::sessions::MAX_SESSIONS))
+					as u8
 			});
 		let job = crate::lsp::analysis::Job {
 			uri: doc.uri.clone(),
