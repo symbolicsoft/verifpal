@@ -47,12 +47,15 @@ pub(crate) fn obtainable(
 		return hit;
 	}
 	let result = construction_inputs(p, capabilities, attacker).is_some();
+	let canonical = crate::term::hashing::hashconsed(p);
 	with_memo(capabilities, attacker, |memo| {
 		memo.pointers.insert(pointer, (Arc::clone(p), result));
-		memo.entries
-			.entry(hash)
-			.or_default()
-			.push((v.clone(), result))
+		if !canonical {
+			memo.entries
+				.entry(hash)
+				.or_default()
+				.push((v.clone(), result));
+		}
 	});
 	result
 }

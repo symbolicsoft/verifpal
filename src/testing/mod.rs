@@ -31,6 +31,7 @@ pub(crate) fn make_trace(slots: Vec<TraceSlot>) -> ProtocolTrace {
 		.map(|(i, slot)| (slot.constant.id, i))
 		.collect();
 	ProtocolTrace {
+		dependencies: crate::protocol::trace::Dependencies::of(&slots, &index),
 		slots,
 		index,
 		..ProtocolTrace::default()

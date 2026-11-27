@@ -217,7 +217,7 @@ impl<'a, 'b> Search<'a, 'b> {
 			.min_by_key(|&n| rank(n));
 		let union = self.phase_union(phase);
 		if adders.reachable.0 != self.union.size() {
-			let honest = &self.nodes[HONEST_NODE].at(phase).0;
+			let honest = &self.knowledge_of(HONEST_NODE, phase).0;
 			let mut within = before.clone();
 			for v in union.state.known.iter() {
 				if honest.knows(v).is_none() {
@@ -248,7 +248,7 @@ impl<'a, 'b> Search<'a, 'b> {
 	}
 
 	fn adds(&self, n: NodeIdx, value: &Value, phase: i32, before: &Knowledge) -> bool {
-		let capabilities = &self.nodes[n].at(phase).1;
+		let capabilities = &self.knowledge_of(n, phase).1;
 		let additions = self.additions(n, phase);
 		if additions.is_empty() {
 			return obtainable(value, capabilities, &before.state);
@@ -261,12 +261,12 @@ impl<'a, 'b> Search<'a, 'b> {
 	}
 
 	fn additions(&self, n: NodeIdx, phase: i32) -> Arc<[Value]> {
-		if let Some(known) = self.memo.additions.borrow().get(&(n, phase)) {
+		let state = self.nodes[n].at(phase);
+		if let Some(known) = self.memo.additions.borrow().get(&state) {
 			return Arc::clone(known);
 		}
-		let honest = &self.nodes[HONEST_NODE].at(phase).0;
-		let known: Arc<[Value]> = self.nodes[n]
-			.at(phase)
+		let honest = &self.knowledge_of(HONEST_NODE, phase).0;
+		let known: Arc<[Value]> = self.states.held[state]
 			.0
 			.known
 			.iter()
@@ -276,7 +276,7 @@ impl<'a, 'b> Search<'a, 'b> {
 		self.memo
 			.additions
 			.borrow_mut()
-			.insert((n, phase), Arc::clone(&known));
+			.insert(state, Arc::clone(&known));
 		known
 	}
 

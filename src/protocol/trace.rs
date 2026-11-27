@@ -7,7 +7,7 @@ use crate::primitive::CapabilityIndex;
 use crate::syntax::names::{ATTACKER_ID, ATTACKER_NAME};
 use crate::syntax::{PrincipalId, Span};
 use crate::term::{Constant, Value, ValueId, copy_index_of, hashing};
-use crate::util::index::{IndexVec, index_type};
+use crate::util::index::{Idx, IndexVec, index_type};
 use crate::util::{IdMap, IdSet};
 
 index_type!(
@@ -118,11 +118,84 @@ pub(crate) struct ProtocolTrace {
 	pub scenario_dependent: IdSet<ValueId>,
 	pub equivalence_queried: IdSet<ValueId>,
 	pub capabilities: CapabilityIndex,
+	pub dependencies: Dependencies,
+}
+
+#[derive(Clone, Debug, Default)]
+pub(crate) struct Dependencies {
+	reads: IndexVec<SlotIdx, Vec<SlotIdx>>,
+	width: usize,
+	mentions: Vec<u64>,
+}
+
+impl Dependencies {
+	pub(crate) fn of(
+		slots: &IndexVec<SlotIdx, TraceSlot>,
+		index: &IdMap<ValueId, SlotIdx>,
+	) -> Self {
+		let reads: IndexVec<SlotIdx, Vec<SlotIdx>> = slots
+			.iter()
+			.map(|slot| {
+				slot.initial_value
+					.constant_leaves()
+					.filter_map(|c| index.get(&c.id).copied())
+					.collect()
+			})
+			.collect();
+		let width = slots.len().div_ceil(64);
+		let mut dependencies = Dependencies {
+			reads,
+			width,
+			mentions: vec![0; slots.len() * width],
+		};
+		let mut filled = IndexVec::from_elem(false, slots.len());
+		for slot in slots.indices() {
+			dependencies.fill(slots, slot, &mut filled);
+		}
+		dependencies
+	}
+
+	fn fill(
+		&mut self,
+		slots: &IndexVec<SlotIdx, TraceSlot>,
+		slot: SlotIdx,
+		filled: &mut IndexVec<SlotIdx, bool>,
+	) {
+		if std::mem::replace(&mut filled[slot], true) {
+			return;
+		}
+		let row = slot.index() * self.width;
+		for at in 0..self.reads[slot].len() {
+			let read = self.reads[slot][at];
+			self.mentions[row + read.index() / 64] |= 1 << (read.index() % 64);
+			if slots[read].creator != slots[slot].creator
+				|| !matches!(slots[read].initial_value, Value::Primitive(_))
+			{
+				continue;
+			}
+			self.fill(slots, read, filled);
+			let from = read.index() * self.width;
+			for word in 0..self.width {
+				self.mentions[row + word] |= self.mentions[from + word];
+			}
+		}
+	}
 }
 
 impl ProtocolTrace {
 	pub(crate) fn index_of(&self, c: &Constant) -> Option<SlotIdx> {
 		self.index.get(&c.id).copied()
+	}
+
+	pub(crate) fn reads(&self, slot: SlotIdx) -> &[SlotIdx] {
+		&self.dependencies.reads[slot]
+	}
+
+	pub(crate) fn mentions(&self, slot: SlotIdx, target: SlotIdx) -> bool {
+		let dependencies = &self.dependencies;
+		dependencies.mentions[slot.index() * dependencies.width + target.index() / 64]
+			& (1 << (target.index() % 64))
+			!= 0
 	}
 
 	pub(crate) fn principal_name(&self, id: PrincipalId) -> &str {

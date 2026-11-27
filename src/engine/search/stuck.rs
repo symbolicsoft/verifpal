@@ -258,12 +258,10 @@ impl<'a, 'b> Search<'a, 'b> {
 				{
 					continue;
 				}
-				let within = context.iter().all(|install| {
-					self.nodes[n]
-						.installs
-						.iter()
-						.any(|held| held.same_input(install))
-				});
+				let mut held = self.nodes[n].installs.iter();
+				let within = context
+					.iter()
+					.all(|install| held.any(|held| held.same_input(install)));
 				if !within || !self.derivable_in(n, value, phase) {
 					continue;
 				}
@@ -351,10 +349,8 @@ impl<'a, 'b> Search<'a, 'b> {
 		match program.runs[run].steps[step].event {
 			Event::Recv(d) => self.cone(program.deliveries[d].sender, slot, out),
 			Event::Assign(_) => {
-				for leaf in km.slots[slot].initial_value.constant_leaves() {
-					if let Some(at) = km.index_of(leaf) {
-						self.cone(run, at, out);
-					}
+				for &at in km.reads(slot) {
+					self.cone(run, at, out);
 				}
 			}
 			_ => {}

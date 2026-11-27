@@ -67,13 +67,7 @@ pub(super) fn constraint_sets(
 						continue;
 					}
 					for &check in owned {
-						if crate::engine::judgment::mentions(
-							km,
-							&km.slots[check].initial_value,
-							constant.id,
-							owner,
-							&mut Vec::new(),
-						) {
+						if km.mentions(check, slot) {
 							endpoints.push((
 								owner,
 								(km.slots[check].declared_at, Some(check)),

@@ -253,19 +253,9 @@ impl<'a, 'b> Search<'a, 'b> {
 	}
 
 	fn used_with(&self, r: RunIdx, subject: SlotIdx) -> Vec<SlotIdx> {
-		let km = self.cx.km;
 		let program = &self.cx.program.runs[r];
-		let target = km.slots[subject].constant.id;
 		let mut out: Vec<SlotIdx> = Vec::new();
-		let downstream = |slot: SlotIdx| {
-			crate::engine::judgment::mentions(
-				km,
-				&km.slots[slot].initial_value,
-				target,
-				program.id,
-				&mut Vec::new(),
-			)
-		};
+		let downstream = |slot: SlotIdx| self.cx.km.mentions(slot, subject);
 		let mut pending: Vec<SlotIdx> = program
 			.steps
 			.iter()
@@ -276,10 +266,7 @@ impl<'a, 'b> Search<'a, 'b> {
 			.filter(|&slot| downstream(slot))
 			.collect();
 		while let Some(slot) = pending.pop() {
-			for c in km.slots[slot].initial_value.constant_leaves() {
-				let Some(at) = km.index_of(c) else {
-					continue;
-				};
+			for &at in self.cx.km.reads(slot) {
 				let Some(&step) = program.step_of_slot.get(&at) else {
 					continue;
 				};

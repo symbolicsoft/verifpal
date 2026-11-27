@@ -33,6 +33,9 @@ index_type!(
 index_type!(
 	struct AttemptIdx;
 );
+index_type!(
+	struct StateIdx;
+);
 
 const HONEST_NODE: NodeIdx = NodeIdx(0);
 
@@ -41,7 +44,7 @@ struct Node {
 	family: Family,
 	held: IndexVec<RunIdx, Vec<HeldValue>>,
 	sent: IndexVec<DeliveryIdx, Option<Vec<Value>>>,
-	knowledge: Vec<PhaseKnowledge>,
+	knowledge: Vec<StateIdx>,
 }
 
 type PhaseKnowledge = (
@@ -50,7 +53,70 @@ type PhaseKnowledge = (
 	std::cell::RefCell<crate::theory::SavedMemo>,
 );
 
-type Additions = IdMap<(NodeIdx, i32), Arc<[Value]>>;
+type Additions = IdMap<StateIdx, Arc<[Value]>>;
+
+#[derive(Default)]
+struct States {
+	held: IndexVec<StateIdx, PhaseKnowledge>,
+	index: IdMap<u64, Vec<StateIdx>>,
+}
+
+impl States {
+	fn of(&mut self, ex: &Execution) -> Vec<StateIdx> {
+		ex.barriers
+			.iter()
+			.chain(std::iter::once(ex))
+			.map(|phase| self.at(&phase.knowledge))
+			.collect()
+	}
+
+	fn at(&mut self, knowledge: &Knowledge) -> StateIdx {
+		use crate::term::hashing::identical;
+		let state = &knowledge.state;
+		let capabilities = knowledge.capabilities();
+		let key = state
+			.known
+			.iter()
+			.fold(state.current_phase as u64, |key, v| {
+				key.rotate_left(5).wrapping_add(v.hash_value())
+			});
+		let held = self.index.entry(key).or_default();
+		let found = held.iter().copied().find(|&at| {
+			let (other, declared, _) = &self.held[at];
+			Arc::ptr_eq(declared, capabilities)
+				&& other.current_phase == state.current_phase
+				&& other.known.len() == state.known.len()
+				&& other.reused.len() == state.reused.len()
+				&& other
+					.known
+					.iter()
+					.zip(state.known.iter())
+					.all(|(a, b)| identical(a, b))
+				&& other
+					.reused
+					.iter()
+					.zip(state.reused.iter())
+					.all(|(a, b)| identical(&a[0], &b[0]) && identical(&a[1], &b[1]))
+		});
+		if let Some(at) = found {
+			return at;
+		}
+		let at = self.held.push((
+			Arc::new(AttackerState {
+				current_phase: state.current_phase,
+				known: Arc::clone(&state.known),
+				known_map: Arc::clone(&state.known_map),
+				derivations: Arc::default(),
+				reused: Arc::clone(&state.reused),
+				chain: next_chain(),
+			}),
+			Arc::clone(capabilities),
+			std::cell::RefCell::default(),
+		));
+		held.push(at);
+		at
+	}
+}
 
 struct HeldValue {
 	slot: SlotIdx,
@@ -92,27 +158,7 @@ impl Node {
 						.map(|values| values.iter().map(crate::term::hashing::hashcons).collect())
 				})
 				.collect(),
-			knowledge: ex
-				.barriers
-				.iter()
-				.chain(std::iter::once(ex))
-				.map(|phase| {
-					let state = &phase.knowledge.state;
-					let state = Arc::new(AttackerState {
-						current_phase: state.current_phase,
-						known: Arc::clone(&state.known),
-						known_map: Arc::clone(&state.known_map),
-						derivations: Arc::default(),
-						reused: Arc::clone(&state.reused),
-						chain: next_chain(),
-					});
-					(
-						state,
-						Arc::clone(phase.knowledge.capabilities()),
-						std::cell::RefCell::default(),
-					)
-				})
-				.collect(),
+			knowledge: Vec::new(),
 		}
 	}
 
@@ -124,11 +170,12 @@ impl Node {
 			.map(|at| &values[at])
 	}
 
-	fn at(&self, phase: i32) -> &PhaseKnowledge {
+	fn at(&self, phase: i32) -> StateIdx {
 		usize::try_from(phase)
 			.ok()
 			.and_then(|phase| self.knowledge.get(phase))
-			.unwrap_or_else(|| self.knowledge.last().unwrap())
+			.copied()
+			.unwrap_or_else(|| *self.knowledge.last().unwrap())
 	}
 }
 
@@ -138,6 +185,7 @@ pub(crate) struct Search<'a, 'b> {
 	honest: Execution,
 	facts: Facts,
 	nodes: IndexVec<NodeIdx, Node>,
+	states: States,
 	union: Union,
 	attempts: Attempts,
 	retries: Retries,
@@ -185,7 +233,6 @@ struct Retries {
 
 #[derive(Default)]
 struct Memo {
-	derivable: std::cell::RefCell<IdMap<(NodeIdx, usize, i32), bool>>,
 	cheapest: std::cell::RefCell<IdMap<(usize, i32), Cheapest>>,
 	late: std::cell::RefCell<IdMap<(RunIdx, StepIdx), Late>>,
 	additions: std::cell::RefCell<Additions>,
@@ -472,6 +519,7 @@ impl<'a, 'b> Search<'a, 'b> {
 				honest_at,
 			},
 			nodes: IndexVec::new(),
+			states: States::default(),
 			union: Union {
 				honest_known: knowledge.len(),
 				knowledge,
@@ -499,11 +547,16 @@ impl<'a, 'b> Search<'a, 'b> {
 				stats: Vec::new(),
 			},
 		};
-		let root = Node::of(Vec::new(), &search.honest, &search.facts.queried);
+		let mut root = Node::of(Vec::new(), &search.honest, &search.facts.queried);
+		root.knowledge = search.states.of(&search.honest);
 		search.push_node(root);
 		search.absorb_terms(&search.honest.knowledge.clone());
 		search.close_union();
 		search
+	}
+
+	fn knowledge_of(&self, node: NodeIdx, phase: i32) -> &PhaseKnowledge {
+		&self.states.held[self.nodes[node].at(phase)]
 	}
 
 	fn done(&self) -> bool {

@@ -174,23 +174,8 @@ impl<'a, 'b> Search<'a, 'b> {
 	}
 
 	pub(super) fn derivable_in(&self, node: NodeIdx, v: &Value, phase: i32) -> bool {
-		let derive = || {
-			let (state, capabilities, memo) = self.nodes[node].at(phase);
-			memo.borrow_mut()
-				.within(capabilities, state, || obtainable(v, capabilities, state))
-		};
-		let Value::Primitive(p) = v else {
-			return derive();
-		};
-		if !crate::term::hashing::hashconsed(p) {
-			return derive();
-		}
-		let key = (node, Arc::as_ptr(p) as usize, phase);
-		if let Some(&known) = self.memo.derivable.borrow().get(&key) {
-			return known;
-		}
-		let found = derive();
-		self.memo.derivable.borrow_mut().insert(key, found);
-		found
+		let (state, capabilities, memo) = self.knowledge_of(node, phase);
+		memo.borrow_mut()
+			.within(capabilities, state, || obtainable(v, capabilities, state))
 	}
 }

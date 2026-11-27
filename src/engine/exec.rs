@@ -279,11 +279,7 @@ fn lacks(cx: &Context, r: RunIdx, state: &RunState, event: Event) -> bool {
 				.is_some_and(|&at| matches!(run.steps[at].event, Event::Recv(_)))
 	};
 	match event {
-		Event::Assign(slot) => km.slots[slot]
-			.initial_value
-			.constant_leaves()
-			.filter_map(|c| km.index_of(c))
-			.any(missing),
+		Event::Assign(slot) => km.reads(slot).iter().copied().any(missing),
 		Event::Send(d) => cx.program.deliveries[d]
 			.slots
 			.iter()

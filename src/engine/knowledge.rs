@@ -118,7 +118,22 @@ pub(crate) struct Knowledge {
 	pools: Arc<IdMap<(usize, usize), usize>>,
 	settled: Arc<Vec<u8>>,
 	genuine: Arc<TermSet>,
+	proofs: Arc<Proofs>,
 	closed: bool,
+}
+
+type Proofs = Vec<(Vec<Value>, Arc<AttackerState>)>;
+
+fn proof<'p>(proofs: &'p Proofs, unforgeable: &[Value]) -> Option<&'p Arc<AttackerState>> {
+	proofs
+		.iter()
+		.find(|(held, _)| {
+			held.len() == unforgeable.len()
+				&& unforgeable
+					.iter()
+					.all(|v| held.iter().any(|h| h.equivalent(v, true)))
+		})
+		.map(|(_, world)| world)
 }
 
 const DECOMPOSED: u8 = 1;
@@ -142,6 +157,7 @@ impl Knowledge {
 			pools: Arc::new(IdMap::default()),
 			settled: Arc::new(Vec::new()),
 			genuine: Arc::new(TermSet::default()),
+			proofs: Arc::default(),
 			closed: true,
 		}
 	}
@@ -155,7 +171,14 @@ impl Knowledge {
 			let state = Arc::make_mut(&mut self.state);
 			state.current_phase = phase;
 			state.chain = next_chain();
-			self.closed = false;
+			self.reopen();
+		}
+	}
+
+	fn reopen(&mut self) {
+		self.closed = false;
+		if !self.proofs.is_empty() {
+			self.proofs = Arc::default();
 		}
 	}
 
@@ -175,7 +198,7 @@ impl Knowledge {
 				let state = Arc::make_mut(&mut self.state);
 				Arc::make_mut(&mut state.derivations)[at.get()] = origin.record();
 				state.chain = next_chain();
-				self.closed = false;
+				self.reopen();
 			}
 			return false;
 		}
@@ -192,10 +215,14 @@ impl Knowledge {
 			.entry(v.hash_value())
 			.or_default()
 			.push(at);
+		let disclosed = disclosure(&record);
 		Arc::make_mut(&mut state.derivations).push(record);
 		state.chain = next_chain();
 		Arc::make_mut(&mut self.origins).push(origin);
 		self.closed = false;
+		if disclosed {
+			self.reopen();
+		}
 	}
 
 	fn disclosed(&self, without: Option<&Value>) -> Knowledge {
@@ -227,6 +254,7 @@ impl Knowledge {
 
 	pub(crate) fn declaring(mut self, capabilities: &CapabilityIndex) -> Knowledge {
 		self.capabilities = Arc::new(capabilities.clone());
+		self.proofs = Arc::default();
 		self
 	}
 
@@ -243,7 +271,7 @@ impl Knowledge {
 	pub(crate) fn withholding(&self, v: &Value) -> Knowledge {
 		let mut out = self.disclosed(Some(v));
 		let capabilities = Arc::clone(&self.capabilities);
-		out.closing(&capabilities, Some(v), &|| false);
+		out.closing(&capabilities, Some(v), &|| false, &mut Arc::default());
 		out
 	}
 
@@ -253,11 +281,20 @@ impl Knowledge {
 		capabilities: &CapabilityIndex,
 		withheld: Option<&Value>,
 		stop: &dyn Fn() -> bool,
+		proofs: &mut Arc<Proofs>,
 	) -> Option<bool> {
+		let mut unforgeable = capabilities.unforgeable().to_vec();
+		unforgeable.push(v.clone());
+		if let Some(world) = proof(proofs, &unforgeable) {
+			return Some(world.knows(v).is_some());
+		}
 		let mut world = self.disclosed(withheld);
-		world
-			.closing(&capabilities.without_forging(v), withheld, stop)
-			.then(|| world.state.knows(v).is_some())
+		if !world.closing(&capabilities.without_forging(v), withheld, stop, proofs) {
+			return None;
+		}
+		let derived = world.state.knows(v).is_some();
+		Arc::make_mut(proofs).push((unforgeable, world.state));
+		Some(derived)
 	}
 
 	pub(crate) fn proven(&self, v: &Value) -> bool {
@@ -270,7 +307,12 @@ impl Knowledge {
 		disclosed: impl Fn(usize, &Value) -> bool,
 	) -> Option<Knowledge> {
 		let mut world = self.disclosed_where(disclosed);
-		world.closing(&self.capabilities.without_forging(v), None, &|| false);
+		world.closing(
+			&self.capabilities.without_forging(v),
+			None,
+			&|| false,
+			&mut Arc::default(),
+		);
 		world.state.knows(v).is_some().then_some(world)
 	}
 
@@ -295,13 +337,15 @@ impl Knowledge {
 	pub(crate) fn note_protocol(&mut self, value: &Value, pre: &Value, own: bool) {
 		Arc::make_mut(&mut self.protocol).push((value.clone(), pre.clone(), own));
 		Arc::make_mut(&mut self.candidates).note(value, pre);
-		self.closed = false;
+		self.reopen();
 	}
 
 	pub(crate) fn note_computed(&mut self, declared: &Value, pre: &Value, value: &Value) {
 		let mut built = Vec::new();
 		applied(declared, pre, &mut built);
-		if !value.same_term(pre) {
+		let rebuilt = matches!(value, Value::Primitive(_))
+			&& !crate::term::subterms(pre).any(|input| input.equivalent(value, true));
+		if rebuilt {
 			let inputs: TermSet = crate::term::subterms(pre).cloned().collect();
 			reassembled(value, &inputs, &mut IdSet::default(), &mut built);
 		}
@@ -312,18 +356,16 @@ impl Knowledge {
 	}
 
 	pub(crate) fn note_annotated(&mut self, pre: &Value) {
-		if crate::term::subterms(pre)
-			.any(|term| matches!(term, Value::Primitive(p) if !p.capabilities.is_empty()))
-		{
+		if crate::term::annotated(pre) {
 			Arc::make_mut(&mut self.capabilities).insert(pre);
-			self.closed = false;
+			self.reopen();
 		}
 	}
 
 	pub(crate) fn note_built(&mut self, term: &Value) {
 		if !self.built.contains(term) {
 			Arc::make_mut(&mut self.built).insert(term.clone());
-			self.closed = false;
+			self.reopen();
 		}
 	}
 
@@ -338,7 +380,10 @@ impl Knowledge {
 
 	pub(crate) fn close_unless(&mut self, stop: &dyn Fn() -> bool) -> bool {
 		let capabilities = Arc::clone(&self.capabilities);
-		self.closing(&capabilities, None, stop)
+		let mut proofs = std::mem::take(&mut self.proofs);
+		let closed = self.closing(&capabilities, None, stop, &mut proofs);
+		self.proofs = proofs;
+		closed
 	}
 
 	fn closing(
@@ -346,12 +391,12 @@ impl Knowledge {
 		capabilities: &CapabilityIndex,
 		withheld: Option<&Value>,
 		stop: &dyn Fn() -> bool,
+		proofs: &mut Arc<Proofs>,
 	) -> bool {
 		if self.closed {
 			return true;
 		}
 		let admitted = |v: &Value| withheld.is_none_or(|w| !w.equivalent(v, true));
-		let mut refuted: Vec<Value> = Vec::new();
 		loop {
 			let pass = {
 				let snapshot = Arc::clone(&self.state);
@@ -409,15 +454,9 @@ impl Knowledge {
 			let mut proven = false;
 			for at in unproven {
 				let v = self.state.known[at].clone();
-				if refuted.iter().any(|r| r.equivalent(&v, true)) {
-					continue;
-				}
-				match self.unforged(&v, capabilities, withheld, stop) {
+				match self.unforged(&v, capabilities, withheld, stop, proofs) {
 					None => return false,
-					Some(false) => {
-						refuted.push(v);
-						continue;
-					}
+					Some(false) => continue,
 					Some(true) => {}
 				}
 				Arc::make_mut(&mut self.genuine).insert(v);
@@ -579,14 +618,15 @@ impl Pass<'_> {
 
 	fn openable(&self, found: &mut Found, at: usize, p: &Arc<Primitive>, known: &Value) -> bool {
 		let attacker = self.attacker;
+		let built = self.built.contains(known);
+		if built && (disclosure(&attacker.derivations[at]) || self.genuine.contains(known)) {
+			return true;
+		}
 		if !can_reconstruct_primitive(p, self.capabilities, attacker).is_some_and(|b| b.forged()) {
 			return true;
 		}
-		if !self.built.contains(known) {
+		if !built {
 			return false;
-		}
-		if disclosure(&attacker.derivations[at]) || self.genuine.contains(known) {
-			return true;
 		}
 		if !found.unproven.contains(&at) {
 			found.unproven.push(at);

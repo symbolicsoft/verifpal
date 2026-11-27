@@ -285,6 +285,10 @@ impl CapabilityIndex {
 		out
 	}
 
+	pub(crate) fn unforgeable(&self) -> &[Value] {
+		&self.unforgeable
+	}
+
 	pub(crate) fn forgery_denied(&self, p: &Primitive) -> bool {
 		self.unforgeable.iter().any(|v| {
 			v.as_primitive()

@@ -9,8 +9,7 @@ use super::{
 };
 use crate::engine::exec::{Execution, Install, Installs, execute};
 use crate::engine::program::{DeliveryIdx, Event, RunIdx};
-use crate::protocol::{ProtocolTrace, SlotIdx};
-use crate::syntax::PrincipalId;
+use crate::protocol::SlotIdx;
 use crate::term::Value;
 use crate::theory::obtainable;
 use crate::util::IdSet;
@@ -55,29 +54,6 @@ fn rebuilt(honest: &Value, obtains: &impl Fn(&Value) -> bool) -> Value {
 		}
 		Value::Constant(_) | Value::Variable(_) => crate::term::value_nil(),
 	}
-}
-
-fn feeds(
-	km: &ProtocolTrace,
-	owner: PrincipalId,
-	slot: SlotIdx,
-	from: &[SlotIdx],
-	seen: &mut Vec<SlotIdx>,
-) -> bool {
-	if from.contains(&slot) {
-		return true;
-	}
-	if seen.contains(&slot) || km.slots[slot].creator != owner {
-		return false;
-	}
-	seen.push(slot);
-	let Value::Primitive(_) = &km.slots[slot].initial_value else {
-		return false;
-	};
-	km.slots[slot].initial_value.constant_leaves().any(|c| {
-		km.index_of(c)
-			.is_some_and(|at| feeds(km, owner, at, from, seen))
-	})
 }
 
 fn halts_of(ex: &Execution) -> Vec<(RunIdx, SlotIdx)> {
@@ -298,7 +274,9 @@ impl<'a, 'b> Search<'a, 'b> {
 						Event::Assign(slot) => match &km.slots[slot].initial_value {
 							Value::Primitive(p)
 								if p.instance_check
-									&& feeds(km, program.id, slot, &withheld, &mut Vec::new()) =>
+									&& withheld.iter().any(|&from| {
+										from == slot || self.cx.km.mentions(slot, from)
+									}) =>
 							{
 								Some(slot)
 							}
@@ -369,15 +347,11 @@ impl<'a, 'b> Search<'a, 'b> {
 					};
 					if obtains(b, slot, value) {
 						fills.push(install);
-					} else if run.halted.as_ref().is_some_and(|halt| {
-						crate::engine::judgment::mentions(
-							km,
-							&km.slots[halt.slot].initial_value,
-							km.slots[slot].constant.id,
-							self.cx.program.runs[b].id,
-							&mut Vec::new(),
-						)
-					}) {
+					} else if run
+						.halted
+						.as_ref()
+						.is_some_and(|halt| self.cx.km.mentions(halt.slot, slot))
+					{
 						wanted.push(install);
 					}
 				}
@@ -512,7 +486,7 @@ impl<'a, 'b> Search<'a, 'b> {
 		{
 			self.attempts.drops.push(installs.clone());
 		}
-		let node = Node::of(installs, &ex, &self.facts.queried);
+		let mut node = Node::of(installs, &ex, &self.facts.queried);
 		let at = self.nodes.next_index();
 		let fresh = self.note_fresh(at, &node, &ex);
 		let holder = !(kept || fresh || alternative) && self.holds_unsourced(&ex);
@@ -529,6 +503,7 @@ impl<'a, 'b> Search<'a, 'b> {
 			}
 			return false;
 		}
+		node.knowledge = self.states.of(&ex);
 		self.push_node(node);
 		self.absorb(at, novel, &ex.knowledge);
 		if kept {

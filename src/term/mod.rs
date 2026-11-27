@@ -118,14 +118,23 @@ impl Constant {
 	}
 }
 
-const VARIABLES_UNKNOWN: u8 = 0;
-const VARIABLES_ABSENT: u8 = 1;
-const VARIABLES_PRESENT: u8 = 2;
+const UNKNOWN: u8 = 0;
+const ABSENT: u8 = 1;
+const PRESENT: u8 = 2;
+
+fn presence(cell: &AtomicU8) -> Option<bool> {
+	match cell.load(Ordering::Relaxed) {
+		UNKNOWN => None,
+		ABSENT => Some(false),
+		_ => Some(true),
+	}
+}
 
 #[derive(Debug, Default)]
 pub(crate) struct HashCell {
 	hash: AtomicU64,
 	variables: AtomicU8,
+	annotations: AtomicU8,
 	reduct: std::sync::OnceLock<Box<(bool, Option<Value>)>>,
 }
 
@@ -134,6 +143,7 @@ impl Clone for HashCell {
 		HashCell {
 			hash: AtomicU64::new(self.hash.load(Ordering::Relaxed)),
 			variables: AtomicU8::new(self.variables.load(Ordering::Relaxed)),
+			annotations: AtomicU8::new(self.annotations.load(Ordering::Relaxed)),
 			reduct: std::sync::OnceLock::new(),
 		}
 	}
@@ -160,21 +170,27 @@ impl HashCell {
 	}
 
 	pub(crate) fn has_variables(&self) -> Option<bool> {
-		match self.variables.load(Ordering::Relaxed) {
-			VARIABLES_UNKNOWN => None,
-			VARIABLES_ABSENT => Some(false),
-			_ => Some(true),
-		}
+		presence(&self.variables)
 	}
 
 	pub(crate) fn set_has_variables(&self, has: bool) {
-		let state = if has {
-			VARIABLES_PRESENT
-		} else {
-			VARIABLES_ABSENT
-		};
-		self.variables.store(state, Ordering::Relaxed);
+		self.variables
+			.store(if has { PRESENT } else { ABSENT }, Ordering::Relaxed);
 	}
+}
+
+pub(crate) fn annotated(v: &Value) -> bool {
+	let Value::Primitive(p) = v else {
+		return false;
+	};
+	if let Some(known) = presence(&p.cache.annotations) {
+		return known;
+	}
+	let known = !p.capabilities.is_empty() || p.arguments.iter().any(annotated);
+	p.cache
+		.annotations
+		.store(if known { PRESENT } else { ABSENT }, Ordering::Relaxed);
+	known
 }
 
 #[derive(Clone, Debug)]

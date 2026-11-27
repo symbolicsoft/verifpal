@@ -346,9 +346,10 @@ impl<'a, 'b> Search<'a, 'b> {
 				let Some(attacker) = self.union.at_last_receive(km, principal) else {
 					continue;
 				};
-				let Some((later, _, _)) = self.nodes[node].knowledge.last() else {
+				let Some(&later) = self.nodes[node].knowledge.last() else {
 					continue;
 				};
+				let later = &self.states.held[later].0;
 				if attacker.current_phase >= later.current_phase {
 					continue;
 				}
@@ -553,10 +554,7 @@ fn needs(
 	slot: SlotIdx,
 ) -> bool {
 	match event {
-		Event::Assign(at) => km.slots[at]
-			.initial_value
-			.constant_leaves()
-			.any(|c| km.index_of(c) == Some(slot)),
+		Event::Assign(at) => km.reads(at).contains(&slot),
 		Event::Send(d) => program.deliveries[d].slots.iter().any(|&(s, _)| s == slot),
 		Event::Leak(at) => at == slot,
 		Event::Hold(_) | Event::Recv(_) => false,

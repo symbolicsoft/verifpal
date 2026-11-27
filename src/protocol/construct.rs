@@ -6,6 +6,7 @@ use std::sync::Arc;
 use super::sanity::{
 	sanity_assignment_constants, sanity_message_principals, sanity_primitive, unknown_constant,
 };
+use super::trace::Dependencies;
 use super::{LeakEvent, ProtocolTrace, SendEvent, SlotIdx, TraceSlot};
 use crate::primitive::CapabilityIndex;
 use crate::syntax::names::{ATTACKER_ID, base_name};
@@ -120,6 +121,7 @@ pub(crate) fn construct_protocol_trace(
 	}
 	trace.max_phase = current_phase;
 	trace.used_by = construct_trace_used_by(&trace);
+	trace.dependencies = Dependencies::of(&trace.slots, &trace.index);
 	for slot in &mut trace.slots {
 		for event in &slot.sent_by {
 			if !event.guarded || slot.mutatable_to.contains(&event.sender) {

@@ -200,6 +200,39 @@ static PRIM_SPECS: LazyLock<[Option<PrimitiveSpec>; 256]> = LazyLock::new(|| {
 	table
 });
 
+type Rewriting = (&'static PrimitiveSpec, &'static RewriteRule);
+
+struct Inverse {
+	rewriting: [Vec<Rewriting>; 256],
+	combines_from: [Vec<&'static CombineRule>; 256],
+	combines_into: [Vec<(PrimitiveId, &'static CombineRule)>; 256],
+	tuple: [bool; 256],
+}
+
+static INVERSE: LazyLock<Inverse> = LazyLock::new(|| {
+	let mut inverse = Inverse {
+		rewriting: [const { Vec::new() }; 256],
+		combines_from: [const { Vec::new() }; 256],
+		combines_into: [const { Vec::new() }; 256],
+		tuple: [false; 256],
+	};
+	for spec in prim_specs() {
+		if let Some(rule) = &spec.rewrite {
+			inverse.rewriting[rule.id as usize].push((spec, rule));
+		}
+		for rule in &spec.combine {
+			inverse.combines_from[rule.partial as usize].push(rule);
+			inverse.combines_into[rule.whole as usize].push((spec.id, rule));
+		}
+	}
+	for core in core_specs() {
+		if let Some(tuple) = core.projection_of {
+			inverse.tuple[tuple as usize] = true;
+		}
+	}
+	inverse
+});
+
 fn core_entry(id: PrimitiveId) -> Option<&'static PrimitiveCoreSpec> {
 	CORE_SPECS[id as usize].as_ref()
 }
@@ -290,13 +323,8 @@ pub(crate) fn check_undoing(
 		.min_by_key(|(spec, _)| spec.id)
 }
 
-pub(crate) fn rewriting(
-	id: PrimitiveId,
-) -> impl Iterator<Item = (&'static PrimitiveSpec, &'static RewriteRule)> {
-	prim_specs().filter_map(move |spec| {
-		let rule = spec.rewrite.as_ref().filter(|rule| rule.id == id)?;
-		Some((spec, rule))
-	})
+pub(crate) fn rewriting(id: PrimitiveId) -> impl Iterator<Item = Rewriting> {
+	INVERSE.rewriting[id as usize].iter().copied()
 }
 
 pub(crate) fn name(id: PrimitiveId) -> &'static str {
@@ -484,7 +512,7 @@ pub(crate) fn is_projection(id: PrimitiveId) -> bool {
 }
 
 pub(crate) fn is_tuple(id: PrimitiveId) -> bool {
-	core_specs().any(|core| core.projection_of == Some(id))
+	INVERSE.tuple[id as usize]
 }
 
 pub(crate) fn is_equality(id: PrimitiveId) -> bool {
@@ -507,18 +535,13 @@ pub(crate) fn combine_rules(id: PrimitiveId) -> &'static [CombineRule] {
 }
 
 pub(crate) fn combines_from(partial: PrimitiveId) -> impl Iterator<Item = &'static CombineRule> {
-	prim_specs().flat_map(move |spec| spec.combine.iter().filter(move |r| r.partial == partial))
+	INVERSE.combines_from[partial as usize].iter().copied()
 }
 
 pub(crate) fn combines_into(
 	whole: PrimitiveId,
 ) -> impl Iterator<Item = (PrimitiveId, &'static CombineRule)> {
-	prim_specs().flat_map(move |spec| {
-		spec.combine
-			.iter()
-			.filter(move |rule| rule.whole == whole)
-			.map(move |rule| (spec.id, rule))
-	})
+	INVERSE.combines_into[whole as usize].iter().copied()
 }
 
 pub(crate) fn threshold(id: PrimitiveId) -> Option<ThresholdSpec> {

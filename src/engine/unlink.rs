@@ -4,7 +4,6 @@
 use std::sync::Arc;
 
 use super::exec::{Context, Execution, Held, Taken};
-use super::judgment::mentions;
 use super::knowledge::{Knowledge, Origin};
 use super::program::{Event, RunIdx};
 use crate::primitive::{CapabilityIndex, PrimitiveSpec, Reveal, RewriteRule};
@@ -489,15 +488,12 @@ fn supplied(cx: &Context, ex: &Execution, holders: [(RunIdx, SlotIdx); 2]) -> Kn
 			pending.push((sender, slot));
 			continue;
 		}
-		let program = &cx.program.runs[run];
-		let value = &cx.km.slots[slot].initial_value;
-		for step in &program.steps {
+		for step in &cx.program.runs[run].steps {
 			let Event::Recv(d) = step.event else {
 				continue;
 			};
 			for &(input, _) in &cx.program.deliveries[d].slots {
-				let target = cx.km.slots[input].constant.id;
-				if mentions(cx.km, value, target, program.id, &mut Vec::new()) {
+				if cx.km.mentions(slot, input) {
 					pending.push((run, input));
 				}
 			}

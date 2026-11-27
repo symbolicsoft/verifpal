@@ -67,6 +67,10 @@ fn same_constant(a: &Constant, b: &Constant) -> bool {
 		&& a.qualifier == b.qualifier
 }
 
+pub(crate) fn identical(a: &Value, b: &Value) -> bool {
+	same_leaf(&hashcons(a), &hashcons(b))
+}
+
 fn same_leaf(a: &Value, b: &Value) -> bool {
 	match (a, b) {
 		(Value::Constant(x), Value::Constant(y)) => same_constant(x, y),

@@ -8,7 +8,7 @@ use crate::protocol::ProtocolTrace;
 use crate::protocol::SlotIdx;
 use crate::protocol::trace::mentions_across_principals;
 use crate::syntax::{PrincipalId, Query, QueryKind};
-use crate::term::{Constant, Value, ValueId};
+use crate::term::{Constant, Value};
 use crate::theory::{can_rewrite, obtainable};
 use crate::util::IdMap;
 
@@ -169,17 +169,17 @@ impl<'a, 'b> Judge<'a, 'b> {
 		})
 	}
 
-	fn first_use(&self, now: &RunState, run: RunIdx, target: ValueId) -> Option<SlotIdx> {
+	fn first_use(&self, now: &RunState, run: RunIdx, target: SlotIdx) -> Option<SlotIdx> {
 		let km = self.km();
 		let program = &self.cx.program.runs[run];
-		let sites = |mentioned: &dyn Fn(&Value) -> bool| -> Vec<(StepIdx, SlotIdx)> {
+		let sites = |mentioned: &dyn Fn(SlotIdx) -> bool| -> Vec<(StepIdx, SlotIdx)> {
 			program
 				.steps
 				.iter_enumerated()
 				.filter_map(|(i, step)| match step.event {
 					Event::Assign(slot)
 						if matches!(km.slots[slot].initial_value, Value::Primitive(_))
-							&& mentioned(&km.slots[slot].initial_value) =>
+							&& mentioned(slot) =>
 					{
 						Some((i, slot))
 					}
@@ -187,9 +187,12 @@ impl<'a, 'b> Judge<'a, 'b> {
 				})
 				.collect()
 		};
-		let mut mentioning = sites(&|v| mentions(km, v, target, program.id, &mut Vec::new()));
+		let mut mentioning = sites(&|slot| self.cx.km.mentions(slot, target));
 		if mentioning.is_empty() {
-			mentioning = sites(&|v| mentions_across_principals(v, km, program.id, target));
+			let id = km.slots[target].constant.id;
+			mentioning = sites(&|slot| {
+				mentions_across_principals(&km.slots[slot].initial_value, km, program.id, id)
+			});
 		}
 		let eventually = &self.whole.runs[run];
 		let failed: Vec<SlotIdx> = eventually
@@ -225,7 +228,7 @@ impl<'a, 'b> Judge<'a, 'b> {
 		let state = self.state(b)?;
 		let h = state.held(slot)?;
 		let sender = h.sender?;
-		let used = self.first_use(state, b, c.id)?;
+		let used = self.first_use(state, b, slot)?;
 		if !h.authored && program.runs[sender].id == q.message.sender {
 			return None;
 		}
@@ -328,22 +331,19 @@ impl<'a, 'b> Judge<'a, 'b> {
 				self.ex.runs[r]
 					.held(s)
 					.is_some_and(|held| held.value.equivalent(value, true))
-					&& self
-						.first_use(&self.ex.runs[r], r, km.slots[s].constant.id)
-						.is_some()
+					&& self.first_use(&self.ex.runs[r], r, s).is_some()
 			})
 	}
 
 	fn accepts_from_sender(&self, r: RunIdx, recipient: PrincipalId, s: SlotIdx) -> bool {
 		let km = self.km();
 		let id = self.cx.program.runs[r].id;
-		let target = km.slots[s].constant.id;
 		km.same_binding(id, recipient)
-			|| !km.slots.iter().any(|t| {
+			|| !km.slots.iter_enumerated().any(|(at, t)| {
 				t.creator == id
 					&& matches!(&t.initial_value, Value::Primitive(p) if p.instance_check)
 					&& km.binding_dependent(&t.constant)
-					&& mentions(km, &t.initial_value, target, id, &mut Vec::new())
+					&& self.cx.km.mentions(at, s)
 			})
 	}
 
@@ -369,7 +369,7 @@ impl<'a, 'b> Judge<'a, 'b> {
 						.find(|&other| other != r)?,
 				),
 			};
-			let used = self.first_use(state, r, c.id)?;
+			let used = self.first_use(state, r, slot)?;
 			Some(Violation::Stale {
 				run: r,
 				slot,
@@ -403,16 +403,9 @@ impl<'a, 'b> Judge<'a, 'b> {
 			held.sender
 				.is_some_and(|sender| self.replayed_into(&self.ex.runs[sender], sender, slot, seen))
 		} else {
-			let value = &km.slots[slot].initial_value;
 			program.steps.iter().any(|step| match step.event {
 				Event::Recv(d) => self.cx.program.deliveries[d].slots.iter().any(|&(t, _)| {
-					mentions(
-						km,
-						value,
-						km.slots[t].constant.id,
-						program.id,
-						&mut Vec::new(),
-					) && self.replayed_into(state, r, t, seen)
+					self.cx.km.mentions(slot, t) && self.replayed_into(state, r, t, seen)
 				}),
 				_ => false,
 			})
@@ -486,33 +479,4 @@ fn check_failed(v: &Value) -> bool {
 		Value::Constant(_) => false,
 		Value::Variable(_) => true,
 	}
-}
-
-pub(crate) fn mentions(
-	km: &ProtocolTrace,
-	v: &Value,
-	target: ValueId,
-	owner: PrincipalId,
-	seen: &mut Vec<ValueId>,
-) -> bool {
-	for c in v.constant_leaves() {
-		if c.id == target {
-			return true;
-		}
-		if seen.contains(&c.id) {
-			continue;
-		}
-		seen.push(c.id);
-		let Some(i) = km.index_of(c) else {
-			continue;
-		};
-		let slot = &km.slots[i];
-		if slot.creator != owner || !matches!(slot.initial_value, Value::Primitive(_)) {
-			continue;
-		}
-		if mentions(km, &slot.initial_value, target, owner, seen) {
-			return true;
-		}
-	}
-	false
 }
