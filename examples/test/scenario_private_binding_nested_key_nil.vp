@@ -1,0 +1,32 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0c1 at one session and at two.
+//
+// scenario_private_binding_nested_key.vp with pk = PUBKEY(nil) and nothing
+// leaked but the opened message. nil is public and sits at PUBKEY's secret
+// position inside the bound key, but derived = HASH(PUBKEY(nil), salt) still
+// needs the private salt, so the peer of the second scenario is honest and
+// the m Alice leaks there is a disclosure. This was c0c0: nil counted as key
+// material of the binding, and a public constant is always obtained.
+attacker[passive]
+
+principal Alice[
+	knows private salt, trusted, kpeer
+	pk = PUBKEY(nil)
+	derived = HASH(pk, salt)
+	generates m
+	sealed = ENC(derived, m)
+	opened = DEC(kpeer, sealed)
+	leaks opened
+]
+
+scenarios[
+	Alice[kpeer = trusted]
+	Alice[kpeer = derived]
+]
+
+queries[
+	confidentiality? derived
+	confidentiality? m
+]

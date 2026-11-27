@@ -134,6 +134,14 @@ mod tests {
 	}
 
 	#[test]
+	fn opening_a_document_dates_a_shared_scenario_binding() {
+		let text = include_str!("../../examples/test/scenario_binding_shared_chain.vp");
+		let doc = document("shared.vp", 1, text);
+		assert!(doc.trace.is_some());
+		assert!(doc.error.is_none(), "{:?}", doc.error);
+	}
+
+	#[test]
 	fn an_opened_document_is_parsed_and_indexed() {
 		let doc = document("m.vp", 1, GOOD);
 		assert_eq!(doc.version, 1);

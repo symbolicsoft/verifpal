@@ -539,18 +539,19 @@ fn corruption(m: &Model, copies: &[ModelCopy], cancel: &AtomicBool) -> VResult<V
 		.map(|(scenario, copy)| {
 			let run = program.run_index(copy.principal_id(scenario.principal));
 			let mut material: Vec<Value> = Vec::new();
+			let mut walked = IdSet::default();
 			for (target, value) in rebindings(scenario) {
 				let value = copy.constant(value);
 				let held = run
 					.zip(km.index_of(&value))
 					.and_then(|(r, slot)| honest.runs[r].held(slot))
 					.map_or_else(|| resolve_trace_constant(&value, &km), |h| h.value.clone());
-				if declares_private(m, scenario.principal, target.id)
-					&& !crate::primitive::value_is_key_derivation(&held)
-				{
-					material.push(held.clone());
+				let credential = declares_private(m, scenario.principal, target.id)
+					&& !crate::primitive::value_is_key_derivation(&held);
+				match credential {
+					true => material.push(held),
+					false => secret_arguments(&held, &mut walked, &mut material),
 				}
-				secret_arguments(&held, &mut material);
 			}
 			(0..=km.max_phase)
 				.find(|&phase| {
@@ -579,16 +580,19 @@ fn declares_private(m: &Model, principal: PrincipalId, id: ValueId) -> bool {
 		})
 }
 
-fn secret_arguments(v: &Value, out: &mut Vec<Value>) {
+fn secret_arguments(v: &Value, walked: &mut IdSet<usize>, out: &mut Vec<Value>) {
 	let Value::Primitive(p) = v else {
 		return;
 	};
+	if !walked.insert(Arc::as_ptr(p) as usize) {
+		return;
+	}
 	let secret = crate::primitive::secret_positions(p.id);
 	for (at, argument) in p.arguments.iter().enumerate() {
 		if secret.contains(&at) {
 			out.push(argument.clone());
 		} else {
-			secret_arguments(argument, out);
+			secret_arguments(argument, walked, out);
 		}
 	}
 }
@@ -938,6 +942,59 @@ mod tests {
 		let e = expand_scenarios(&m, 1, &AtomicBool::new(false)).expect("expands");
 		assert!(starts_honest(&e.scenarios[0]));
 		assert!(!starts_honest(&e.scenarios[1]), "{:?}", e.scenarios);
+	}
+
+	#[test]
+	fn key_material_is_collected_once_per_term_node() {
+		let hash = |a: &Value, b: &Value| {
+			Value::primitive(crate::primitive::PRIM_HASH, vec![a.clone(), b.clone()], 0)
+		};
+		let key = crate::testing::make_constant("dag_walk_key");
+		let pk = Value::primitive(crate::primitive::PRIM_PUBKEY, vec![key.clone()], 0);
+		let mut shared = hash(&pk, &pk);
+		let mut linear = hash(&pk, &crate::term::value_nil());
+		for _ in 0..20 {
+			shared = hash(&shared, &shared);
+			linear = hash(&linear, &crate::term::value_nil());
+		}
+		for bound in [shared, linear] {
+			let mut material = Vec::new();
+			secret_arguments(&bound, &mut IdSet::default(), &mut material);
+			assert_eq!(material.len(), 1, "one PUBKEY node, so one key");
+			assert!(material[0].equivalent(&key, true));
+		}
+	}
+
+	#[test]
+	fn a_private_credential_is_compromised_only_as_a_whole() {
+		let src = |leaks: &str| {
+			format!(
+				"attacker[passive]\n\
+				principal Alice[\n\
+				knows private pcw_key, pcw_salt, pcw_trusted, pcw_kpeer\n\
+				pcw_derived = HASH(PUBKEY(pcw_key), pcw_salt)\n\
+				leaks {leaks}\n\
+				]\n\
+				scenarios[\n\
+				Alice[pcw_kpeer = pcw_trusted]\n\
+				Alice[pcw_kpeer = pcw_derived]\n\
+				]\n\
+				queries[\n\
+				confidentiality? pcw_derived\n\
+				]\n"
+			)
+		};
+		let honest = |leaks: &str| {
+			let m = parse_string("pcw.vp", &src(leaks)).expect("parses");
+			let e = expand_scenarios(&m, 1, &AtomicBool::new(false)).expect("expands");
+			e.scenarios.iter().map(starts_honest).collect::<Vec<_>>()
+		};
+		assert_eq!(
+			honest("pcw_key"),
+			[true, true],
+			"a key inside the credential does not give the attacker the credential"
+		);
+		assert_eq!(honest("pcw_key, pcw_salt"), [true, false]);
 	}
 
 	#[test]

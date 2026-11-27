@@ -68,9 +68,10 @@ fn check_honest_run(
 		.min_by_key(|halt| halt.slot);
 	if let Some(halt) = failed
 		&& let Value::Primitive(p) = &halt.failed
+		&& let Value::Primitive(written) = &km.slots[halt.slot].initial_value
 	{
 		return Err(located(
-			crate::protocol::sanity::honest_check_failure(p),
+			crate::protocol::sanity::honest_check_failure(km, written, p),
 			halt.slot,
 		));
 	}

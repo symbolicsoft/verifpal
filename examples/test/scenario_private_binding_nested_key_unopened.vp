@@ -1,0 +1,31 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0c0 at one session and at two.
+//
+// scenario_private_binding_nested_key.vp without the leak of opened. The
+// second scenario's peer is honest and its claims are judged: nothing
+// discloses m there, since sealed is never sent and derived stays secret, so
+// both queries hold. The c1 of the main model is the leak of opened, not the
+// scenario's label.
+attacker[passive]
+
+principal Alice[
+	knows private key, salt, trusted, kpeer
+	pk = PUBKEY(key)
+	derived = HASH(pk, salt)
+	leaks key
+	generates m
+	sealed = ENC(derived, m)
+	opened = DEC(kpeer, sealed)
+]
+
+scenarios[
+	Alice[kpeer = trusted]
+	Alice[kpeer = derived]
+]
+
+queries[
+	confidentiality? derived
+	confidentiality? m
+]

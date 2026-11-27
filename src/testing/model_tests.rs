@@ -4293,6 +4293,54 @@ fn test_scenario_identity_binding_keeps_the_error() {
 	);
 }
 #[test]
+fn a_private_binding_is_compromised_only_as_a_whole() {
+	for sessions in [1, 2] {
+		for (model, code) in [
+			("scenario_private_binding_nested_key.vp", "c0c1"),
+			("scenario_private_binding_nested_key_nil.vp", "c0c1"),
+			("scenario_private_binding_nested_key_unopened.vp", "c0c0"),
+			("scenario_private_binding_whole_key_leaked.vp", "c1c0"),
+		] {
+			run_model_sessions(model, sessions, code);
+		}
+	}
+}
+
+#[test]
+fn a_shared_scenario_binding_is_dated_without_unfolding_it() {
+	for sessions in [1, 2] {
+		run_model_sessions("scenario_binding_shared_chain.vp", sessions, "c0");
+	}
+}
+
+#[test]
+fn a_failed_honest_check_is_reported_in_the_size_of_its_source() {
+	for sessions in [1, 2] {
+		for (model, expected) in [
+			(
+				"err_honest_check_shared_chain.vp",
+				"`ASSERT(HASH(x19, x19), nil)?` is checked",
+			),
+			("err_split_shared_chain.vp", "`pair` packs 2 fields"),
+		] {
+			let path = format!("examples/test/{model}");
+			let source = std::fs::read_to_string(&path).expect("reads the model");
+			let error = crate::verify::verify_with_sessions(&path, sessions)
+				.expect_err("a failed honest check is a model error")
+				.to_string();
+			assert!(error.contains(expected), "{model}: {error}");
+			assert!(
+				error.len() < source.len(),
+				"{model}: a diagnostic of {} bytes for a model of {}",
+				error.len(),
+				source.len()
+			);
+		}
+		run_model_sessions("honest_check_shared_chain.vp", sessions, "c0");
+	}
+}
+
+#[test]
 fn test_scenario_corrupt_needs_every_ingredient() {
 	run_model("scenario_corrupt_needs_every_ingredient.vp", "c1");
 	run_model_sessions("scenario_corrupt_needs_every_ingredient.vp", 1, "c1");

@@ -1,0 +1,57 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0 at one session and at two.
+//
+// Bob's public peer value is bound to x20, a chain of 21 hashes over
+// pk = PUBKEY(key), each of its predecessor twice: 22 term nodes and 2^21
+// occurrences of pk. The binding's key material is key, the argument at
+// PUBKEY's secret position, which nothing discloses, so the scenario is
+// honest and key stays secret.
+//
+// Dating the scenario once walked the bound value as a tree and collected
+// key once per occurrence, two million copies here and twice that with each
+// level, before any analysis and at every document open in an editor
+// (issue #70). The walk now visits each term node once.
+attacker[passive]
+
+principal Alice[
+	knows private key
+	pk = PUBKEY(key)
+	x0 = HASH(pk, pk)
+	x1 = HASH(x0, x0)
+	x2 = HASH(x1, x1)
+	x3 = HASH(x2, x2)
+	x4 = HASH(x3, x3)
+	x5 = HASH(x4, x4)
+	x6 = HASH(x5, x5)
+	x7 = HASH(x6, x6)
+	x8 = HASH(x7, x7)
+	x9 = HASH(x8, x8)
+	x10 = HASH(x9, x9)
+	x11 = HASH(x10, x10)
+	x12 = HASH(x11, x11)
+	x13 = HASH(x12, x12)
+	x14 = HASH(x13, x13)
+	x15 = HASH(x14, x14)
+	x16 = HASH(x15, x15)
+	x17 = HASH(x16, x16)
+	x18 = HASH(x17, x17)
+	x19 = HASH(x18, x18)
+	x20 = HASH(x19, x19)
+]
+
+Alice -> Bob: [x20]
+
+principal Bob[
+	knows public peer
+	seen = HASH(peer, x20)
+]
+
+scenarios[
+	Bob[peer = x20]
+]
+
+queries[
+	confidentiality? key
+]

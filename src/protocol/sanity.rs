@@ -700,8 +700,9 @@ fn checked_examples() -> String {
 		.join(" or ")
 }
 
-fn split_beyond_concat(p: &Primitive) -> Option<VerifpalError> {
+fn split_beyond_concat(written: &Primitive, p: &Primitive) -> Option<VerifpalError> {
 	let tuple = crate::primitive::projects(p.id)?;
+	let source = written.arguments.first()?;
 	let Some(Value::Primitive(inner)) = p.arguments.first() else {
 		return None;
 	};
@@ -725,7 +726,7 @@ fn split_beyond_concat(p: &Primitive) -> Option<VerifpalError> {
 		.note(format!(
 			"`{}` packs {} field{}, so only that many constants can be bound on \
 			 the left of the `=`; a field that was never packed is not an empty one",
-			inner, fields, s
+			source, fields, s
 		))
 		.help(format!(
 			"bind at most {} constant{} on the left, or pack more into the `CONCAT`",
@@ -734,8 +735,27 @@ fn split_beyond_concat(p: &Primitive) -> Option<VerifpalError> {
 	)
 }
 
-pub(crate) fn honest_check_failure(p: &Primitive) -> VerifpalError {
-	split_beyond_concat(p).unwrap_or_else(|| {
+fn spelled_out(km: &ProtocolTrace, written: &Primitive) -> Primitive {
+	let arguments = written
+		.arguments
+		.iter()
+		.map(|argument| match argument {
+			Value::Constant(c) => km
+				.index_of(c)
+				.map_or(argument, |slot| &km.slots[slot].initial_value)
+				.clone(),
+			Value::Primitive(_) | Value::Variable(_) => argument.clone(),
+		})
+		.collect();
+	written.with_arguments(arguments)
+}
+
+pub(crate) fn honest_check_failure(
+	km: &ProtocolTrace,
+	written: &Primitive,
+	p: &Primitive,
+) -> VerifpalError {
+	split_beyond_concat(written, p).unwrap_or_else(|| {
 		VerifpalError::sanity(
 			format!(
 				"`{}` cannot succeed as written",
@@ -749,7 +769,7 @@ pub(crate) fn honest_check_failure(p: &Primitive) -> VerifpalError {
 			"`{}` is checked with `?`, so the principal halts when it fails; \
 			 here it fails even with no attacker, which makes the model \
 			 describe a protocol that never completes",
-			p
+			spelled_out(km, written)
 		))
 		.help(
 			"check that the key, message and any additional data match what \

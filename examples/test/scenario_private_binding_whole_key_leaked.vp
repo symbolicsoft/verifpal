@@ -1,0 +1,34 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1c0 at one session and at two.
+//
+// scenario_private_binding_nested_key.vp with salt leaked beside key. The
+// attacker now computes PUBKEY(key) and then derived, the whole credential
+// the second scenario binds, so that scenario's peer is corrupt from phase 0
+// and its claims are not required. derived is one term in both scenarios,
+// over constants they share, so the first query fails in the honest scenario
+// too. m is judged only there, where DEC(trusted, sealed) is not m and
+// nothing discloses it.
+attacker[passive]
+
+principal Alice[
+	knows private key, salt, trusted, kpeer
+	pk = PUBKEY(key)
+	derived = HASH(pk, salt)
+	leaks key, salt
+	generates m
+	sealed = ENC(derived, m)
+	opened = DEC(kpeer, sealed)
+	leaks opened
+]
+
+scenarios[
+	Alice[kpeer = trusted]
+	Alice[kpeer = derived]
+]
+
+queries[
+	confidentiality? derived
+	confidentiality? m
+]

@@ -1,0 +1,44 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0c1 at one session and at two.
+//
+// Alice holds kpeer as a private key and the second scenario binds it to
+// derived = HASH(PUBKEY(key), salt). key leaks, salt never does, so the
+// attacker computes PUBKEY(key) and still cannot compute derived: the peer of
+// the second scenario is honest. In that scenario DEC(derived, sealed) is m,
+// and Alice leaks it, so m is disclosed; derived itself stays secret.
+//
+// This was c0c0 (issue #72). Corruption dating collected, beside the bound
+// value, every argument at a secret position inside it, and asked whether the
+// attacker obtains any of them: key sits at PUBKEY's secret position, its leak
+// dated the scenario corrupt from phase 0, and the disclosure of m was
+// dropped with the scenario's claims. A value a principal holds as a private
+// credential is compromised only when the attacker has the whole of it; the
+// secrets behind a value are its key material only when the value is a public
+// identifier of the peer.
+// scenario_private_binding_nested_key_nil.vp is the form with no leak at all,
+// scenario_private_binding_nested_key_unopened.vp and
+// scenario_private_binding_whole_key_leaked.vp are the counterweights.
+attacker[passive]
+
+principal Alice[
+	knows private key, salt, trusted, kpeer
+	pk = PUBKEY(key)
+	derived = HASH(pk, salt)
+	leaks key
+	generates m
+	sealed = ENC(derived, m)
+	opened = DEC(kpeer, sealed)
+	leaks opened
+]
+
+scenarios[
+	Alice[kpeer = trusted]
+	Alice[kpeer = derived]
+]
+
+queries[
+	confidentiality? derived
+	confidentiality? m
+]
