@@ -1,0 +1,29 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: u1 at one session and at two.
+//
+// a and b encrypt the same fresh s under two keys the attacker never learns,
+// and both encryptions are declared weak. The attacker breaks each and
+// obtains s: a and b link via s. This was u0, because the attacker cannot
+// rebuild a ciphertext whose key it lacks, and nothing was below a value it
+// could not rebuild. unlink_weak_ciphertext_content_strong.vp is the
+// counterweight.
+attacker[passive]
+
+principal Alice[
+	knows private kone, ktwo
+	generates s
+	a = ENC[weak](kone, s)
+	b = ENC[weak](ktwo, s)
+]
+
+Alice -> Bob: a, b
+
+principal Bob[
+	_ = HASH(a, b)
+]
+
+queries[
+	unlinkability? a, b
+]

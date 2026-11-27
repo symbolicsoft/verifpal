@@ -2,9 +2,9 @@
  * SPDX-License-Identifier: GPL-3.0-only */
 
 use super::{
-	Family, HONEST_NODE, NodeIdx, Search, Tried, compatible_with, normalize, runs_of, same_installs,
+	Family, HONEST_NODE, NodeIdx, Search, Tried, compatible_with, normalize, same_installs,
 };
-use crate::engine::exec::{Execution, Install, Installs};
+use crate::engine::exec::{Execution, Installs};
 use crate::engine::knowledge::{Knowledge, Origin};
 use crate::engine::program::{DeliveryIdx, Event, RunIdx};
 use crate::protocol::ProtocolTrace;
@@ -564,13 +564,19 @@ impl<'a, 'b> Search<'a, 'b> {
 				.into_iter()
 				.filter(|input| crate::engine::unlink::depends_on_secret(input, km))
 				.collect();
-			add_set(&mut routes, joined(&along, self.missing(&inputs, holder)));
+			let checked = joined(&along, self.missing(&inputs, holder));
+			add_set(&mut routes, checked.clone());
 			let below = if crate::primitive::core_reveals_arguments(p.id) {
 				along
 			} else {
 				rebuilt
 			};
 			pending.extend(p.arguments.iter().map(|a| (a.clone(), below.clone())));
+			pending.extend(
+				crate::engine::unlink::check_confirms(p)
+					.into_iter()
+					.map(|a| (a, checked.clone())),
+			);
 		}
 		routes
 	}
@@ -690,73 +696,5 @@ impl<'a, 'b> Search<'a, 'b> {
 			}
 		}
 		holders.scanned = self.nodes.next_index();
-	}
-
-	fn sibling_slot(&self, slot: SlotIdx, r: RunIdx) -> Option<SlotIdx> {
-		let km = self.cx.km;
-		let id = km.slots[slot].constant.id;
-		let group = km.copy_siblings.get(&id)?;
-		group.iter().find_map(|sid| {
-			let at = *km.index.get(sid)?;
-			self.cx.program.runs[r]
-				.step_of_slot
-				.contains_key(&at)
-				.then_some(at)
-		})
-	}
-
-	pub(super) fn transfer(&mut self, node: NodeIdx) {
-		let km = self.cx.km;
-		let program = self.cx.program;
-		let installs = self.nodes[node].installs.clone();
-		let runs = runs_of(&installs);
-		let mut plans: Vec<Installs> = Vec::new();
-		for &q in &runs {
-			for r in program.runs.indices() {
-				if r == q
-					|| runs.contains(&r)
-					|| !km.same_actor(program.runs[r].id, program.runs[q].id)
-				{
-					continue;
-				}
-				let mut plan: Installs = installs
-					.iter()
-					.filter(|install| install.run() != q)
-					.cloned()
-					.collect();
-				let mut complete = true;
-				for install in installs.iter().filter(|install| install.run() == q) {
-					let moved = match install {
-						Install::Value { slot, value, .. } => {
-							self.sibling_slot(*slot, r).map(|slot| Install::Value {
-								run: r,
-								slot,
-								value: value.clone(),
-							})
-						}
-						Install::Idle { .. } => Some(Install::Idle { run: r }),
-						Install::Drop { slot, .. } => self
-							.sibling_slot(*slot, r)
-							.map(|slot| Install::Drop { run: r, slot }),
-					};
-					match moved {
-						Some(moved) => plan.push(moved),
-						None => {
-							complete = false;
-							break;
-						}
-					}
-				}
-				if complete {
-					plans.push(normalize(plan));
-				}
-			}
-		}
-		for plan in plans.into_iter().rev() {
-			if self.done() {
-				break;
-			}
-			self.as_family(Family::Merge, |search| search.enqueue(plan));
-		}
 	}
 }

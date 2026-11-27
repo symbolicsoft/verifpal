@@ -4,6 +4,7 @@
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
+use crate::engine::program::RunIdx;
 use crate::protocol::SlotIdx;
 use crate::term::{Primitive, Value, VariableId, value_nil};
 use crate::util::index::Idx;
@@ -52,17 +53,22 @@ pub(crate) fn attacker_var_id(slot: SlotIdx) -> VariableId {
 	VariableId::Slot(slot.index())
 }
 
+pub(crate) fn receiver_var_id(slot: SlotIdx, run: RunIdx) -> VariableId {
+	VariableId::Receiver(run.index(), slot.index())
+}
+
 pub(crate) fn is_slot_var_id(id: &VariableId) -> bool {
-	matches!(id, VariableId::Slot(_))
+	matches!(id, VariableId::Slot(_) | VariableId::Receiver(..))
 }
 
 pub(crate) fn slot_of_var_id(id: &VariableId) -> SlotIdx {
-	let VariableId::Slot(slot) = id else {
-		panic!("a wire slot variable")
-	};
-	SlotIdx::new(*slot)
+	match id {
+		VariableId::Slot(slot) | VariableId::Receiver(_, slot) => SlotIdx::new(*slot),
+		VariableId::Free(_) => panic!("a wire slot variable"),
+	}
 }
 
+#[cfg(test)]
 pub(crate) fn attacker_var(slot: SlotIdx) -> Value {
 	Value::Variable(attacker_var_id(slot))
 }

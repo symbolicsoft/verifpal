@@ -15,15 +15,13 @@ pub(crate) mod vars;
 
 pub(crate) use free::honest_slot_terms;
 pub(crate) use propose::{
-	emissions_under, extended, install_signature, leave_honest_slots, propose,
+	emissions_under, everywhere, extended, install_signature, leave_honest_slots, propose,
 };
 
 use std::sync::Arc;
 
-use crate::protocol::ProtocolTrace;
 use crate::protocol::SlotIdx;
-use crate::syntax::PrincipalId;
-use crate::term::{Value, VariableId};
+use crate::term::Value;
 use crate::util::IdSet;
 use symbolic::SymbolicState;
 
@@ -31,29 +29,6 @@ use symbolic::SymbolicState;
 pub(crate) enum Pass {
 	Targeted,
 	Constructed,
-}
-
-pub(crate) fn directly_unguarded(
-	km: &ProtocolTrace,
-	principal: PrincipalId,
-	slot: SlotIdx,
-) -> bool {
-	km.slots.get(slot).is_some_and(|trace_slot| {
-		trace_slot
-			.sent_by
-			.iter()
-			.any(|event| event.recipient == principal && !event.guarded)
-	})
-}
-
-pub(crate) fn split_delivered(km: &ProtocolTrace, principal: PrincipalId, slot: SlotIdx) -> bool {
-	km.slots.get(slot).is_some_and(|trace_slot| {
-		trace_slot
-			.sent_by
-			.iter()
-			.any(|event| event.recipient != principal && event.sender != principal)
-			&& trace_slot.mutatable_to.iter().any(|&who| who != principal)
-	})
 }
 
 pub(crate) fn slots_blocking_reduction(sym: &SymbolicState) -> Vec<Vec<SlotIdx>> {
@@ -82,11 +57,15 @@ fn collect_blocking_slots(v: &Value, out: &mut Vec<Vec<SlotIdx>>, seen: &mut IdS
 		let positions = std::iter::once(rule.from).chain(rule.matching.iter().map(|(o, _)| *o));
 		for position in positions {
 			if let Some(argument) = p.arguments.get(position) {
-				if let Value::Variable(id @ VariableId::Slot(_)) = argument {
+				if let Value::Variable(id) = argument
+					&& vars::is_slot_var_id(id)
+				{
 					direct.push(vars::slot_of_var_id(id));
 				}
 				for term in crate::term::subterms(argument) {
-					if let Value::Variable(id @ VariableId::Slot(_)) = term {
+					if let Value::Variable(id) = term
+						&& vars::is_slot_var_id(id)
+					{
 						group.push(vars::slot_of_var_id(id));
 					}
 				}

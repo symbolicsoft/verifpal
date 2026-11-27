@@ -1,0 +1,30 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: u0 at one session and at two.
+//
+// unlink_tuple_shared_field.vp with the shared field public. a and b carry
+// the public tag, a fresh field each and a hash of the secret s with that
+// fresh field. The attacker splits both, but the only term it finds in both
+// is tag, which carries no secret and identifies nobody; x and y differ, the
+// two hashes differ, and s is never disclosed, so neither hash can be rebuilt
+// or opened. The honest values do share s, so only the conditions on the
+// common term stand between these tuples and a link.
+attacker[passive]
+
+principal Alice[
+	knows public tag
+	generates s, x, y
+	a = CONCAT(x, tag, HASH(s, x))
+	b = CONCAT(y, tag, HASH(s, y))
+]
+
+Alice -> Bob: a, b
+
+principal Bob[
+	_ = HASH(a, b)
+]
+
+queries[
+	unlinkability? a, b
+]

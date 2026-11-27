@@ -3,11 +3,12 @@
 
 use std::sync::Arc;
 
+use crate::engine::program::Program;
 use crate::protocol::trace::{resolve_trace_constant, resolve_trace_term};
-use crate::protocol::{ProtocolTrace, SlotIdx, TraceSlot};
+use crate::protocol::{ProtocolTrace, SlotIdx};
 use crate::syntax::PrincipalId;
 use crate::term::{Value, ValueId, VariableId};
-use crate::theory::{AttackerState, reduce_once};
+use crate::theory::reduce_once;
 use crate::util::IdMap;
 use crate::util::generation::{AnalysisKey, AnalysisLocal};
 use crate::util::index::IndexVec;
@@ -17,37 +18,41 @@ thread_local! {
 }
 
 pub(crate) struct Controllable {
-	principal: PrincipalId,
-	phase: i32,
 	slots: IndexVec<SlotIdx, bool>,
 }
 
 impl Controllable {
 	pub(crate) fn of(
+		program: &Program,
 		km: &ProtocolTrace,
 		principal: PrincipalId,
-		attacker: &AttackerState,
+		phase: i32,
 	) -> Controllable {
+		let run = program.run_index(principal);
 		Controllable {
-			principal,
-			phase: attacker.current_phase,
 			slots: km
 				.slots
-				.iter()
-				.map(|slot| attacker_controllable(slot, km, principal, attacker))
+				.iter_enumerated()
+				.map(|(at, slot)| {
+					run.is_some_and(|run| {
+						!slot.constant.is_nil()
+							&& slot.creator != principal
+							&& (program.receipt(run, at).is_none()
+								|| program.carriers(at).contains(&run))
+							&& program
+								.first_install_phase(at)
+								.is_some_and(|first| first <= phase)
+							&& (km.constant_used_by(principal, &slot.constant)
+								|| program.emits(run, at, None)
+								|| km.equivalence_queried.contains(&slot.constant.id))
+					})
+				})
 				.collect(),
 		}
 	}
 
-	pub(crate) fn admits(
-		&self,
-		principal: PrincipalId,
-		attacker: &AttackerState,
-		slot: SlotIdx,
-	) -> bool {
-		self.principal == principal
-			&& self.phase == attacker.current_phase
-			&& self.slots.get(slot).copied().unwrap_or(false)
+	pub(crate) fn admits(&self, slot: SlotIdx) -> bool {
+		self.slots.get(slot).copied().unwrap_or(false)
 	}
 }
 
@@ -262,37 +267,6 @@ fn term_depth_outside(
 			depth
 		}
 	}
-}
-
-fn attacker_controllable(
-	slot: &TraceSlot,
-	km: &ProtocolTrace,
-	principal: PrincipalId,
-	attacker: &AttackerState,
-) -> bool {
-	if slot.constant.is_nil() {
-		return false;
-	}
-	if slot.guarded_for(principal) {
-		if !slot.mutation_reaches(slot.sender_to(principal)) {
-			return false;
-		}
-	} else if slot.creator == principal || slot.sent_by.is_empty() {
-		return false;
-	}
-	if !slot
-		.delivery_phase
-		.is_some_and(|phase| phase <= attacker.current_phase)
-	{
-		return false;
-	}
-	if !km.constant_used_by(principal, &slot.constant)
-		&& !slot.sent_from(principal)
-		&& !km.equivalence_queried.contains(&slot.constant.id)
-	{
-		return false;
-	}
-	true
 }
 
 pub(crate) fn attacker_authored(ground: &Value, slot: SlotIdx, km: &ProtocolTrace) -> bool {

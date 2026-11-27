@@ -1,0 +1,34 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: u1 at one session and at two.
+//
+// a and b each seal a fresh message beside its MAC under k, each under a key
+// of its own, and all three keys leak. Opening a or b yields nothing the
+// attacker can recognise, so neither is tied to the key that opened it.
+// Inside each it finds a MAC that it recomputes from k and the message
+// beside it: both MACs are made of k, and so a and b link via k.
+//
+// This was u0: the descent stopped at what opening a value reveals, so a MAC
+// found inside an opened ciphertext was only a part on which a check could
+// run. Every held term now takes its own step.
+// unlink_opened_mac_key_unleaked.vp is the counterweight.
+attacker[passive]
+
+principal Alice[
+	knows private k, kone, ktwo
+	generates d, e
+	a = ENC(kone, CONCAT(d, MAC(k, d)))
+	b = ENC(ktwo, CONCAT(e, MAC(k, e)))
+	leaks k, kone, ktwo
+]
+
+Alice -> Bob: a, b
+
+principal Bob[
+	_ = HASH(a, b)
+]
+
+queries[
+	unlinkability? a, b
+]

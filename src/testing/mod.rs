@@ -49,7 +49,6 @@ pub(crate) fn make_trace_slot(c: &Value, value: &Value, creator: PrincipalId) ->
 		declared_at: 0,
 		phases: vec![],
 		mutatable_to: vec![],
-		delivery_phase: None,
 	}
 }
 
@@ -59,7 +58,6 @@ pub(crate) fn make_wire_slot(c: &Value, value: &Value, creator: PrincipalId) -> 
 			sender: creator,
 			recipient: 0,
 			declared_at: 0,
-			phase: 0,
 			guarded: false,
 		}],
 		..make_trace_slot(c, value, creator)

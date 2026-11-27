@@ -60,6 +60,7 @@ fn an_oracle_accepts_a_constructed_goal_outside_the_protocol_basis() {
 	let sym = SymbolicState {
 		terms: IndexVec::from(vec![sealed, opened, input.clone(), cipher.clone()]),
 		var_terms: IndexVec::from(vec![None, None, Some(input.clone()), Some(cipher.clone())]),
+		..SymbolicState::default()
 	};
 	let attacker = make_attacker_state(vec![message.clone(), value_nil()]);
 	let deducer = Deducer::new(&km, &attacker, &sym);
@@ -700,6 +701,7 @@ fn forgeable_shape_collection_visits_a_shared_check_once() {
 	let sym = SymbolicState {
 		terms: IndexVec::from(vec![term.clone(), check, term]),
 		var_terms: IndexVec::from(vec![Some(variable.clone())]),
+		..SymbolicState::default()
 	};
 	let km = make_trace(vec![]);
 	let attacker = make_attacker_state(vec![]);
@@ -740,9 +742,8 @@ authentication? Sender -> Bob: payload
 	let model = crate::syntax::parser::parse_string("constraint-prefix.vp", source).unwrap();
 	let km = crate::protocol::sanity::sanity(&model).unwrap();
 	let bob = km.principal_ids[km.principals.iter().position(|p| p == "Bob").unwrap()];
-	let attacker = make_attacker_state(vec![]);
-	let controllable = crate::solve::control::Controllable::of(&km, bob, &attacker);
-	let sym = crate::solve::symbolic::build(&controllable, &km, bob, &attacker);
+	let program = crate::engine::program::Program::of(&model, &km);
+	let sym = crate::solve::symbolic::View::of(&program, &km, bob, 0).build();
 	let groups = constraint_sets(&model.queries, &km, &sym);
 	let slot = |name: &str| {
 		km.slots

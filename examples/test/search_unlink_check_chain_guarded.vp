@@ -1,0 +1,52 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: CC-BY-SA-4.0
+//
+// Expected: u0 at one session and at two.
+//
+// search_unlink_check_chain.vp with Frank's input guarded. The attacker still
+// hands Erin ekone, obtains pkone and checks that a signs inner. It can no
+// longer hand Frank ektwo, so pktwo stays sealed under kf and the check on
+// inner cannot run: nothing the attacker holds ties inner to m, and a and b
+// are not linked.
+attacker[active]
+
+principal Alice[
+	knows private kd, kf, skone, sktwo
+	generates m
+	pkone = PUBKEY(skone)
+	pktwo = PUBKEY(sktwo)
+	inner = SIGN(sktwo, m)
+	a = SIGN(skone, inner)
+	b = HASH(m)
+	ekone = ENC(kd, pkone)
+	ektwo = ENC(kf, pktwo)
+	ed = ENC(kd, nil)
+	ef = ENC(kf, nil)
+	leaks m
+]
+
+Alice -> Dave: ekone, ektwo, inner, a, b
+
+Alice -> Erin: ed
+
+Alice -> Frank: [ef]
+
+principal Erin[
+	knows private kd
+	dd = DEC(kd, ed)
+	leaks dd
+]
+
+principal Frank[
+	knows private kf
+	df = DEC(kf, ef)
+	leaks df
+]
+
+principal Dave[
+	_ = HASH(ekone, ektwo, inner, a, b)
+]
+
+queries[
+	unlinkability? a, b
+]

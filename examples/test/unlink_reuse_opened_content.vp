@@ -1,0 +1,31 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: u1 at one session and at two.
+//
+// a and c are sealed under one key and one nonce, m1 leaks, and b is the hash
+// of m2. The reused nonce gives the attacker m2 from c once it knows m1, and
+// it recomputes b from m2: c and b link via m2. This was u0: the attacker
+// cannot rebuild c without k, and nothing was below a value it could not
+// rebuild, although it reads c's plaintext.
+// unlink_reuse_opened_content_fresh_nonce.vp is the counterweight.
+attacker[passive]
+
+principal Alice[
+	knows private k, ad
+	generates n, m1, m2
+	a = AEAD_ENC(k, n, m1, ad)
+	c = AEAD_ENC(k, n, m2, ad)
+	b = HASH(m2)
+	leaks m1
+]
+
+Alice -> Bob: a, c, b
+
+principal Bob[
+	_ = HASH(a, c, b)
+]
+
+queries[
+	unlinkability? c, b
+]

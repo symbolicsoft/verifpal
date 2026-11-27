@@ -1,0 +1,30 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: u0 at one session and at two.
+//
+// unlink_check_chain.vp without pktwo on the wire. The attacker still checks
+// that a signs inner, but cannot run SIGNVERIF on inner, so nothing ties
+// inner to m, and it cannot rebuild inner without sktwo. a reaches pkone and
+// inner, b reaches m, and the two have no term in common.
+attacker[passive]
+
+principal Alice[
+	knows private skone, sktwo
+	generates m
+	pkone = PUBKEY(skone)
+	inner = SIGN(sktwo, m)
+	a = SIGN(skone, inner)
+	b = HASH(m)
+	leaks m
+]
+
+Alice -> Bob: pkone, inner, a, b
+
+principal Bob[
+	_ = HASH(pkone, inner, a, b)
+]
+
+queries[
+	unlinkability? a, b
+]

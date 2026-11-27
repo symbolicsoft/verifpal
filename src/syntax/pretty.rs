@@ -63,6 +63,7 @@ impl fmt::Display for Value {
 			Value::Constant(c) => write!(f, "{}", c),
 			Value::Primitive(p) => write!(f, "{}", p),
 			Value::Variable(VariableId::Slot(slot)) => write!(f, "$slot{slot}"),
+			Value::Variable(VariableId::Receiver(run, slot)) => write!(f, "$slot{slot}@{run}"),
 			Value::Variable(VariableId::Free(name)) => write!(f, "$free{name}"),
 		}
 	}

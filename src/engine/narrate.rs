@@ -412,7 +412,8 @@ impl<'a, 'b> Narrator<'a, 'b> {
 			return;
 		};
 		if knowledge.proven(v)
-			&& opened && let Some(world) = self.proving(knowledge, len, v)
+			&& opened
+			&& let Some(world) = self.proving(knowledge, len, v)
 		{
 			let outer = self.within.replace(world);
 			self.narrate(v, opened);
@@ -724,6 +725,36 @@ impl<'a, 'b> Narrator<'a, 'b> {
 		})
 	}
 
+	fn opens(&mut self, outer: &Value, inner: &Value) -> bool {
+		let Value::Primitive(p) = outer else {
+			return false;
+		};
+		let (knowledge, _) = self.view();
+		let (capabilities, attacker) = (knowledge.capabilities(), &knowledge.state);
+		let reveals = |found: &[Value]| found.iter().any(|v| v.equivalent(inner, true));
+		let record = match crate::theory::can_decompose(p, capabilities, attacker) {
+			Some(opened) if reveals(&opened.revealed) => DerivationRecord::Decomposed {
+				of: outer.clone(),
+				using: opened.used,
+			},
+			_ if crate::theory::can_break_weak(p, capabilities, attacker)
+				.is_some_and(|broken| reveals(&broken)) =>
+			{
+				DerivationRecord::Broken {
+					of: outer.clone(),
+					capability: Capability::Weak,
+					using: Vec::new(),
+				}
+			}
+			_ => return false,
+		};
+		for key in record.supplied() {
+			self.visit(key, false);
+		}
+		self.derives(&record, inner);
+		true
+	}
+
 	fn recognizes(&mut self, outer: &Value, inner: &Value) {
 		if inner.equivalent(outer, true) || self.constructed(outer) {
 			return;
@@ -733,7 +764,9 @@ impl<'a, 'b> Narrator<'a, 'b> {
 			_ => None,
 		};
 		let Some(built) = built else {
-			self.visit(inner, false);
+			if self.opened_out_of(outer, inner) || !self.opens(outer, inner) {
+				self.visit(inner, false);
+			}
 			return;
 		};
 		if !self.rebuilt.insert(outer.clone()) {
@@ -772,18 +805,13 @@ impl<'a, 'b> Narrator<'a, 'b> {
 	}
 
 	fn linked(&mut self, link: &Link, resolved: &[(Constant, Value)]) {
-		for (side, (_, whole)) in resolved.iter().enumerate().take(2) {
+		for (legs, (_, whole)) in link.legs.iter().zip(resolved) {
 			self.visit(whole, false);
-			let subject = match &link.components {
-				Some(parts) => {
-					self.recognizes(whole, &parts[side]);
-					&parts[side]
+			for leg in legs {
+				match &leg.check {
+					Some(check) => self.confirmed(check),
+					None => self.recognizes(&leg.from, &leg.to),
 				}
-				None => whole,
-			};
-			match &link.checks[side] {
-				Some(check) => self.confirmed(check),
-				None => self.recognizes(subject, &link.value),
 			}
 		}
 		self.visit(&link.value, false);

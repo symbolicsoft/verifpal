@@ -1,0 +1,36 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: u1u1 at one session and at two.
+//
+// a and b are tuples sent in the clear that carry the same fresh s beside a
+// fresh field of their own, and c is the hash of s. The attacker splits a
+// and reads s, finds the same s in b, and recomputes c from it: s ties a to
+// b and a to c.
+//
+// Both pairs were u0. Nothing was below a tuple that the attacker could
+// rebuild only from its own fields, and a field counted only as a part on
+// which a check could run, so a field two values visibly share linked
+// nothing, although a ciphertext under a leaked key was already tied to what
+// opening it reveals. Opening a tuple now reveals its fields, with no key.
+// unlink_tuple_shared_field_public.vp, unlink_tuple_shared_field_supplied.vp
+// and unlink_tuple_shares_recomposed.vp are the counterweights.
+attacker[passive]
+
+principal Alice[
+	generates s, x, y
+	a = CONCAT(x, s)
+	b = CONCAT(y, s)
+	c = HASH(s)
+]
+
+Alice -> Bob: a, b, c
+
+principal Bob[
+	_ = HASH(a, b, c)
+]
+
+queries[
+	unlinkability? a, b
+	unlinkability? a, c
+]

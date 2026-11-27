@@ -3,8 +3,8 @@
 //
 // Expected: u1u0 — two pseudonyms derived from one seed are unlinkable until
 // the seed shows up, and then they are not. The linking witness here is common
-// secret origin: origin_leaves finds that both values bottom out on one secret
-// the attacker holds, and it only holds it from phase 1 onward.
+// secret origin: both values are made of one secret the attacker holds, and
+// it only holds it from phase 1 onward.
 //
 // The second pair is derived from two independent seeds and stays unlinkable
 // with the same leak in force, which is what keeps the first verdict from

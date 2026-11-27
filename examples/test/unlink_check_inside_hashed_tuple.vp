@@ -1,0 +1,36 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: u1 at one session and at two.
+//
+// hone and htwo each hash a tuple of a fresh nonce and a signature under sk,
+// and the tuples and pk are on the wire. The attacker rebuilds each hash
+// from its tuple, splits the tuple, and SIGNVERIF succeeds on both
+// signatures under pk: the hashes link through the signatures inside them,
+// as the tuples themselves do in unlink_signature_in_tuple.vp.
+//
+// This was u0: the parts of a value were what it is made of and its own
+// fields, never the fields of something it is made of.
+// unlink_check_inside_hashed_tuple_unsent_key.vp is the counterweight.
+attacker[passive]
+
+principal Alice[
+	knows private sk
+	knows public mone, mtwo
+	generates n1, n2
+	pk = PUBKEY(sk)
+	bone = CONCAT(n1, SIGN(sk, mone))
+	btwo = CONCAT(n2, SIGN(sk, mtwo))
+	hone = HASH(bone)
+	htwo = HASH(btwo)
+]
+
+Alice -> Bob: pk, bone, btwo, hone, htwo
+
+principal Bob[
+	_ = HASH(pk, bone, btwo, hone, htwo)
+]
+
+queries[
+	unlinkability? hone, htwo
+]

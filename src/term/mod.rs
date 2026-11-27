@@ -29,6 +29,7 @@ pub(crate) enum Value {
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) enum VariableId {
 	Slot(usize),
+	Receiver(usize, usize),
 	Free(Arc<str>),
 }
 

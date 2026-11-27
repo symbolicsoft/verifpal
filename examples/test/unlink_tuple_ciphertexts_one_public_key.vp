@@ -1,0 +1,39 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: u0 at one session and at two.
+//
+// a and b each carry a fresh nonce beside a PKE ciphertext to gb, and the
+// plaintexts are different hashes of the undisclosed s behind a public tag.
+// Honestly the attacker splits both tuples and finds two ciphertexts it can
+// neither open nor rebuild: encrypting to one public key ties nothing, since
+// PKE_DEC identifies no key (unlink_pke_recipient.vp). gb is unguarded, so
+// the attacker can make Alice encrypt to PUBKEY(nil) instead. It then opens
+// both ciphertexts and recognises tag, but what that confirms is the key it
+// supplied itself, and the two plaintexts still differ.
+attacker[active]
+
+principal Bob[
+	knows private bsk
+	gb = PUBKEY(bsk)
+]
+
+Bob -> Alice: gb
+
+principal Alice[
+	knows private s
+	knows public tag
+	generates n1, n2
+	a = CONCAT(n1, PKE_ENC(gb, CONCAT(tag, HASH(s, n1))))
+	b = CONCAT(n2, PKE_ENC(gb, CONCAT(tag, HASH(s, n2))))
+]
+
+Alice -> Bob: a, b
+
+principal Bob[
+	_ = HASH(a, b)
+]
+
+queries[
+	unlinkability? a, b
+]

@@ -126,9 +126,9 @@ impl<'a> Deducer<'a> {
 			.filter_map(|(idx, _)| sym.terms.get(idx).cloned())
 			.collect();
 		let slot_terms = sym
-			.variables()
-			.filter(|(_, term)| as_var(term).is_none())
-			.map(|(slot, term)| (super::vars::attacker_var_id(slot), term.clone()))
+			.inputs()
+			.filter(|(_, _, term)| as_var(term).is_none())
+			.map(|(id, _, term)| (id, term.clone()))
 			.collect();
 		let mut by_head = HeldByHead::default();
 		for (at, held) in attacker.known.iter().enumerate() {
@@ -177,6 +177,10 @@ impl<'a> Deducer<'a> {
 
 	pub(crate) fn capabilities(&self) -> &'a CapabilityIndex {
 		self.shared.capabilities
+	}
+
+	pub(crate) fn attacker(&self) -> &'a AttackerState {
+		self.attacker
 	}
 
 	pub(crate) fn declined_bound(&self) -> bool {

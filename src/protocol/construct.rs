@@ -87,7 +87,6 @@ pub(crate) fn construct_protocol_trace(
 				declared_at,
 				phases: vec![current_phase],
 				mutatable_to: vec![],
-				delivery_phase: None,
 			},
 		);
 	}
@@ -128,11 +127,6 @@ pub(crate) fn construct_protocol_trace(
 				append_unique(&mut slot.mutatable_to, event.recipient);
 			}
 		}
-		slot.delivery_phase = slot
-			.mutatable_to
-			.iter()
-			.filter_map(|&who| slot.substitution_phase(who))
-			.min();
 	}
 	trace.capabilities = construct_capability_index(&trace);
 	Ok(trace)
@@ -359,7 +353,6 @@ fn declare_by(
 			declared_at,
 			phases: vec![],
 			mutatable_to: vec![],
-			delivery_phase: None,
 		},
 	)
 }
@@ -631,7 +624,6 @@ fn construct_trace_render_message(
 			sender: message.sender,
 			recipient: message.recipient,
 			declared_at,
-			phase: current_phase,
 			guarded: c.guard,
 		});
 		append_unique(&mut trace.slots[idx].phases, current_phase);
@@ -729,7 +721,12 @@ mod tests {
 			"cst_ga travels unguarded, so the attacker can replace it on the way"
 		);
 		let n = &km.slots[slot(&km, "cst_n")];
-		assert!(n.guarded_for(bob), "cst_n is written in guard brackets");
+		assert!(
+			n.sent_by
+				.iter()
+				.any(|event| event.recipient == bob && event.guarded),
+			"cst_n is written in guard brackets"
+		);
 		assert!(
 			!n.mutation_reaches(bob),
 			"a guarded delivery is not a substitution the attacker may make"

@@ -231,10 +231,10 @@ fn proposed_terms<'h, 's>(
 	sym: &'s SymbolicState,
 	proposal: &'s Substitution,
 ) -> impl Iterator<Item = (Value, &'h Value)> {
-	sym.variables()
+	sym.inputs()
 		.zip(honest)
-		.filter(|((slot, _), _)| proposal.contains_key(&vars::attacker_var_id(*slot)))
-		.map(|((_, term), honest)| (vars::apply(term, proposal), honest))
+		.filter(|((id, _, _), _)| proposal.contains_key(id))
+		.map(|((_, _, term), honest)| (vars::apply(term, proposal), honest))
 }
 
 fn free_positions<'a>(
@@ -293,8 +293,8 @@ pub(super) fn aligned_free_positions<'a>(
 /// besides, so resolving the whole trace inside that loop is the difference
 /// between a constant factor and a multiplicative one.
 pub(crate) fn honest_slot_terms(km: &ProtocolTrace, sym: &SymbolicState) -> Vec<Value> {
-	sym.var_slots()
-		.map(|slot| match km.slots.get(slot) {
+	sym.inputs()
+		.map(|(_, slot, _)| match km.slots.get(slot) {
 			Some(trace_slot) => resolve_trace_constant(&trace_slot.constant, km),
 			None => crate::term::value_nil(),
 		})

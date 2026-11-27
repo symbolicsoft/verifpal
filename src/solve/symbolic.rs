@@ -3,18 +3,33 @@
 
 use std::sync::Arc;
 
-use super::vars::attacker_var;
+use super::control::Controllable;
+use super::vars::{Substitution, attacker_var_id, receiver_var_id};
+use crate::engine::program::{Event, Program, RunIdx};
 use crate::protocol::ProtocolTrace;
 use crate::protocol::SlotIdx;
 use crate::syntax::PrincipalId;
-use crate::term::Value;
-use crate::theory::{AttackerState, reduce_once};
+use crate::term::{Value, VariableId};
+use crate::theory::reduce_once;
+use crate::util::IdMap;
 use crate::util::index::IndexVec;
 
 #[derive(Default)]
 pub(crate) struct SymbolicState {
 	pub terms: IndexVec<SlotIdx, Value>,
 	pub var_terms: IndexVec<SlotIdx, Option<Value>>,
+	pub(crate) named: IndexVec<SlotIdx, Option<VariableId>>,
+	pub(crate) points: IndexVec<SlotIdx, Vec<RunIdx>>,
+	pub(crate) forwards: IndexVec<SlotIdx, Option<Value>>,
+	pub(crate) others: Vec<Receiver>,
+}
+
+pub(crate) struct Receiver {
+	pub(crate) id: VariableId,
+	pub(crate) run: RunIdx,
+	pub(crate) slot: SlotIdx,
+	pub(crate) term: Value,
+	pub(crate) forwarded: Value,
 }
 
 impl SymbolicState {
@@ -35,10 +50,69 @@ impl SymbolicState {
 	pub(crate) fn has_variables(&self) -> bool {
 		self.var_terms.iter().any(Option::is_some)
 	}
+
+	pub(crate) fn primary(&self, slot: SlotIdx) -> VariableId {
+		self.named
+			.get(slot)
+			.cloned()
+			.flatten()
+			.unwrap_or_else(|| attacker_var_id(slot))
+	}
+
+	pub(crate) fn inputs(&self) -> impl Iterator<Item = (VariableId, SlotIdx, &Value)> + Clone {
+		self.variables()
+			.map(|(slot, term)| (self.primary(slot), slot, term))
+			.chain(
+				self.others
+					.iter()
+					.map(|other| (other.id.clone(), other.slot, &other.term)),
+			)
+	}
+
+	pub(crate) fn term_of(&self, id: &VariableId) -> Option<&Value> {
+		self.inputs()
+			.find(|(held, _, _)| held == id)
+			.map(|(_, _, term)| term)
+	}
+
+	pub(crate) fn installed_at(&self, id: &VariableId) -> &[RunIdx] {
+		match self.others.iter().find(|other| other.id == *id) {
+			Some(other) => std::slice::from_ref(&other.run),
+			None => self
+				.points
+				.get(super::vars::slot_of_var_id(id))
+				.map_or(&[], Vec::as_slice),
+		}
+	}
+
+	pub(crate) fn variable_at(&self, run: RunIdx, slot: SlotIdx) -> VariableId {
+		match self.points.get(slot).is_some_and(|at| at.contains(&run)) {
+			true => self.primary(slot),
+			false => receiver_var_id(slot, run),
+		}
+	}
+
+	pub(crate) fn forwarded(&self, id: &VariableId) -> Option<&Value> {
+		match self.others.iter().find(|other| other.id == *id) {
+			Some(other) => Some(&other.forwarded),
+			None => self
+				.forwards
+				.get(super::vars::slot_of_var_id(id))
+				.and_then(Option::as_ref),
+		}
+	}
+
+	pub(crate) fn forwarding(&self, proposal: &Substitution) -> Substitution {
+		let mut out = proposal.clone();
+		for other in &self.others {
+			out.entry(other.id.clone())
+				.or_insert_with(|| other.forwarded.clone());
+		}
+		out
+	}
 }
 
-fn shaped_var(slot: SlotIdx, honest: &Value) -> Value {
-	let var = attacker_var(slot);
+fn shaped(var: Value, honest: &Value) -> Value {
 	match honest {
 		Value::Primitive(_) if crate::primitive::value_is_key_derivation(honest) => {
 			crate::primitive::key_derivation_of(var.clone()).unwrap_or(var)
@@ -47,22 +121,144 @@ fn shaped_var(slot: SlotIdx, honest: &Value) -> Value {
 	}
 }
 
-pub(crate) fn build(
-	controllable: &crate::solve::control::Controllable,
-	km: &ProtocolTrace,
+pub(crate) struct View<'a> {
+	controllable: Controllable,
+	program: &'a Program,
+	km: &'a ProtocolTrace,
 	principal: PrincipalId,
-	attacker: &AttackerState,
-) -> SymbolicState {
-	build_with(controllable, km, principal, attacker, &[], false, true)
+	within: Option<&'a SymbolicState>,
 }
 
-pub(crate) fn build_unshaped(
-	controllable: &crate::solve::control::Controllable,
-	km: &ProtocolTrace,
-	principal: PrincipalId,
-	attacker: &AttackerState,
-) -> SymbolicState {
-	build_with(controllable, km, principal, attacker, &[], false, false)
+impl<'a> View<'a> {
+	pub(crate) fn of(
+		program: &'a Program,
+		km: &'a ProtocolTrace,
+		principal: PrincipalId,
+		phase: i32,
+	) -> Self {
+		View {
+			controllable: Controllable::of(program, km, principal, phase),
+			program,
+			km,
+			principal,
+			within: None,
+		}
+	}
+
+	pub(crate) fn within(self, outer: &'a SymbolicState) -> Self {
+		View {
+			within: Some(outer),
+			..self
+		}
+	}
+
+	pub(crate) fn build(&self) -> SymbolicState {
+		self.build_with(&[], &[], true)
+	}
+
+	pub(crate) fn build_unshaped(&self) -> SymbolicState {
+		self.build_with(&[], &[], false)
+	}
+
+	pub(crate) fn build_assuming_honest(&self, honest: &[SlotIdx]) -> SymbolicState {
+		self.build_with(honest, &[], true)
+	}
+
+	pub(crate) fn build_narrowed(&self, honest: &[SlotIdx], alone: &[SlotIdx]) -> SymbolicState {
+		self.build_with(honest, alone, true)
+	}
+
+	fn build_with(&self, honest: &[SlotIdx], alone: &[SlotIdx], shape: bool) -> SymbolicState {
+		let (km, program) = (self.km, self.program);
+		let variable = |id: &VariableId, slot: SlotIdx| match shape {
+			true => shaped(Value::Variable(id.clone()), &km.slots[slot].initial_value),
+			false => Value::Variable(id.clone()),
+		};
+		let slots = km.slots.len();
+		let mut var_terms: IndexVec<SlotIdx, Option<Value>> = IndexVec::from_elem(None, slots);
+		let mut named: IndexVec<SlotIdx, Option<VariableId>> = IndexVec::from_elem(None, slots);
+		let mut points: IndexVec<SlotIdx, Vec<RunIdx>> = IndexVec::from_elem(Vec::new(), slots);
+		let mut receivers: Vec<(VariableId, RunIdx, SlotIdx)> = Vec::new();
+		for slot in km.slots.indices() {
+			let Some(proposer) = program.run_index(self.principal) else {
+				break;
+			};
+			if !self.controllable.admits(slot) || honest.contains(&slot) {
+				continue;
+			}
+			let outer = |run: RunIdx| self.within.map(|outer| outer.variable_at(run, slot));
+			let mut at = program.points(proposer, slot);
+			let id = at
+				.first()
+				.and_then(|&run| outer(run))
+				.unwrap_or_else(|| attacker_var_id(slot));
+			for &run in program.receivers(slot) {
+				let uses = km.constant_used_by(program.runs[run].id, &km.slots[slot].constant)
+					|| program.emits(run, slot, Some(true));
+				if !uses || at.contains(&run) || alone.contains(&slot) {
+					continue;
+				}
+				let other = outer(run).unwrap_or_else(|| receiver_var_id(slot, run));
+				match other == id {
+					true => at.push(run),
+					false => receivers.push((other, run, slot)),
+				}
+			}
+			var_terms[slot] = Some(variable(&id, slot));
+			named[slot] = Some(id);
+			points[slot] = at;
+		}
+		let held = executed(program, km, &|run, slot| {
+			if points[slot].contains(&run) {
+				return var_terms[slot].clone();
+			}
+			receivers
+				.iter()
+				.find(|(_, at, of)| *at == run && *of == slot)
+				.map(|(id, _, _)| variable(id, slot))
+		});
+		let forwarded = |run: RunIdx, slot: SlotIdx| {
+			program
+				.receipt(run, slot)
+				.and_then(|(delivery, _, _)| held[delivery.sender].get(&slot))
+				.unwrap_or(&km.slots[slot].initial_value)
+				.clone()
+		};
+		let forwards = points
+			.iter_enumerated()
+			.map(|(slot, at)| at.first().map(|&run| forwarded(run, slot)))
+			.collect();
+		let others = receivers
+			.iter()
+			.map(|(id, run, slot)| Receiver {
+				term: variable(id, *slot),
+				id: id.clone(),
+				run: *run,
+				slot: *slot,
+				forwarded: forwarded(*run, *slot),
+			})
+			.collect();
+		let terms = km
+			.slots
+			.iter_enumerated()
+			.map(|(idx, slot)| match &var_terms[idx] {
+				Some(var) => var.clone(),
+				None => program
+					.run_index(slot.creator)
+					.and_then(|creator| held[creator].get(&idx))
+					.unwrap_or(&slot.initial_value)
+					.clone(),
+			})
+			.collect();
+		SymbolicState {
+			terms,
+			var_terms,
+			named,
+			points,
+			forwards,
+			others,
+		}
+	}
 }
 
 pub(crate) fn has_key_shaped_slot(km: &ProtocolTrace) -> bool {
@@ -71,130 +267,57 @@ pub(crate) fn has_key_shaped_slot(km: &ProtocolTrace) -> bool {
 		.any(|slot| crate::primitive::value_is_key_derivation(&slot.initial_value))
 }
 
-pub(crate) fn build_assuming_honest(
-	controllable: &crate::solve::control::Controllable,
-	km: &ProtocolTrace,
-	principal: PrincipalId,
-	attacker: &AttackerState,
-	honest: &[SlotIdx],
-) -> SymbolicState {
-	build_with(controllable, km, principal, attacker, honest, false, true)
-}
-
-pub(crate) fn build_addressed(
-	controllable: &crate::solve::control::Controllable,
-	km: &ProtocolTrace,
-	principal: PrincipalId,
-	attacker: &AttackerState,
-	honest: &[SlotIdx],
-) -> SymbolicState {
-	build_with(controllable, km, principal, attacker, honest, true, true)
-}
-
-struct Walk<'a> {
-	km: &'a ProtocolTrace,
-	principal: PrincipalId,
-	var_terms: &'a IndexVec<SlotIdx, Option<Value>>,
-	addressed: bool,
-	memo: IndexVec<SlotIdx, Option<Value>>,
-	building: IndexVec<SlotIdx, bool>,
-}
-
-fn build_with(
-	controllable: &crate::solve::control::Controllable,
-	km: &ProtocolTrace,
-	principal: PrincipalId,
-	attacker: &AttackerState,
-	honest: &[SlotIdx],
-	addressed: bool,
-	shaped: bool,
-) -> SymbolicState {
-	let n = km.slots.len();
-	let mut var_terms: IndexVec<SlotIdx, Option<Value>> = IndexVec::from_elem(None, n);
-
-	for (idx, slot) in var_terms.iter_enumerated_mut() {
-		if !controllable.admits(principal, attacker, idx) || honest.contains(&idx) {
-			continue;
+fn resolved(v: &Value, held: &IdMap<SlotIdx, Value>, km: &ProtocolTrace) -> Value {
+	match v {
+		Value::Variable(_) => v.clone(),
+		Value::Constant(c) => km
+			.index_of(c)
+			.and_then(|slot| held.get(&slot))
+			.unwrap_or(v)
+			.clone(),
+		Value::Primitive(p) => {
+			let arguments = p.arguments.iter().map(|a| resolved(a, held, km)).collect();
+			Value::Primitive(Arc::new(p.with_arguments(arguments)))
 		}
-		let trace_slot = &km.slots[idx];
-		*slot = Some(match shaped {
-			true => shaped_var(idx, &trace_slot.initial_value),
-			false => attacker_var(idx),
-		});
 	}
-
-	let mut walk = Walk {
-		km,
-		principal,
-		var_terms: &var_terms,
-		addressed,
-		memo: IndexVec::from_elem(None, n),
-		building: IndexVec::from_elem(false, n),
-	};
-	let terms: IndexVec<SlotIdx, Value> =
-		km.slots.indices().map(|idx| walk.slot_term(idx)).collect();
-
-	SymbolicState { terms, var_terms }
 }
 
-impl Walk<'_> {
-	fn slot_term(&mut self, idx: SlotIdx) -> Value {
-		if let Some(cached) = &self.memo[idx] {
-			return cached.clone();
-		}
-		if let Some(var) = &self.var_terms[idx] {
-			let v = var.clone();
-			self.memo[idx] = Some(v.clone());
-			return v;
-		}
-		let slot = &self.km.slots[idx];
-		if self.building[idx] {
-			return slot.initial_value.clone();
-		}
-
-		self.building[idx] = true;
-		let inlined = self.inline(&slot.initial_value, slot.creator);
-		self.building[idx] = false;
-
-		let reduced = reduce_once(&inlined);
-		self.memo[idx] = Some(reduced.clone());
-		reduced
-	}
-
-	fn reaches(&self, idx: SlotIdx, owner: PrincipalId) -> bool {
-		owner == self.principal || (!self.addressed && self.km.slots[idx].mutation_reaches(owner))
-	}
-
-	fn inline(&mut self, v: &Value, owner: PrincipalId) -> Value {
-		match v {
-			Value::Variable(_) => v.clone(),
-			Value::Constant(c) => match self.km.index_of(c) {
-				Some(idx) => {
-					if self.var_terms[idx].is_some() && !self.reaches(idx, owner) {
-						if self.building[idx] {
-							return v.clone();
-						}
-						self.building[idx] = true;
-						let honest = self.inline(&self.km.slots[idx].initial_value, owner);
-						self.building[idx] = false;
-						return reduce_once(&honest);
-					}
-					self.slot_term(idx)
-				}
-				None => v.clone(),
-			},
-			Value::Primitive(p) => {
-				let args: Vec<Value> = p.arguments.iter().map(|a| self.inline(a, owner)).collect();
-				Value::Primitive(Arc::new(p.with_arguments(args)))
+pub(crate) fn executed(
+	program: &Program,
+	km: &ProtocolTrace,
+	taken: &dyn Fn(RunIdx, SlotIdx) -> Option<Value>,
+) -> IndexVec<RunIdx, IdMap<SlotIdx, Value>> {
+	let mut held: IndexVec<RunIdx, IdMap<SlotIdx, Value>> =
+		IndexVec::from_elem(IdMap::default(), program.runs.len());
+	for &(run, step) in &program.order {
+		match program.runs[run].steps[step].event {
+			Event::Hold(slot) => {
+				held[run].insert(slot, km.slots[slot].initial_value.clone());
 			}
+			Event::Assign(slot) => {
+				let value = reduce_once(&resolved(&km.slots[slot].initial_value, &held[run], km));
+				held[run].insert(slot, value);
+			}
+			Event::Recv(d) => {
+				let delivery = &program.deliveries[d];
+				for &(slot, guarded) in &delivery.slots {
+					let value = (!guarded)
+						.then(|| taken(run, slot))
+						.flatten()
+						.or_else(|| held[delivery.sender].get(&slot).cloned())
+						.unwrap_or_else(|| km.slots[slot].initial_value.clone());
+					held[run].insert(slot, value);
+				}
+			}
+			Event::Send(_) | Event::Leak(_) => {}
 		}
 	}
+	held
 }
 
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::testing::make_attacker_state;
 
 	const SRC: &str = "attacker[active]\n\
 		principal Alice[\n\
@@ -211,15 +334,16 @@ mod tests {
 		confidentiality? sym_a\n\
 		]\n";
 
-	fn bob() -> (ProtocolTrace, PrincipalId, AttackerState) {
+	fn bob() -> (ProtocolTrace, Program, PrincipalId) {
 		let m = crate::syntax::parser::parse_string("sym.vp", SRC).expect("parses");
 		let km = crate::protocol::sanity::sanity(&m).expect("passes sanity");
+		let program = Program::of(&m, &km);
 		let bob = km.principal_ids[km
 			.principals
 			.iter()
 			.position(|p| p == "Bob")
 			.expect("Bob exists")];
-		(km, bob, make_attacker_state(vec![]))
+		(km, program, bob)
 	}
 
 	fn slot(km: &ProtocolTrace, name: &str) -> SlotIdx {
@@ -230,9 +354,8 @@ mod tests {
 
 	#[test]
 	fn a_controllable_wire_slot_becomes_a_variable_shaped_like_what_it_replaced() {
-		let (km, bob, attacker) = bob();
-		let controllable = crate::solve::control::Controllable::of(&km, bob, &attacker);
-		let sym = build(&controllable, &km, bob, &attacker);
+		let (km, program, bob) = bob();
+		let sym = View::of(&program, &km, bob, 0).build();
 		let ga = slot(&km, "sym_ga");
 		assert!(
 			sym.is_var_slot(ga),
@@ -252,10 +375,9 @@ mod tests {
 
 	#[test]
 	fn holding_one_slot_honest_removes_it_from_the_variables_and_from_every_term() {
-		let (km, bob, attacker) = bob();
-		let controllable = crate::solve::control::Controllable::of(&km, bob, &attacker);
+		let (km, program, bob) = bob();
 		let ga = slot(&km, "sym_ga");
-		let refined = build_assuming_honest(&controllable, &km, bob, &attacker, &[ga]);
+		let refined = View::of(&program, &km, bob, 0).build_assuming_honest(&[ga]);
 		assert!(!refined.is_var_slot(ga), "the held slot is not a variable");
 		assert!(!refined.has_variables());
 		for name in ["sym_ga", "sym_k", "sym_t"] {
@@ -269,9 +391,8 @@ mod tests {
 
 	#[test]
 	fn a_slot_this_principal_created_is_never_a_variable() {
-		let (km, bob, attacker) = bob();
-		let controllable = crate::solve::control::Controllable::of(&km, bob, &attacker);
-		let sym = build(&controllable, &km, bob, &attacker);
+		let (km, program, bob) = bob();
+		let sym = View::of(&program, &km, bob, 0).build();
 		for name in ["sym_b", "sym_k", "sym_t"] {
 			assert!(
 				!sym.is_var_slot(slot(&km, name)),
@@ -281,23 +402,41 @@ mod tests {
 	}
 
 	#[test]
-	fn reaches_asks_whether_an_unguarded_delivery_carried_the_slot_to_the_owner() {
-		let (km, bob, _) = bob();
-		let walk = Walk {
-			km: &km,
-			principal: bob,
-			var_terms: &IndexVec::new(),
-			addressed: false,
-			memo: IndexVec::new(),
-			building: IndexVec::new(),
-		};
-		let ga = slot(&km, "sym_ga");
-		assert!(walk.reaches(ga, bob), "the walked principal always reaches");
-		let creator = km.slots[ga].creator;
-		assert_eq!(
-			walk.reaches(ga, creator),
-			km.slots[ga].mutatable_to.contains(&creator),
-			"for anyone else it is exactly the unguarded-delivery question"
+	fn a_guarded_receive_takes_what_its_sender_holds() {
+		let source = "attacker[active]\n\
+			principal Alice[\n\
+			generates fwd_x\n\
+			]\n\
+			Alice -> Bob: fwd_x\n\
+			principal Bob[\n\
+			fwd_b = HASH(fwd_x)\n\
+			]\n\
+			Bob -> Carol: [fwd_x]\n\
+			principal Carol[\n\
+			fwd_c = HASH(fwd_x)\n\
+			]\n\
+			queries[\n\
+			confidentiality? fwd_x\n\
+			]\n";
+		let m = crate::syntax::parser::parse_string("fwd.vp", source).expect("parses");
+		let km = crate::protocol::sanity::sanity(&m).expect("passes sanity");
+		let program = Program::of(&m, &km);
+		let run = |name: &str| program.runs.position(|r| r.name == name).expect("run");
+		let x = slot(&km, "fwd_x");
+		let var = crate::solve::vars::attacker_var(x);
+		let held = executed(&program, &km, &|run, at| {
+			(program.runs[run].name == "Bob" && at == x).then(|| var.clone())
+		});
+		assert!(crate::solve::vars::contains_var(
+			&held[run("Carol")][&slot(&km, "fwd_c")]
+		));
+		assert!(!crate::solve::vars::contains_var(&held[run("Alice")][&x]));
+		let held = executed(&program, &km, &|run, at| {
+			(program.runs[run].name == "Carol" && at == x).then(|| var.clone())
+		});
+		assert!(
+			!crate::solve::vars::contains_var(&held[run("Carol")][&slot(&km, "fwd_c")]),
+			"a guarded receive takes no install"
 		);
 	}
 }

@@ -1,0 +1,32 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1u0 at one session and at two.
+//
+// unlink_shares_recomposed_secret.vp with each share carried in a tuple. The
+// attacker splits both tuples, holds two shares of a 2-of-3 sharing and
+// recomposes secret (c1). The tuples are still not linked (u0): each opens to
+// its own fresh field and its own share, and a share is made of the secret
+// only when the attacker can interpolate it without that share's own
+// disclosure, which it cannot, since it assembled the secret from the two
+// shares. Opening a tuple gives its fields, not what those fields were later
+// assembled into.
+attacker[passive]
+
+principal Alice[
+	generates secret, x, y
+	share_a, share_b, share_c = THRESHOLD_SPLIT[2](secret)
+	a = CONCAT(x, share_a)
+	b = CONCAT(y, share_b)
+]
+
+Alice -> Bob: a, b
+
+principal Bob[
+	_ = HASH(a, b)
+]
+
+queries[
+	confidentiality? secret
+	unlinkability? a, b
+]

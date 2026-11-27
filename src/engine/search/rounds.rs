@@ -192,33 +192,27 @@ impl<'a, 'b> Search<'a, 'b> {
 		self.log.proposer = r;
 		let km = self.cx.km;
 		let principal = self.cx.program.runs[r].id;
-		let Some(attacker) = self.union.at_last_receive(km, principal) else {
+		let Some(attacker) = self.union.at_last_receive(self.cx.program, km, r) else {
 			return Vec::new();
 		};
 		let capabilities = std::sync::Arc::clone(self.union.knowledge.capabilities());
-		let controllable = crate::solve::control::Controllable::of(km, principal, &attacker);
+		let view = symbolic::View::of(self.cx.program, km, principal, attacker.current_phase);
 		let sym = match mode {
-			Mode::Unshaped => symbolic::build_unshaped(&controllable, km, principal, &attacker),
-			Mode::Plain | Mode::Refined => symbolic::build(&controllable, km, principal, &attacker),
+			Mode::Unshaped => view.build_unshaped(),
+			Mode::Plain | Mode::Refined => view.build(),
 		};
 		if !sym.has_variables() {
 			return Vec::new();
 		}
 		let mut replays = Vec::new();
 		if mode != Mode::Refined || pass != Pass::Targeted {
-			replays = self.propose_and_try(r, pass, (&capabilities, &attacker), &sym, taken, false);
+			replays = self.propose_and_try(r, pass, (&capabilities, &attacker), &sym, taken);
 		} else {
 			for honest in crate::solve::slots_blocking_reduction(&sym) {
 				if self.done() {
 					return replays;
 				}
-				let refined = symbolic::build_assuming_honest(
-					&controllable,
-					km,
-					principal,
-					&attacker,
-					&honest,
-				);
+				let refined = view.build_assuming_honest(&honest);
 				if refined.has_variables() {
 					replays.extend(self.propose_and_try(
 						r,
@@ -226,34 +220,9 @@ impl<'a, 'b> Search<'a, 'b> {
 						(&capabilities, &attacker),
 						&refined,
 						Vec::new(),
-						false,
 					));
 				}
 			}
-		}
-		if pass != Pass::Targeted || self.done() {
-			return replays;
-		}
-		if !sym
-			.var_slots()
-			.any(|slot| crate::solve::split_delivered(km, principal, slot))
-		{
-			return replays;
-		}
-		let shared: Vec<SlotIdx> = sym
-			.var_slots()
-			.filter(|&slot| !crate::solve::directly_unguarded(km, principal, slot))
-			.collect();
-		let addressed = symbolic::build_addressed(&controllable, km, principal, &attacker, &shared);
-		if addressed.has_variables() {
-			self.propose_and_try(
-				r,
-				pass,
-				(&capabilities, &attacker),
-				&addressed,
-				Vec::new(),
-				true,
-			);
 		}
 		replays
 	}
@@ -265,12 +234,12 @@ impl<'a, 'b> Search<'a, 'b> {
 		(capabilities, attacker): (&CapabilityIndex, &AttackerState),
 		sym: &SymbolicState,
 		taken: Vec<Substitution>,
-		addressed: bool,
 	) -> Vec<Substitution> {
 		let km = self.cx.km;
 		let run = &self.cx.program.runs[r];
 		let deducer = self.deducer(capabilities, attacker, sym);
-		let (mut proposals, replays) = propose(self.ctx, km, run.id, pass, attacker, sym, deducer);
+		let (mut proposals, replays) =
+			propose(self.ctx, self.cx.program, km, run.id, pass, sym, deducer);
 		proposals.extend(taken);
 		let flights = flights(km, sym, proposals);
 		if self.log.debug {
@@ -282,7 +251,7 @@ impl<'a, 'b> Search<'a, 'b> {
 				flights.len()
 			);
 		}
-		self.try_flights(r, pass, (capabilities, attacker), sym, flights, addressed);
+		self.try_flights(r, pass, (capabilities, attacker), sym, flights);
 		replays
 	}
 
@@ -293,20 +262,18 @@ impl<'a, 'b> Search<'a, 'b> {
 		(capabilities, attacker): (&CapabilityIndex, &AttackerState),
 		sym: &SymbolicState,
 		flights: Vec<Flight>,
-		addressed: bool,
 	) {
 		let mut repairer: Option<Deducer> = None;
 		for (signature, chained, variant) in flights {
 			if self.done() {
 				break;
 			}
-			let halted = self.try_flight(r, signature, addressed, &chained, pass == Pass::Targeted);
+			let halted = self.try_flight(r, signature, &chained, pass == Pass::Targeted);
 			if let Some(check) = halted.filter(|_| pass == Pass::Targeted) {
 				self.repair(
 					r,
 					(capabilities, attacker),
 					sym,
-					addressed,
 					(check, variant),
 					&mut repairer,
 				);
@@ -343,7 +310,7 @@ impl<'a, 'b> Search<'a, 'b> {
 					continue;
 				}
 				let principal = self.cx.program.runs[r].id;
-				let Some(attacker) = self.union.at_last_receive(km, principal) else {
+				let Some(attacker) = self.union.at_last_receive(self.cx.program, km, r) else {
 					continue;
 				};
 				let Some(&later) = self.nodes[node].knowledge.last() else {
@@ -355,9 +322,9 @@ impl<'a, 'b> Search<'a, 'b> {
 				}
 				let later = Arc::clone(later);
 				let capabilities = Arc::clone(self.union.knowledge.capabilities());
-				let controllable =
-					crate::solve::control::Controllable::of(km, principal, &attacker);
-				let sym = symbolic::build(&controllable, km, principal, &attacker);
+				let view =
+					symbolic::View::of(self.cx.program, km, principal, attacker.current_phase);
+				let sym = view.build();
 				let fixed = |slot: SlotIdx| installed.iter().any(|(at, _)| *at == slot);
 				let base: Substitution = installed
 					.iter()
@@ -372,13 +339,8 @@ impl<'a, 'b> Search<'a, 'b> {
 						.var_slots()
 						.filter(|&slot| slot != free && !fixed(slot))
 						.collect();
-					let narrowed = symbolic::build_assuming_honest(
-						&controllable,
-						km,
-						principal,
-						&attacker,
-						&honest,
-					);
+					let held: Vec<SlotIdx> = installed.iter().map(|(at, _)| *at).collect();
+					let narrowed = view.build_narrowed(&honest, &held);
 					let deducer = self.deducer(&capabilities, &later, &narrowed);
 					proposals.extend(crate::solve::extended(
 						self.ctx, km, principal, &attacker, &narrowed, &deducer, &base,
@@ -395,7 +357,6 @@ impl<'a, 'b> Search<'a, 'b> {
 						(&capabilities, &attacker),
 						&sym,
 						flights,
-						false,
 					);
 				});
 			}
@@ -407,7 +368,6 @@ impl<'a, 'b> Search<'a, 'b> {
 		r: RunIdx,
 		(capabilities, attacker): (&'x CapabilityIndex, &'x AttackerState),
 		sym: &'x SymbolicState,
-		addressed: bool,
 		halted: (SlotIdx, Substitution),
 		repairer: &mut Option<Deducer<'x>>,
 	) where
@@ -462,7 +422,7 @@ impl<'a, 'b> Search<'a, 'b> {
 				}
 				let emitted = crate::solve::emissions_under(km, sym, &solution);
 				let halt = self.as_family(Family::Repair, |search| {
-					search.try_flight(r, signature, addressed, &emitted, true)
+					search.try_flight(r, signature, &emitted, true)
 				});
 				if let Some(later) = halt
 					&& later > check
@@ -485,20 +445,20 @@ impl<'a, 'b> Search<'a, 'b> {
 	{
 		let km = self.cx.km;
 		let honest: Substitution = sym
-			.var_slots()
+			.inputs()
 			.zip(crate::solve::honest_slot_terms(km, sym))
-			.map(|(slot, honest)| (vars::attacker_var_id(slot), honest))
+			.map(|((id, _, _), honest)| (id, honest))
 			.collect();
 		let inputs = sym
-			.variables()
-			.filter(|&(slot, _)| {
+			.inputs()
+			.filter(|&(_, slot, _)| {
 				self.cx
 					.program
 					.runs
 					.indices()
 					.any(|r| self.relevant_input(r, slot))
 			})
-			.map(|(slot, term)| {
+			.map(|(_, slot, term)| {
 				(
 					term.clone(),
 					self.ctx.term_bound(km).maximum_depth(km, slot),
@@ -517,18 +477,24 @@ impl<'a, 'b> Search<'a, 'b> {
 	}
 }
 
-type Flight = (Vec<(SlotIdx, Value)>, Vec<Value>, Substitution);
+type Flight = (Vec<(SlotIdx, Value, Vec<RunIdx>)>, Vec<Value>, Substitution);
 
 fn flights(km: &ProtocolTrace, sym: &SymbolicState, proposals: Vec<Substitution>) -> Vec<Flight> {
 	let mut flights = Vec::new();
 	let mut variants_seen = vars::Distinct::default();
 	for proposal in vars::dedupe(proposals) {
-		let unpinned = crate::solve::leave_honest_slots(km, sym, proposal.clone());
-		let variants = if unpinned.len() == proposal.len() {
-			vec![proposal]
-		} else {
-			vec![unpinned, proposal]
-		};
+		let mut variants = Vec::new();
+		for proposal in crate::solve::everywhere(km, sym, &proposal)
+			.into_iter()
+			.chain([proposal])
+			.rev()
+		{
+			let unpinned = crate::solve::leave_honest_slots(km, sym, proposal.clone());
+			if unpinned.len() != proposal.len() {
+				variants.push(unpinned);
+			}
+			variants.push(proposal);
+		}
 		for variant in variants {
 			if variant.is_empty() {
 				continue;

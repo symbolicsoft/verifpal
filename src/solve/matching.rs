@@ -94,6 +94,7 @@ fn projected_variable(p: &Primitive, s: &Substitution) -> Option<(VariableId, us
 fn field_var(id: &VariableId, field: usize) -> Value {
 	let name = match id {
 		VariableId::Slot(slot) => format!("slot/{slot}/{field}"),
+		VariableId::Receiver(run, slot) => format!("slot/{slot}@{run}/{field}"),
 		VariableId::Free(name) => format!("{name}/{field}"),
 	};
 	Value::Variable(VariableId::Free(Arc::from(name)))

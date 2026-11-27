@@ -1,0 +1,36 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: u1 at one session and at two.
+//
+// a and b seal the same fresh s under two leaked keys, with their nonces on
+// the wire and associated data the attacker never learns. A key and a nonce
+// are enough to recover an AEAD plaintext, so the attacker opens both and
+// finds s in each: a and b link via s. Missing associated data blocks
+// AEAD_DEC and the rebuild, not the plaintext recovery, as in
+// unlink_aead_missing_inputs.vp.
+//
+// This was u0 while two ENC ciphertexts of one plaintext under leaked keys
+// linked: a value had something below it only when the attacker could
+// rebuild it in full, so one it could open but not rebuild was tied to
+// nothing. unlink_aead_opened_without_data_unsent_nonce.vp is the
+// counterweight.
+attacker[passive]
+
+principal Alice[
+	knows private kone, ktwo, ad
+	generates s, n1, n2
+	a = AEAD_ENC(kone, n1, s, ad)
+	b = AEAD_ENC(ktwo, n2, s, ad)
+	leaks kone, ktwo
+]
+
+Alice -> Bob: n1, n2, a, b
+
+principal Bob[
+	_ = HASH(a, b)
+]
+
+queries[
+	unlinkability? a, b
+]

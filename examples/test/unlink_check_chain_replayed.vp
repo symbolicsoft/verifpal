@@ -1,0 +1,49 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: u0 at one session and at two.
+//
+// Bob signs the signature he receives from Alice. Honestly a signs i1, i1
+// signs m1, and b is the hash of m2: m1 and m2 are different hashes of the
+// undisclosed s, so the two chains never meet. The attacker can replace i1
+// at Bob with i2, which it read on the wire, and then a signs i2, i2 signs
+// m2 and b is rebuilt from m2. But a reaches m2 only through the i2 the
+// attacker put there, which shows nothing about the a Bob would have sent.
+// The walk does not enter a term the attacker supplied, so nothing found
+// inside one is a witness either: a check on a replayed signature confirms a
+// message the attacker could not build from that signature, and a test of
+// the witness alone would let it through. unlink_check_chain.vp is the
+// counterweight.
+attacker[active]
+
+principal Alice[
+	knows private ska, s
+	generates n1, n2
+	pka = PUBKEY(ska)
+	m1 = HASH(s, n1)
+	m2 = HASH(s, n2)
+	i1 = SIGN(ska, m1)
+	i2 = SIGN(ska, m2)
+	b = HASH(m2)
+	leaks m1, m2
+]
+
+Alice -> Bob: pka, i1
+
+Alice -> Dave: i2, b
+
+principal Bob[
+	knows private skb
+	pkb = PUBKEY(skb)
+	a = SIGN(skb, i1)
+]
+
+Bob -> Dave: pkb, a
+
+principal Dave[
+	_ = HASH(i2, b, pkb, a)
+]
+
+queries[
+	unlinkability? a, b
+]

@@ -6,19 +6,19 @@ use super::matching::unifiers;
 use super::symbolic::SymbolicState;
 use super::vars::Substitution;
 use super::{deduce, diverge, matching, symbolic, vars};
+use crate::engine::program::Program;
 use crate::protocol::trace::resolve_trace_constant;
 use crate::protocol::{ProtocolTrace, SlotIdx};
 use crate::syntax::{PrincipalId, Query, QueryKind};
 use crate::term::{Constant, PrimitiveId, Value, VariableId};
-use crate::theory::AttackerState;
 
 type Wanted = Vec<(Value, Option<VariableId>)>;
 
 pub(super) fn oracle_input_goals(
+	program: &Program,
 	km: &ProtocolTrace,
 	principal: PrincipalId,
 	sym: &SymbolicState,
-	attacker: &AttackerState,
 	deducer: &Deducer,
 ) -> Vec<Substitution> {
 	let emissions: Vec<&Value> = km
@@ -40,10 +40,10 @@ pub(super) fn oracle_input_goals(
 	let mut pins: Vec<Substitution> = Vec::new();
 	for &other in &km.principal_ids {
 		pins.extend(check_shapes(
+			program,
 			km,
 			other,
 			sym,
-			attacker,
 			deducer,
 			&mut wanted,
 			(&mut foreign, &mut kept),
@@ -72,7 +72,7 @@ pub(super) fn oracle_input_goals(
 				bounds = deducer.invert_into_revealed(emission, shape);
 			}
 			for bound in &bounds {
-				for bound in completed(km, principal, sym, deducer, bound) {
+				for bound in completed(program, km, sym, deducer, bound) {
 					out.extend(foreign.iter().filter_map(|foreign| {
 						oracle_proposal(sym, emission, target.as_ref(), &bound, foreign)
 					}));
@@ -84,38 +84,42 @@ pub(super) fn oracle_input_goals(
 }
 
 fn completed(
+	program: &Program,
 	km: &ProtocolTrace,
-	principal: PrincipalId,
 	sym: &SymbolicState,
 	deducer: &Deducer,
 	bound: &Substitution,
 ) -> Vec<Substitution> {
+	let nil = unbound_inputs(sym, bound);
 	let empty = Substitution::default();
-	let nil: Substitution = sym
-		.var_slots()
-		.map(vars::attacker_var_id)
-		.filter(|id| {
-			!bound.contains_key(id) && bound.values().any(|value| vars::occurs(id, value, &empty))
-		})
-		.map(|id| (id, crate::term::value_nil()))
-		.collect();
 	let mut out = vec![bound.clone()];
 	for (id, value) in bound {
-		if !vars::is_slot_var_id(id)
-			|| !sym.is_var_slot(vars::slot_of_var_id(id))
+		if sym.term_of(id).is_none()
 			|| !(nil.keys().any(|local| vars::occurs(local, value, &empty))
 				|| tied(&vars::apply(value, bound)))
 		{
 			continue;
 		}
 		let filled = vars::ground_free(&vars::apply(&vars::apply(value, bound), &nil));
-		if !deducer.holds(&filled)
-			|| disclosed_after(km, principal, vars::slot_of_var_id(id), &filled)
-		{
+		let late = sym.installed_at(id).iter().any(|&run| {
+			disclosed_after(km, program.runs[run].id, vars::slot_of_var_id(id), &filled)
+		});
+		if !deducer.holds(&filled) || late {
 			out.extend(deducer.held_matches(value, bound));
 		}
 	}
 	out
+}
+
+fn unbound_inputs(sym: &SymbolicState, bound: &Substitution) -> Substitution {
+	let empty = Substitution::default();
+	sym.inputs()
+		.map(|(id, _, _)| id)
+		.filter(|id| {
+			!bound.contains_key(id) && bound.values().any(|value| vars::occurs(id, value, &empty))
+		})
+		.map(|id| (id, crate::term::value_nil()))
+		.collect()
 }
 
 fn disclosed_after(km: &ProtocolTrace, principal: PrincipalId, slot: SlotIdx, v: &Value) -> bool {
@@ -156,20 +160,22 @@ fn push_wanted(wanted: &mut Wanted, shape: Value, target: Option<VariableId>) {
 }
 
 fn check_shapes(
+	program: &Program,
 	km: &ProtocolTrace,
 	principal: PrincipalId,
 	sym: &SymbolicState,
-	attacker: &AttackerState,
 	deducer: &Deducer,
 	wanted: &mut Wanted,
 	(foreign, kept): (&mut Substitution, &mut Substitution),
 ) -> Vec<Substitution> {
+	let attacker = deducer.attacker();
 	let mut pins = Vec::new();
 	let slot_var = |v: &Value| vars::as_var(v).filter(vars::is_slot_var_id);
-	let controllable = crate::solve::control::Controllable::of(km, principal, attacker);
-	let other = symbolic::build(&controllable, km, principal, attacker);
-	for slot in other.var_slots() {
-		if sym.is_var_slot(slot) {
+	let other = symbolic::View::of(program, km, principal, attacker.current_phase)
+		.within(sym)
+		.build();
+	for (id, slot, _) in other.inputs() {
+		if sym.term_of(&id).is_some() {
 			continue;
 		}
 		let honest = resolve_trace_constant(&km.slots[slot].constant, km);
@@ -178,7 +184,7 @@ fn check_shapes(
 		} else {
 			crate::term::value_nil()
 		};
-		foreign.insert(vars::attacker_var_id(slot), filler);
+		foreign.insert(id, filler);
 	}
 	let inverter = deduce::Deducer::with_basis(
 		km,
@@ -206,13 +212,12 @@ fn check_shapes(
 		}
 		for bound in inverter.equality_shapes(prim) {
 			let mut pin = Substitution::default();
-			for slot in other.var_slots() {
-				let id = vars::attacker_var_id(slot);
+			for (id, _, _) in other.inputs() {
 				let Some(value) = bound.get(&id) else {
 					continue;
 				};
 				let shape = vars::apply(value, &bound);
-				if !sym.is_var_slot(slot) && !vars::contains_var(&shape) {
+				if sym.term_of(&id).is_none() && !vars::contains_var(&shape) {
 					pin.insert(id.clone(), shape.clone());
 				}
 				if matches!(shape, Value::Primitive(_)) {
@@ -235,13 +240,10 @@ fn check_shapes(
 					let mut read = Vec::new();
 					vars::collect_vars(&other.terms[c], &mut read);
 					for id in read {
-						if !vars::is_slot_var_id(&id) {
+						if other.term_of(&id).is_none() || sym.term_of(&id).is_some() {
 							continue;
 						}
 						let slot = vars::slot_of_var_id(&id);
-						if !other.is_var_slot(slot) || sym.is_var_slot(slot) {
-							continue;
-						}
 						let honest = resolve_trace_constant(&km.slots[slot].constant, km);
 						if !crate::primitive::value_is_key_derivation(&honest)
 							&& deducer.holds(&honest)
@@ -340,23 +342,13 @@ fn oracle_proposal(
 	foreign: &Substitution,
 ) -> Option<Substitution> {
 	let empty = Substitution::default();
-	let mut local: Substitution = Substitution::default();
-	for slot in sym.var_slots() {
-		let id = vars::attacker_var_id(slot);
-		if bound.contains_key(&id) {
-			continue;
-		}
-		if bound.values().any(|value| vars::occurs(&id, value, &empty)) {
-			local.insert(id, crate::term::value_nil());
-		}
-	}
+	let local = unbound_inputs(sym, bound);
 	let mut proposal = Substitution::default();
-	for slot in sym.var_slots() {
-		let id = vars::attacker_var_id(slot);
+	for (id, _, _) in sym.inputs() {
 		if !bound.contains_key(&id) && !local.contains_key(&id) {
 			continue;
 		}
-		let value = vars::apply(&vars::attacker_var(slot), bound);
+		let value = vars::apply(&Value::Variable(id.clone()), bound);
 		let value = vars::apply(&value, &local);
 		if vars::as_var(&value).as_ref() == Some(&id) || vars::occurs(&id, &value, &empty) {
 			continue;
@@ -367,7 +359,7 @@ fn oracle_proposal(
 		return None;
 	}
 	if let Some(target) = target
-		&& sym.is_var_slot(vars::slot_of_var_id(target))
+		&& sym.term_of(target).is_some()
 		&& !proposal.contains_key(target)
 	{
 		let value = vars::apply(emission, bound);

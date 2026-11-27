@@ -1,0 +1,40 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: u0 at one session and at two.
+//
+// Bob puts what he receives in the first field of each tuple. Honestly the
+// two fields are different hashes of Alice's secret l, a and b have no term
+// in common, and l is never disclosed. The attacker can replace r2 with r1,
+// or r1 with r2, and both tuples then carry the same field, a hash of the
+// secret the honest values share. But that field is the value the attacker
+// put there, so it shows nothing about a and b that the attacker did not
+// arrange, as in unlink_supplied_witness_only.vp: the walk does not enter a
+// term the attacker supplied. unlink_tuple_shared_field.vp is the
+// counterweight, where the shared field is the sender's own.
+attacker[active]
+
+principal Alice[
+	knows private l
+	generates n1, n2
+	r1 = HASH(l, n1)
+	r2 = HASH(l, n2)
+]
+
+Alice -> Bob: r1, r2
+
+principal Bob[
+	generates x, y
+	a = CONCAT(r1, x)
+	b = CONCAT(r2, y)
+]
+
+Bob -> Carol: a, b
+
+principal Carol[
+	_ = HASH(a, b)
+]
+
+queries[
+	unlinkability? a, b
+]

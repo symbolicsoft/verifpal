@@ -1,62 +1,178 @@
 /* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
  * SPDX-License-Identifier: GPL-3.0-only */
 
+use std::cell::{OnceCell, RefCell};
+use std::rc::Rc;
 use std::sync::Arc;
 
 use super::exec::{Context, Execution, Held, Taken};
 use super::knowledge::{Knowledge, Origin};
 use super::program::{Event, RunIdx};
-use crate::primitive::{CapabilityIndex, PrimitiveSpec, Reveal, RewriteRule};
+use crate::primitive::{CapabilityIndex, PrimitiveSpec, RewriteRule};
 use crate::protocol::ProtocolTrace;
 use crate::protocol::SlotIdx;
 use crate::syntax::Qualifier;
+use crate::term::equivalence::structurally_identical;
 use crate::term::hashing::TermSet;
 use crate::term::{Constant, Primitive, PrimitiveId, Value, ValueId};
-use crate::theory::{
-	AttackerState, can_break_weak, can_recompose, can_reconstruct_primitive, obtainable,
-};
-use crate::util::generation::{AnalysisKey, AnalysisLocal, Recent};
+use crate::theory::{AttackerState, can_break_weak, can_reconstruct_primitive, obtainable};
 use crate::util::{IdMap, IdSet};
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum LinkKind {
-	SharedSecret,
-	IdentifyingCheck(PrimitiveId),
-	ObservedEquality,
-	RecognizedSecret(PrimitiveId),
+	Equal,
+	SameKey(PrimitiveId),
+	Shared,
+	Contained,
+	Confirmed(PrimitiveId),
+}
+
+impl LinkKind {
+	fn preference(self) -> u8 {
+		match self {
+			LinkKind::Equal => 0,
+			LinkKind::SameKey(_) => 1,
+			LinkKind::Shared => 2,
+			LinkKind::Contained => 3,
+			LinkKind::Confirmed(_) => 4,
+		}
+	}
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct Leg {
+	pub(crate) from: Value,
+	pub(crate) to: Value,
+	pub(crate) check: Option<Value>,
 }
 
 #[derive(Clone, Debug)]
 pub(crate) struct Link {
 	pub(crate) kind: LinkKind,
 	pub(crate) value: Value,
-	pub(crate) components: Option<[Value; 2]>,
-	pub(crate) checks: [Option<Value>; 2],
+	pub(crate) legs: [Vec<Leg>; 2],
 }
 
-struct Scope<'a> {
-	km: &'a ProtocolTrace,
-	knowledge: &'a Knowledge,
+impl Link {
+	pub(crate) fn describe(&self, render: impl Fn(&Value) -> String) -> String {
+		let term = render(&self.value);
+		let [a, b] = self.legs.each_ref().map(|legs| {
+			let whole = legs.first().map_or(&self.value, |leg| &leg.from);
+			let checked = legs.iter().rev().find(|leg| leg.check.is_some());
+			(whole, checked.map_or(whole, |leg| &leg.from))
+		});
+		let through = [a, b]
+			.iter()
+			.any(|(whole, on)| !on.equivalent(whole, true))
+			.then(|| format!("through {} and {}", render(a.1), render(b.1)));
+		let name = crate::primitive::name;
+		match (self.kind, through) {
+			(LinkKind::Equal, _) => format!("because both are the same value ({term})"),
+			(LinkKind::Shared | LinkKind::Contained, _) => format!("via {term}"),
+			(LinkKind::SameKey(id), None) => {
+				format!("because {} succeeds for both under {term}", name(id))
+			}
+			(LinkKind::SameKey(id), Some(through)) => {
+				format!("{through}, for which {} succeeds under {term}", name(id))
+			}
+			(LinkKind::Confirmed(id), None) => format!("via {term}, which {} confirms", name(id)),
+			(LinkKind::Confirmed(id), Some(through)) => {
+				format!("{through}, linked via {term}, which {} confirms", name(id))
+			}
+		}
+	}
 }
 
-impl Scope<'_> {
-	fn attacker(&self) -> &AttackerState {
-		&self.knowledge.state
+#[derive(Clone, Copy)]
+enum How {
+	Key(PrimitiveId),
+	Confirms(PrimitiveId),
+}
+
+struct Tie {
+	term: Value,
+	from: Option<usize>,
+	check: Option<Value>,
+	last: Option<How>,
+	part: bool,
+}
+
+impl Tie {
+	fn joins(&self, other: &Tie) -> LinkKind {
+		match (self.last, other.last) {
+			(None, None) => match (self.from, other.from) {
+				(None, None) => LinkKind::Equal,
+				(None, _) | (_, None) => LinkKind::Contained,
+				_ => LinkKind::Shared,
+			},
+			(Some(How::Key(i)), Some(How::Key(j)))
+				if i == j && self.check.is_some() && other.check.is_some() =>
+			{
+				LinkKind::SameKey(i)
+			}
+			(Some(How::Confirms(i)), _)
+			| (_, Some(How::Confirms(i)))
+			| (Some(How::Key(i)), _)
+			| (_, Some(How::Key(i))) => LinkKind::Confirmed(i),
+		}
+	}
+}
+
+fn legs(ties: &[Tie], mut at: usize) -> Vec<Leg> {
+	let mut out = Vec::new();
+	while let Some(from) = ties[at].from {
+		out.push(Leg {
+			from: ties[from].term.clone(),
+			to: ties[at].term.clone(),
+			check: ties[at].check.clone(),
+		});
+		at = from;
+	}
+	out.reverse();
+	out
+}
+
+struct Check {
+	run: Arc<Primitive>,
+	key: Option<Value>,
+	confirms: Vec<Value>,
+}
+
+#[derive(Default)]
+struct Memo<T>(IdMap<u64, Vec<(Value, T)>>);
+
+impl<T: Clone> Memo<T> {
+	fn get(&self, v: &Value) -> Option<T> {
+		self.0
+			.get(&v.hash_value())?
+			.iter()
+			.find(|(seen, _)| structurally_identical(seen, v))
+			.map(|(_, hit)| hit.clone())
 	}
 
-	fn secret(&self, v: &Value) -> bool {
-		depends_on_secret(v, self.km)
+	fn put(&mut self, v: &Value, hit: T) {
+		self.0
+			.entry(v.hash_value())
+			.or_default()
+			.push((v.clone(), hit));
 	}
+}
 
-	fn obtainable(&self, v: &Value) -> bool {
-		obtainable(v, self.knowledge.capabilities(), self.attacker())
-	}
+fn remembered<T: Clone>(memo: &RefCell<Memo<T>>, v: &Value, compute: impl FnOnce() -> T) -> T {
+	let hit = memo.borrow().get(v);
+	hit.unwrap_or_else(|| {
+		let found = compute();
+		memo.borrow_mut().put(v, found.clone());
+		found
+	})
 }
 
 pub(crate) struct Linker<'a> {
 	cx: &'a Context<'a>,
 	ex: &'a Execution,
-	observed: std::cell::OnceCell<TermSet>,
+	observed: OnceCell<TermSet>,
+	sealed: RefCell<Memo<Arc<AttackerState>>>,
+	below: RefCell<Memo<Rc<[Value]>>>,
 }
 
 impl<'a> Linker<'a> {
@@ -64,27 +180,299 @@ impl<'a> Linker<'a> {
 		Linker {
 			cx,
 			ex,
-			observed: std::cell::OnceCell::new(),
+			observed: OnceCell::new(),
+			sealed: RefCell::default(),
+			below: RefCell::default(),
 		}
+	}
+
+	fn attacker(&self) -> &AttackerState {
+		&self.ex.knowledge.state
+	}
+
+	fn capabilities(&self) -> &CapabilityIndex {
+		self.ex.knowledge.capabilities()
+	}
+
+	fn obtainable(&self, v: &Value) -> bool {
+		obtainable(v, self.capabilities(), self.attacker())
 	}
 
 	pub(crate) fn link(
 		&self,
 		[(ra, a, ha), (rb, b, hb)]: [(RunIdx, SlotIdx, &Held); 2],
 	) -> Option<Link> {
-		let scope = Scope {
-			km: self.cx.km,
-			knowledge: &self.ex.knowledge,
+		let km = self.cx.km;
+		let queried = [&ha.value, &hb.value];
+		let mut seen = IdMap::default();
+		if !queried.iter().all(|v| self.observable(v, &mut seen)) {
+			return None;
+		}
+		let same = honest_reduct(km, a).equivalent(&honest_reduct(km, b), true);
+		let shared = shared_secret_leaves(km, a, b);
+		if !same && shared.is_empty() {
+			return None;
+		}
+		let installed = self.supplied([(ra, a), (rb, b)]);
+		let supplied = |w: &Value| obtainable(w, &CapabilityIndex::default(), &installed.state);
+		let witness = |w: &Value, kind: LinkKind| {
+			depends_on_secret(w, km)
+				&& ((same && matches!(kind, LinkKind::Equal))
+					|| w.constant_leaves().any(|c| shared.contains(&c.id)))
+				&& (!matches!(kind, LinkKind::Shared)
+					|| queried.iter().any(|v| self.independent(w, v)))
 		};
-		link(
-			&scope,
-			|| {
-				self.observed
-					.get_or_init(|| observed(&scope, self.cx, self.ex))
-			},
-			|| supplied(self.cx, self.ex, [(ra, a), (rb, b)]),
-			[(a, ha), (b, hb)],
-		)
+		let [ta, tb] = queried.map(|v| self.ties(v, &supplied));
+		ta.iter()
+			.enumerate()
+			.flat_map(|a| tb.iter().enumerate().map(move |b| (a, b)))
+			.filter(|((_, a), (_, b))| a.term.equivalent(&b.term, true))
+			.map(|((x, a), (y, b))| (a.joins(b), x, y))
+			.filter(|&(kind, x, _)| witness(&ta[x].term, kind))
+			.min_by_key(|&(kind, x, y)| (ta[x].part || tb[y].part, kind.preference()))
+			.map(|(kind, x, y)| Link {
+				kind,
+				value: ta[x].term.clone(),
+				legs: [legs(&ta, x), legs(&tb, y)],
+			})
+	}
+
+	fn ties(&self, v: &Value, supplied: &dyn Fn(&Value) -> bool) -> Vec<Tie> {
+		let mut out = Vec::new();
+		let mut walked = [Memo::default(), Memo::default()];
+		let whole = Tie {
+			term: v.clone(),
+			from: None,
+			check: None,
+			last: None,
+			part: false,
+		};
+		self.reach(whole, supplied, &mut walked, &mut out);
+		let mut at = 0;
+		while at < out.len() {
+			if let Some(Check { run, key, confirms }) = self.check(&out[at].term) {
+				let application = Value::Primitive(Arc::clone(&run));
+				let key = key.iter().map(|term| (How::Key(run.id), term));
+				let confirms = confirms.iter().map(|term| (How::Confirms(run.id), term));
+				for (how, term) in key.chain(confirms) {
+					let tie = Tie {
+						term: term.clone(),
+						from: Some(at),
+						check: Some(application.clone()),
+						last: Some(how),
+						part: out[at].from.is_some(),
+					};
+					self.reach(tie, supplied, &mut walked, &mut out);
+				}
+			}
+			at += 1;
+		}
+		out
+	}
+
+	fn reach(
+		&self,
+		tie: Tie,
+		supplied: &dyn Fn(&Value) -> bool,
+		walked: &mut [Memo<()>; 2],
+		out: &mut Vec<Tie>,
+	) {
+		let seen = &mut walked[usize::from(tie.last.is_some())];
+		if seen.get(&tie.term).is_some() || supplied(&tie.term) {
+			return;
+		}
+		seen.put(&tie.term, ());
+		let (at, last, part) = (out.len(), tie.last, tie.part);
+		let below = self.below(&tie.term);
+		out.push(tie);
+		for term in below.iter() {
+			let tie = Tie {
+				term: term.clone(),
+				from: Some(at),
+				check: None,
+				last,
+				part,
+			};
+			self.reach(tie, supplied, walked, out);
+		}
+	}
+
+	fn below(&self, v: &Value) -> Rc<[Value]> {
+		remembered(&self.below, v, || self.taken_apart(v).into())
+	}
+
+	fn taken_apart(&self, v: &Value) -> Vec<Value> {
+		let (capabilities, attacker) = (self.capabilities(), self.attacker());
+		let held = |value: &Value| attacker.knows(value).is_some();
+		let opened = |value: &Value| opening(value, capabilities, attacker);
+		let from = ingredients(v, capabilities, attacker);
+		let mut revealed = opened(v);
+		if from.is_some()
+			&& let Value::Primitive(p) = v
+		{
+			revealed.extend(crate::theory::decomposition_reveals(p).unwrap_or_default());
+		}
+		if let Some(from) = from {
+			let sealed = self.sealed(v);
+			let recognized = || {
+				unfolded(revealed.clone(), opened)
+					.iter()
+					.any(|w| held(w) && obtainable(w, capabilities, &sealed))
+			};
+			if rebuildable(v, capabilities, &sealed) || recognized() {
+				return from;
+			}
+		}
+		revealed.retain(held);
+		revealed
+	}
+
+	fn sealed(&self, v: &Value) -> Arc<AttackerState> {
+		remembered(&self.sealed, v, || self.ex.knowledge.withholding(v).state)
+	}
+
+	fn independent(&self, w: &Value, of: &Value) -> bool {
+		obtainable(w, self.capabilities(), &self.sealed(of))
+	}
+
+	fn check(&self, v: &Value) -> Option<Check> {
+		let Value::Primitive(p) = v else {
+			return None;
+		};
+		let (check, rule) = crate::primitive::check_undoing(p.id)?;
+		let run = self.runnable(check, rule, p)?;
+		let key = check
+			.identifying_positions
+			.first()
+			.and_then(|&at| run.arguments.get(at))
+			.cloned();
+		let confirms = confirmed(rule, p)
+			.filter(|arg| self.obtainable(arg))
+			.cloned()
+			.collect();
+		Some(Check { run, key, confirms })
+	}
+
+	fn runnable(
+		&self,
+		check: &PrimitiveSpec,
+		rule: &RewriteRule,
+		p: &Primitive,
+	) -> Option<Arc<Primitive>> {
+		if !undoes(rule, p) {
+			return None;
+		}
+		let &arity = check.arity.last()?;
+		let mut arguments = vec![crate::term::value_nil(); arity as usize];
+		let source = arguments.get_mut(rule.from)?;
+		*source = Value::Primitive(Arc::new(p.clone()));
+		let mut candidates = vec![(arguments, Vec::new())];
+		for (position, targets) in &rule.matching {
+			let inputs: Vec<_> = inputs_at(check, rule, *position, targets, p)
+				.filter(|(_, input)| self.obtainable(input))
+				.collect();
+			candidates = candidates
+				.iter()
+				.flat_map(|(arguments, taken)| {
+					inputs
+						.iter()
+						.filter(|(target, _)| !taken.contains(target))
+						.filter_map(|(target, input)| {
+							let mut arguments = arguments.clone();
+							*arguments.get_mut(*position)? = input.clone();
+							Some((arguments, [&taken[..], &[*target]].concat()))
+						})
+				})
+				.collect();
+		}
+		candidates.into_iter().find_map(|(arguments, _)| {
+			let run = Arc::new(Primitive::new(check.id, arguments, 0));
+			crate::theory::can_rewrite(&run).0.then_some(run)
+		})
+	}
+
+	fn observed(&self) -> &TermSet {
+		self.observed.get_or_init(|| {
+			let (cx, ex) = (self.cx, self.ex);
+			let mut disclosed: Vec<Value> = cx
+				.program
+				.sends(&ex.sent)
+				.filter(|&(_, delivery, slot, _)| {
+					ex.runs[delivery.sender]
+						.held(slot)
+						.is_none_or(|held| !held.authored)
+				})
+				.map(|(_, _, _, v)| v.clone())
+				.collect();
+			for &Taken { run, step, .. } in &ex.order {
+				if let Event::Leak(slot) = cx.program.runs[run].steps[step].event
+					&& let Some(held) = ex.runs[run].held(slot)
+					&& !held.authored
+				{
+					disclosed.push(held.value.clone());
+				}
+			}
+			unfolded(disclosed, |value| {
+				opening(value, self.capabilities(), self.attacker())
+			})
+			.into_iter()
+			.collect()
+		})
+	}
+
+	fn observable(&self, v: &Value, seen: &mut IdMap<usize, bool>) -> bool {
+		if self.attacker().knows(v).is_none() {
+			return false;
+		}
+		if self.observed().contains(v) || public(v, self.cx.km) {
+			return true;
+		}
+		let (Value::Primitive(p), [_, ..]) = (v, fields(v)) else {
+			return false;
+		};
+		let key = Arc::as_ptr(p) as usize;
+		if let Some(&hit) = seen.get(&key) {
+			return hit;
+		}
+		let out = fields(v).iter().all(|field| self.observable(field, seen));
+		seen.insert(key, out);
+		out
+	}
+
+	fn supplied(&self, holders: [(RunIdx, SlotIdx); 2]) -> Knowledge {
+		let (cx, ex) = (self.cx, self.ex);
+		let mut supplied = cx.initial.clone();
+		supplied.set_phase(ex.knowledge.state.current_phase);
+		let mut seen: Vec<(RunIdx, SlotIdx)> = Vec::new();
+		let mut pending = holders.to_vec();
+		while let Some((run, slot)) = pending.pop() {
+			if seen.contains(&(run, slot)) {
+				continue;
+			}
+			seen.push((run, slot));
+			let Some(held) = ex.runs[run].held(slot) else {
+				continue;
+			};
+			if let Some(components) = &held.installed {
+				for component in components.iter() {
+					supplied.learn(component, Origin::Initial);
+				}
+			} else if let Some(sender) = held.sender {
+				pending.push((sender, slot));
+			} else {
+				for step in &cx.program.runs[run].steps {
+					let Event::Recv(d) = step.event else {
+						continue;
+					};
+					for &(input, _) in &cx.program.deliveries[d].slots {
+						if cx.km.mentions(slot, input) {
+							pending.push((run, input));
+						}
+					}
+				}
+			}
+		}
+		supplied
 	}
 }
 
@@ -93,219 +481,6 @@ pub(crate) fn honest_reduct(km: &ProtocolTrace, slot: SlotIdx) -> Value {
 		&km.slots[slot].constant,
 		km,
 	))
-}
-
-fn link<'s>(
-	scope: &Scope,
-	observed: impl FnOnce() -> &'s TermSet,
-	supplied: impl FnOnce() -> Knowledge,
-	[(a, ha), (b, hb)]: [(SlotIdx, &Held); 2],
-) -> Option<Link> {
-	let km = scope.km;
-	let (av, bv) = (&ha.value, &hb.value);
-	let observed = observed();
-	let mut seen = IdMap::default();
-	if !observable(scope, observed, av, &mut seen) || !observable(scope, observed, bv, &mut seen) {
-		return None;
-	}
-	let same = honest_reduct(km, a).equivalent(&honest_reduct(km, b), true);
-	let shared = shared_secret_leaves(scope, a, b);
-	if !same && shared.is_empty() {
-		return None;
-	}
-	let supplied = supplied();
-	let valid = |w: &Value, kind: LinkKind| {
-		scope.secret(w)
-			&& !obtainable(w, &CapabilityIndex::default(), &supplied.state)
-			&& ((same && matches!(kind, LinkKind::ObservedEquality))
-				|| w.constant_leaves().any(|c| shared.contains(&c.id)))
-	};
-	let (ta, tb) = (ties(scope, av, None), ties(scope, bv, None));
-	if let Some(link) = strongest(scope, [av, bv], [&ta, &tb], &valid) {
-		return Some(link);
-	}
-	let (pa, pb) = (with_parts(scope, av, ta), with_parts(scope, bv, tb));
-	strongest(scope, [av, bv], [&pa, &pb], &valid)
-}
-
-#[derive(Clone, Copy)]
-enum Tie {
-	Itself,
-	Built,
-	Key(PrimitiveId),
-	Confirms(PrimitiveId),
-}
-
-struct Tied {
-	term: Value,
-	tie: Tie,
-	via: Option<Value>,
-	check: Option<Value>,
-}
-
-fn ties(scope: &Scope, v: &Value, via: Option<&Value>) -> Vec<Tied> {
-	let known = scope.attacker().knows(v).is_some();
-	let mut out: Vec<Tied> = Vec::new();
-	let mut tie = |term: Value, tie: Tie, check: Option<&Value>| {
-		out.push(Tied {
-			term,
-			tie,
-			via: via.cloned(),
-			check: check.cloned(),
-		})
-	};
-	if known {
-		tie(v.clone(), Tie::Itself, None);
-	}
-	for leaf in origin_leaves(scope, v).unwrap_or_default() {
-		tie(leaf, Tie::Built, None);
-	}
-	let Value::Primitive(p) = v else {
-		return out;
-	};
-	let Some((check, rule)) = crate::primitive::check_undoing(p.id) else {
-		return out;
-	};
-	let Some(run) = runnable(scope, check, rule, p) else {
-		return out;
-	};
-	let run = Some(&run);
-	if let Some(&identifying) = check.identifying_positions.first()
-		&& let Some(&key) = rule
-			.matching
-			.iter()
-			.find(|(position, _)| *position == identifying)
-			.and_then(|(_, targets)| targets.first())
-		&& let Some(identifier) = p
-			.arguments
-			.get(key)
-			.and_then(|produced| check_input(check, rule, identifying, key, produced))
-		&& scope.obtainable(&identifier)
-	{
-		tie(identifier, Tie::Key(check.id), run);
-	}
-	if known {
-		for arg in rule
-			.matching
-			.iter()
-			.filter_map(|(_, targets)| match targets[..] {
-				[target] => p.arguments.get(target),
-				_ => None,
-			}) {
-			if !scope.obtainable(arg) {
-				continue;
-			}
-			tie(arg.clone(), Tie::Confirms(check.id), run);
-			for leaf in origin_leaves(scope, arg).unwrap_or_default() {
-				tie(leaf, Tie::Confirms(check.id), run);
-			}
-		}
-	}
-	out
-}
-
-fn with_parts(scope: &Scope, v: &Value, mut tied: Vec<Tied>) -> Vec<Tied> {
-	for part in parts(scope, v) {
-		if !part.equivalent(v, true) {
-			tied.extend(ties(scope, &part, Some(&part)));
-		}
-	}
-	tied
-}
-
-fn strongest(
-	scope: &Scope,
-	[av, bv]: [&Value; 2],
-	[ta, tb]: [&[Tied]; 2],
-	valid: &dyn Fn(&Value, LinkKind) -> bool,
-) -> Option<Link> {
-	let mut best: Option<(u8, Link)> = None;
-	for a in ta {
-		for b in tb {
-			let w = &a.term;
-			if !w.equivalent(&b.term, true) {
-				continue;
-			}
-			let (sa, sb) = (a.via.as_ref().unwrap_or(av), b.via.as_ref().unwrap_or(bv));
-			let fresh = !w.equivalent(sa, true) && !w.equivalent(sb, true);
-			let via = a.via.is_some() || b.via.is_some();
-			let joined = match (a.tie, b.tie) {
-				(Tie::Itself, Tie::Itself) => Some((0, LinkKind::ObservedEquality)),
-				(Tie::Key(i), Tie::Key(j)) if i == j => Some((1, LinkKind::IdentifyingCheck(i))),
-				(Tie::Built, Tie::Built)
-					if !via && fresh && [av, bv].iter().any(|v| held_without(scope, w, v)) =>
-				{
-					Some((2, LinkKind::SharedSecret))
-				}
-				(Tie::Itself, Tie::Built) | (Tie::Built, Tie::Itself) => {
-					Some((3, LinkKind::SharedSecret))
-				}
-				(Tie::Confirms(i), Tie::Built | Tie::Confirms(_) | Tie::Key(_))
-				| (Tie::Built | Tie::Key(_), Tie::Confirms(i))
-					if fresh =>
-				{
-					Some((4, LinkKind::RecognizedSecret(i)))
-				}
-				(Tie::Key(i) | Tie::Confirms(i), Tie::Itself)
-				| (Tie::Itself, Tie::Key(i) | Tie::Confirms(i))
-				| (Tie::Key(i), Tie::Built)
-				| (Tie::Built, Tie::Key(i)) => Some((4, LinkKind::RecognizedSecret(i))),
-				_ => None,
-			};
-			let Some((rank, kind)) = joined else {
-				continue;
-			};
-			let rank = match kind {
-				_ if !via => rank,
-				LinkKind::IdentifyingCheck(_) | LinkKind::RecognizedSecret(_) => 5,
-				LinkKind::ObservedEquality | LinkKind::SharedSecret => continue,
-			};
-			if best.as_ref().is_some_and(|(held, _)| *held <= rank) || !valid(w, kind) {
-				continue;
-			}
-			let components = via.then(|| [sa.clone(), sb.clone()]);
-			best = Some((
-				rank,
-				Link {
-					kind,
-					value: w.clone(),
-					components,
-					checks: [a.check.clone(), b.check.clone()],
-				},
-			));
-		}
-	}
-	best.map(|(_, link)| link)
-}
-
-impl Link {
-	pub(crate) fn describe(&self, render: impl Fn(&Value) -> String) -> String {
-		let term = render(&self.value);
-		let through = |[a, b]: &[Value; 2]| format!("through {} and {}", render(a), render(b));
-		match (self.kind, &self.components) {
-			(LinkKind::ObservedEquality, _) => format!("because both are the same value ({term})"),
-			(LinkKind::SharedSecret, _) => format!("via {term}"),
-			(LinkKind::IdentifyingCheck(id), None) => {
-				format!(
-					"because {} succeeds for both under {term}",
-					crate::primitive::name(id)
-				)
-			}
-			(LinkKind::IdentifyingCheck(id), Some(components)) => format!(
-				"{}, for which {} succeeds under {term}",
-				through(components),
-				crate::primitive::name(id)
-			),
-			(LinkKind::RecognizedSecret(id), None) => {
-				format!("via {term}, which {} confirms", crate::primitive::name(id))
-			}
-			(LinkKind::RecognizedSecret(id), Some(components)) => format!(
-				"{}, linked via {term}, which {} confirms",
-				through(components),
-				crate::primitive::name(id)
-			),
-		}
-	}
 }
 
 pub(crate) fn depends_on_secret(v: &Value, km: &ProtocolTrace) -> bool {
@@ -327,91 +502,6 @@ fn public(v: &Value, km: &ProtocolTrace) -> bool {
 	matches!(v, Value::Constant(c) if km
 		.index_of(c)
 		.is_some_and(|i| km.slots[i].constant.qualifier == Some(Qualifier::Public)))
-}
-
-fn observed(scope: &Scope, cx: &Context, ex: &Execution) -> TermSet {
-	let mut pending: Vec<Value> = cx
-		.program
-		.sends(&ex.sent)
-		.filter(|&(_, delivery, slot, _)| {
-			ex.runs[delivery.sender]
-				.held(slot)
-				.is_none_or(|held| !held.authored)
-		})
-		.map(|(_, _, _, v)| v.clone())
-		.collect();
-	for &Taken { run, step, .. } in &ex.order {
-		if let Event::Leak(slot) = cx.program.runs[run].steps[step].event
-			&& let Some(held) = ex.runs[run].held(slot)
-			&& !held.authored
-		{
-			pending.push(held.value.clone());
-		}
-	}
-	let mut seen = TermSet::default();
-	while let Some(value) = pending.pop() {
-		if !seen.insert(value.clone()) {
-			continue;
-		}
-		pending.extend(opening(
-			&value,
-			scope.knowledge.capabilities(),
-			scope.attacker(),
-		));
-	}
-	seen
-}
-
-fn opening(value: &Value, capabilities: &CapabilityIndex, attacker: &AttackerState) -> Vec<Value> {
-	let Value::Primitive(p) = value else {
-		return Vec::new();
-	};
-	let mut out = Vec::new();
-	if crate::primitive::core_reveals_arguments(p.id) {
-		out.extend(p.arguments.iter().cloned());
-	}
-	if let Some(opened) = crate::theory::can_decompose(p, capabilities, attacker) {
-		out.extend(opened.revealed);
-	}
-	if let Some(revealed) = can_break_weak(p, capabilities, attacker) {
-		out.extend(revealed);
-	}
-	if attacker.reused.iter().any(|pair| {
-		pair.iter().any(|member| member.equivalent(value, true))
-			&& pair.iter().all(|member| attacker.knows(member).is_some())
-	}) {
-		out.extend(
-			crate::theory::opened(p, capabilities, attacker)
-				.iter()
-				.map(crate::theory::reduce_once),
-		);
-	}
-	out
-}
-
-fn observable(scope: &Scope, observed: &TermSet, v: &Value, seen: &mut IdMap<usize, bool>) -> bool {
-	if scope.attacker().knows(v).is_none() {
-		return false;
-	}
-	if observed.contains(v) || public(v, scope.km) {
-		return true;
-	}
-	let Value::Primitive(p) = v else {
-		return false;
-	};
-	if !crate::primitive::core_reveals_arguments(p.id) {
-		return false;
-	}
-	let key = Arc::as_ptr(p) as usize;
-	if let Some(&hit) = seen.get(&key) {
-		return hit;
-	}
-	let out = p
-		.arguments
-		.iter()
-		.all(|arg| observable(scope, observed, arg, seen));
-	seen.insert(key, out);
-	out
 }
 
 fn projected(v: &Value, memo: &mut IdMap<usize, Value>) -> Value {
@@ -440,8 +530,7 @@ fn projected(v: &Value, memo: &mut IdMap<usize, Value>) -> Value {
 	out
 }
 
-fn shared_secret_leaves(scope: &Scope, a: SlotIdx, b: SlotIdx) -> IdSet<ValueId> {
-	let km = scope.km;
+fn shared_secret_leaves(km: &ProtocolTrace, a: SlotIdx, b: SlotIdx) -> IdSet<ValueId> {
 	let mut memo = IdMap::default();
 	let mut of = |slot: SlotIdx| {
 		crate::term::subterms(&projected(
@@ -454,7 +543,7 @@ fn shared_secret_leaves(scope: &Scope, a: SlotIdx, b: SlotIdx) -> IdSet<ValueId>
 	let (of_a, of_b) = (of(a), of(b));
 	of_b.iter()
 		.filter(|t| {
-			scope.secret(t)
+			depends_on_secret(t, km)
 				&& of_a
 					.iter()
 					.any(|s| s.hash_value() == t.hash_value() && s.equivalent(t, true))
@@ -465,102 +554,91 @@ fn shared_secret_leaves(scope: &Scope, a: SlotIdx, b: SlotIdx) -> IdSet<ValueId>
 		.collect()
 }
 
-fn supplied(cx: &Context, ex: &Execution, holders: [(RunIdx, SlotIdx); 2]) -> Knowledge {
-	let mut supplied = cx.initial.clone();
-	supplied.set_phase(ex.knowledge.state.current_phase);
-	let mut seen: Vec<(RunIdx, SlotIdx)> = Vec::new();
-	let mut pending = holders.to_vec();
-	while let Some((run, slot)) = pending.pop() {
-		if seen.contains(&(run, slot)) {
-			continue;
-		}
-		seen.push((run, slot));
-		let Some(held) = ex.runs[run].held(slot) else {
-			continue;
-		};
-		if let Some(components) = &held.installed {
-			for component in components.iter() {
-				supplied.learn(component, Origin::Initial);
-			}
-			continue;
-		}
-		if let Some(sender) = held.sender {
-			pending.push((sender, slot));
-			continue;
-		}
-		for step in &cx.program.runs[run].steps {
-			let Event::Recv(d) = step.event else {
-				continue;
-			};
-			for &(input, _) in &cx.program.deliveries[d].slots {
-				if cx.km.mentions(slot, input) {
-					pending.push((run, input));
-				}
-			}
-		}
+fn push_leaf(out: &mut Vec<Value>, v: &Value) {
+	if !out.iter().any(|k| k.equivalent(v, true)) {
+		out.push(v.clone());
 	}
-	supplied
 }
 
-fn parts(scope: &Scope, v: &Value) -> Vec<Value> {
-	let mut out = origin_leaves(scope, v).unwrap_or_default();
-	let mut pending = vec![v.clone()];
+fn unfolded(from: Vec<Value>, step: impl Fn(&Value) -> Vec<Value>) -> Vec<Value> {
+	let mut out = Vec::new();
+	let mut pending = from;
 	let mut seen = TermSet::default();
 	while let Some(value) = pending.pop() {
-		if !seen.insert(value.clone()) {
-			continue;
+		if seen.insert(value.clone()) {
+			pending.extend(step(&value));
+			out.push(value);
 		}
-		if let Value::Primitive(p) = &value
-			&& crate::primitive::core_reveals_arguments(p.id)
-		{
-			pending.extend(p.arguments.iter().cloned());
-		}
-		push_leaf(&mut out, &value);
 	}
 	out
 }
 
-type Withheld = Recent<u64, u64, Vec<(Value, Arc<AttackerState>)>>;
-
-thread_local! {
-	static WITHHELD: AnalysisLocal<Withheld> = AnalysisLocal::default();
-}
-
-fn withholding(scope: &Scope, of: &Value) -> Arc<AttackerState> {
-	let key = of.hash_value();
-	let group = scope.attacker().chain;
-	let remembered = WITHHELD.with_current(|memo| {
-		memo.group(group).get(&key).and_then(|bucket| {
-			bucket
-				.iter()
-				.find(|(seen, _)| crate::term::equivalence::structurally_identical(seen, of))
-				.map(|(_, state)| Arc::clone(state))
-		})
-	});
-	if let Some(state) = remembered {
-		return state;
+fn fields(v: &Value) -> &[Value] {
+	match v {
+		Value::Primitive(p) if crate::primitive::core_reveals_arguments(p.id) => &p.arguments,
+		_ => &[],
 	}
-	let state = scope.knowledge.withholding(of).state;
-	WITHHELD.with_current(|memo| {
-		memo.group(group)
-			.entry(key)
-			.or_default()
-			.push((of.clone(), Arc::clone(&state)));
-	});
-	state
 }
 
-fn held_without(scope: &Scope, w: &Value, of: &Value) -> bool {
-	let restricted = withholding(scope, of);
-	let restricted: &AttackerState = &restricted;
-	restricted.knows(w).is_some()
-		|| obtainable(w, scope.knowledge.capabilities(), restricted)
-		|| restricted.known.iter().any(|known| match known {
-			Value::Primitive(q) => {
-				can_recompose(q, restricted).is_some_and(|r| r.revealed.equivalent(w, true))
-			}
-			_ => false,
-		})
+fn opening(value: &Value, capabilities: &CapabilityIndex, attacker: &AttackerState) -> Vec<Value> {
+	let mut out = fields(value).to_vec();
+	let Value::Primitive(p) = value else {
+		return out;
+	};
+	if let Some(opened) = crate::theory::can_decompose(p, capabilities, attacker) {
+		out.extend(opened.revealed);
+	}
+	if let Some(revealed) = can_break_weak(p, capabilities, attacker) {
+		out.extend(revealed);
+	}
+	if attacker.reused.iter().any(|pair| {
+		pair.iter().any(|member| member.equivalent(value, true))
+			&& pair.iter().all(|member| attacker.knows(member).is_some())
+	}) {
+		out.extend(
+			crate::theory::opened(p, capabilities, attacker)
+				.iter()
+				.map(crate::theory::reduce_once),
+		);
+	}
+	out
+}
+
+fn rebuilt_from(
+	p: &Arc<Primitive>,
+	capabilities: &CapabilityIndex,
+	attacker: &AttackerState,
+) -> Option<Vec<Value>> {
+	can_reconstruct_primitive(p, capabilities, attacker).map(|built| built.supplied().to_vec())
+}
+
+fn rebuildable(v: &Value, capabilities: &CapabilityIndex, attacker: &AttackerState) -> bool {
+	matches!(v, Value::Primitive(p) if rebuilt_from(p, capabilities, attacker).is_some())
+}
+
+fn ingredients(
+	v: &Value,
+	capabilities: &CapabilityIndex,
+	attacker: &AttackerState,
+) -> Option<Vec<Value>> {
+	let Value::Primitive(p) = v else {
+		return None;
+	};
+	let mut pending = rebuilt_from(p, capabilities, attacker)?;
+	pending.reverse();
+	let mut expanded = TermSet::from_iter([v.clone()]);
+	let mut held = Vec::new();
+	while let Some(used) = pending.pop() {
+		if attacker.knows(&used).is_some() {
+			push_leaf(&mut held, &used);
+		} else if let Value::Primitive(q) = &used
+			&& expanded.insert(used.clone())
+			&& let Some(inner) = rebuilt_from(q, capabilities, attacker)
+		{
+			pending.extend(inner.into_iter().rev());
+		}
+	}
+	Some(held)
 }
 
 fn check_input(
@@ -610,6 +688,22 @@ fn inputs_at(
 	})
 }
 
+fn confirmed<'p>(rule: &RewriteRule, p: &'p Primitive) -> impl Iterator<Item = &'p Value> {
+	rule.matching
+		.iter()
+		.filter_map(|(_, targets)| match targets[..] {
+			[target] => p.arguments.get(target),
+			_ => None,
+		})
+}
+
+pub(crate) fn check_confirms(p: &Primitive) -> Vec<Value> {
+	match crate::primitive::check_undoing(p.id) {
+		Some((_, rule)) if undoes(rule, p) => confirmed(rule, p).cloned().collect(),
+		_ => Vec::new(),
+	}
+}
+
 pub(crate) fn check_inputs(p: &Primitive) -> Vec<Value> {
 	let Some((check, rule)) = crate::primitive::check_undoing(p.id) else {
 		return Vec::new();
@@ -620,235 +714,10 @@ pub(crate) fn check_inputs(p: &Primitive) -> Vec<Value> {
 	let mut out: Vec<Value> = Vec::new();
 	for (position, targets) in &rule.matching {
 		for (_, input) in inputs_at(check, rule, *position, targets, p) {
-			if !out.iter().any(|held| held.equivalent(&input, true)) {
-				out.push(input);
-			}
+			push_leaf(&mut out, &input);
 		}
 	}
 	out
-}
-
-fn runnable(
-	scope: &Scope,
-	check: &PrimitiveSpec,
-	rule: &RewriteRule,
-	p: &Primitive,
-) -> Option<Value> {
-	if !undoes(rule, p) {
-		return None;
-	}
-	let &arity = check.arity.last()?;
-	let mut arguments = vec![crate::term::value_nil(); arity as usize];
-	let source = arguments.get_mut(rule.from)?;
-	*source = Value::Primitive(Arc::new(p.clone()));
-	let mut candidates = vec![(arguments, Vec::new())];
-	for (position, targets) in &rule.matching {
-		let inputs: Vec<_> = inputs_at(check, rule, *position, targets, p)
-			.filter(|(_, input)| scope.obtainable(input))
-			.collect();
-		let mut next = Vec::new();
-		for (arguments, taken) in &candidates {
-			for (target, input) in &inputs {
-				if taken.contains(target) || *position >= arguments.len() {
-					continue;
-				}
-				let mut arguments = arguments.clone();
-				arguments[*position] = input.clone();
-				let mut taken = taken.clone();
-				taken.push(*target);
-				next.push((arguments, taken));
-			}
-		}
-		if next.is_empty() {
-			return None;
-		}
-		candidates = next;
-	}
-	candidates.into_iter().find_map(|(arguments, _)| {
-		let run = Arc::new(Primitive::new(check.id, arguments, 0));
-		crate::theory::can_rewrite(&run)
-			.0
-			.then_some(Value::Primitive(run))
-	})
-}
-
-type Leaves = Recent<u64, u64, Vec<(Value, Option<Vec<Value>>)>>;
-
-thread_local! {
-	static LEAVES: AnalysisLocal<Leaves> = AnalysisLocal::default();
-}
-
-struct Walk {
-	stack: Vec<Value>,
-	cut: usize,
-}
-
-fn origin_leaves(scope: &Scope, v: &Value) -> Option<Vec<Value>> {
-	origin_leaves_in(
-		scope,
-		v,
-		&mut Walk {
-			stack: Vec::new(),
-			cut: usize::MAX,
-		},
-	)
-}
-
-fn origin_leaves_in(scope: &Scope, v: &Value, walk: &mut Walk) -> Option<Vec<Value>> {
-	let key = v.hash_value();
-	let group = scope.attacker().chain;
-	let remembered = LEAVES.with_current(|memo| {
-		memo.group(group).get(&key).and_then(|bucket| {
-			bucket
-				.iter()
-				.find(|(seen, _)| crate::term::equivalence::structurally_identical(seen, v))
-				.map(|(_, leaves)| leaves.clone())
-		})
-	});
-	if let Some(leaves) = remembered {
-		return leaves;
-	}
-	if let Some(at) = walk.stack.iter().position(|seen| seen.equivalent(v, true)) {
-		walk.cut = walk.cut.min(at);
-		return None;
-	}
-	let depth = walk.stack.len();
-	walk.stack.push(v.clone());
-	let keep: Vec<bool> = scope
-		.attacker()
-		.known
-		.iter()
-		.map(|known| known.hash_value() != key || !known.equivalent(v, true))
-		.collect();
-	let without = scope.attacker().retaining(&keep);
-	let without: &AttackerState = &without;
-	let capabilities = scope.knowledge.capabilities();
-	let mut out = Vec::new();
-	let leaves = collect_leaves(scope, v, without, &mut Vec::new(), &mut out, walk)
-		.then_some(out)
-		.and_then(|leaves| {
-			let sealed = withholding(scope, v);
-			let sealed: &AttackerState = &sealed;
-			if rebuildable(v, capabilities, sealed) {
-				return Some(leaves);
-			}
-			let inside = contents(v, capabilities, without)?;
-			if inside
-				.iter()
-				.any(|w| sealed.knows(w).is_some() || obtainable(w, capabilities, sealed))
-			{
-				return Some(leaves);
-			}
-			Some(inside)
-		});
-	walk.stack.pop();
-	if walk.cut < depth {
-		return leaves;
-	}
-	walk.cut = usize::MAX;
-	LEAVES.with_current(|memo| {
-		memo.group(group)
-			.entry(key)
-			.or_default()
-			.push((v.clone(), leaves.clone()));
-	});
-	leaves
-}
-
-fn contents(
-	v: &Value,
-	capabilities: &CapabilityIndex,
-	attacker: &AttackerState,
-) -> Option<Vec<Value>> {
-	let Value::Primitive(p) = v else {
-		return None;
-	};
-	let decomposed = crate::primitive::spec(p.id)
-		.ok()?
-		.decompose
-		.as_ref()
-		.filter(|rule| rule.output.is_none_or(|output| p.output == output))
-		.map(|rule| {
-			rule.reveals
-				.iter()
-				.filter_map(|reveal| match *reveal {
-					Reveal::Argument(at) => p.arguments.get(at).cloned(),
-					Reveal::Output(_) => None,
-				})
-				.collect::<Vec<Value>>()
-		});
-	let broken = can_break_weak(p, capabilities, attacker);
-	if decomposed.is_none() && broken.is_none() {
-		return None;
-	}
-	let mut out = Vec::new();
-	let mut pending: Vec<Value> = decomposed.into_iter().chain(broken).flatten().collect();
-	let mut seen = TermSet::default();
-	while let Some(value) = pending.pop() {
-		if !seen.insert(value.clone()) {
-			continue;
-		}
-		if attacker.knows(&value).is_some() {
-			push_leaf(&mut out, &value);
-		}
-		pending.extend(opening(&value, capabilities, attacker));
-	}
-	Some(out)
-}
-
-fn rebuilt_from(
-	p: &Arc<Primitive>,
-	capabilities: &CapabilityIndex,
-	attacker: &AttackerState,
-) -> Option<Vec<Value>> {
-	can_reconstruct_primitive(p, capabilities, attacker)
-		.map(|r| r.supplied().to_vec())
-		.or_else(|| can_recompose(p, attacker).map(|r| r.used))
-}
-
-fn rebuildable(v: &Value, capabilities: &CapabilityIndex, attacker: &AttackerState) -> bool {
-	matches!(v, Value::Primitive(p) if rebuilt_from(p, capabilities, attacker).is_some())
-}
-
-fn collect_leaves(
-	scope: &Scope,
-	v: &Value,
-	attacker: &AttackerState,
-	expanded: &mut Vec<Value>,
-	out: &mut Vec<Value>,
-	walk: &mut Walk,
-) -> bool {
-	let held = attacker.knows(v).is_some();
-	if held {
-		push_leaf(out, v);
-	}
-	let Value::Primitive(p) = v else {
-		return held;
-	};
-	if expanded.iter().any(|seen| seen.equivalent(v, true)) {
-		return held;
-	}
-	expanded.push(v.clone());
-	let Some(used) = rebuilt_from(p, scope.knowledge.capabilities(), attacker) else {
-		return held;
-	};
-	for arg in &used {
-		if attacker.knows(arg).is_none() {
-			collect_leaves(scope, arg, attacker, expanded, out, walk);
-			continue;
-		}
-		push_leaf(out, arg);
-		for leaf in origin_leaves_in(scope, arg, walk).unwrap_or_default() {
-			push_leaf(out, &leaf);
-		}
-	}
-	true
-}
-
-fn push_leaf(out: &mut Vec<Value>, v: &Value) {
-	if !out.iter().any(|k| k.equivalent(v, true)) {
-		out.push(v.clone());
-	}
 }
 
 #[cfg(test)]
@@ -892,7 +761,7 @@ mod tests {
 			.expect("uncancelled");
 			assert!(ex.runs[bob].held(slot("x")).unwrap().installed.is_some());
 			assert!(ex.knowledge.state.knows(&s).is_some());
-			let supplied = supplied(&cx, &ex, [(bob, slot("a")), (bob, slot("b"))]);
+			let supplied = Linker::new(&cx, &ex).supplied([(bob, slot("a")), (bob, slot("b"))]);
 			let supplied = |v: &Value| supplied.knows(v).is_some();
 			assert!(supplied(&value));
 			assert!(supplied(&y));
@@ -985,20 +854,11 @@ mod tests {
 			.collect();
 		let ex = execute(&cx, &installs).expect("uncancelled");
 		let ex = ex.at(phase);
-		let scope = Scope {
-			km: &km,
-			knowledge: &ex.knowledge,
-		};
 		let value = crate::theory::reduce_once(&crate::protocol::trace::resolve_trace_constant(
 			&km.slots[slot(target)].constant,
 			&km,
 		));
-		observable(
-			&scope,
-			&observed(&scope, &cx, ex),
-			&value,
-			&mut IdMap::default(),
-		)
+		Linker::new(&cx, ex).observable(&value, &mut IdMap::default())
 	}
 
 	#[test]
@@ -1047,5 +907,37 @@ mod tests {
 			]\n";
 		assert!(observed_in(src, None, 0, "ulh_m"));
 		assert!(!observed_in(src, Some(("Alice", "ulh_x")), 0, "ulh_m"));
+	}
+
+	#[test]
+	fn a_cycle_of_made_steps_is_walked_once() {
+		let _generation = crate::util::generation::GenerationGuard::enter();
+		let model = crate::syntax::parser::parse_string(
+			"cycle.vp",
+			include_str!("../../examples/test/unlink_shamir_origin.vp"),
+		)
+		.expect("parses");
+		let km = crate::protocol::sanity::sanity(&model).expect("sane");
+		let program = Program::of(&model, &km);
+		let cx = Context::new(&program, &km);
+		let ex = execute(&cx, &vec![]).expect("uncancelled");
+		let alice = program.runs.position(|r| r.name == "Alice").unwrap();
+		let held = |name: &str| {
+			let slot = km
+				.slots
+				.position(|s| s.constant.name.as_ref() == name)
+				.unwrap();
+			ex.runs[alice].held(slot).unwrap().value.clone()
+		};
+		let linker = Linker::new(&cx, &ex);
+		let ties = linker.ties(&held("tok_a"), &|_| false);
+		let reaches = |name: &str| {
+			ties.iter()
+				.any(|tie| tie.term.equivalent(&held(name), true))
+		};
+		assert_eq!(ties.len(), 3);
+		assert!(reaches("secret_shared") && reaches("tok_b") && reaches("tok_a"));
+		assert_eq!(linker.ties(&held("solo_a"), &|_| false).len(), 1);
+		assert!(linker.ties(&held("tok_a"), &|_| true).is_empty());
 	}
 }

@@ -1,0 +1,61 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: CC-BY-SA-4.0
+//
+// Expected: u1 at one session and at two.
+//
+// unlink_check_chain.vp with each public key sealed behind an oracle of its
+// own. a signs inner, inner signs m, b is the hash of m, and m leaks. Erin
+// decrypts whatever she is handed under kd and leaks it, and Frank does the
+// same under kf, so the attacker hands Erin ekone and Frank ektwo and obtains
+// pkone and pktwo. It then checks that a signs inner and that inner signs m,
+// and recomputes b from m: a and b link via m.
+//
+// The link needs both keys in one execution, and each oracle is a different
+// install. A route into a subterm carried only what rebuilding the term above
+// it needs, so the search planned the check on a, which wants pkone, and the
+// check on inner, which wants pktwo, as two targets and never merged the two
+// executions. A descent into an argument that a check confirms now carries
+// that check's inputs, as the evaluator's chain does.
+// search_unlink_check_chain_guarded.vp is the counterweight.
+attacker[active]
+
+principal Alice[
+	knows private kd, kf, skone, sktwo
+	generates m
+	pkone = PUBKEY(skone)
+	pktwo = PUBKEY(sktwo)
+	inner = SIGN(sktwo, m)
+	a = SIGN(skone, inner)
+	b = HASH(m)
+	ekone = ENC(kd, pkone)
+	ektwo = ENC(kf, pktwo)
+	ed = ENC(kd, nil)
+	ef = ENC(kf, nil)
+	leaks m
+]
+
+Alice -> Dave: ekone, ektwo, inner, a, b
+
+Alice -> Erin: ed
+
+Alice -> Frank: ef
+
+principal Erin[
+	knows private kd
+	dd = DEC(kd, ed)
+	leaks dd
+]
+
+principal Frank[
+	knows private kf
+	df = DEC(kf, ef)
+	leaks df
+]
+
+principal Dave[
+	_ = HASH(ekone, ektwo, inner, a, b)
+]
+
+queries[
+	unlinkability? a, b
+]

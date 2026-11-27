@@ -1,0 +1,29 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: u0 at one session and at two.
+//
+// unlink_check_inside_hashed_tuple.vp without pk on the wire. The attacker
+// still rebuilds each hash and splits each tuple, but cannot run SIGNVERIF,
+// and the nonces and the signatures of the two tuples differ.
+attacker[passive]
+
+principal Alice[
+	knows private sk
+	knows public mone, mtwo
+	generates n1, n2
+	bone = CONCAT(n1, SIGN(sk, mone))
+	btwo = CONCAT(n2, SIGN(sk, mtwo))
+	hone = HASH(bone)
+	htwo = HASH(btwo)
+]
+
+Alice -> Bob: bone, btwo, hone, htwo
+
+principal Bob[
+	_ = HASH(bone, btwo, hone, htwo)
+]
+
+queries[
+	unlinkability? hone, htwo
+]

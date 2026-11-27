@@ -8,7 +8,7 @@ use crate::primitive::{
 	PRIM_CONCAT, PRIM_HASH, PRIM_PUBKEY, attacker_public_key, value_is_key_derivation,
 };
 use crate::protocol::SlotIdx;
-use crate::term::value_nil;
+use crate::term::{VariableId, value_nil};
 use crate::testing::{make_attacker_state, make_constant};
 use crate::util::index::Idx;
 use crate::util::index::IndexVec;
@@ -219,6 +219,7 @@ fn a_held_honest_key_can_still_be_swapped_beside_a_kept_field() {
 	let sym = SymbolicState {
 		terms: IndexVec::from(vec![vars::attacker_var(SlotIdx::new(0))]),
 		var_terms: IndexVec::from(vec![Some(vars::attacker_var(SlotIdx::new(0)))]),
+		..SymbolicState::default()
 	};
 	let proposal = Substitution::from_iter([(
 		slot.clone(),

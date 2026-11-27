@@ -1,0 +1,26 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: u0 at one session and at two.
+//
+// unlink_weak_ciphertext_content.vp with only a declared weak. The attacker
+// breaks a and holds s, but b keeps its plaintext: the attacker can neither
+// open b nor rebuild it without ktwo, so nothing ties b to s.
+attacker[passive]
+
+principal Alice[
+	knows private kone, ktwo
+	generates s
+	a = ENC[weak](kone, s)
+	b = ENC(ktwo, s)
+]
+
+Alice -> Bob: a, b
+
+principal Bob[
+	_ = HASH(a, b)
+]
+
+queries[
+	unlinkability? a, b
+]

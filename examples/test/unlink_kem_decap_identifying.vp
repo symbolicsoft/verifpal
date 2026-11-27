@@ -9,7 +9,7 @@
 // attacker has no key that opens both.
 //
 // Nothing about the encapsulations is shared — each uses its own generated
-// randomness, so the pair has no common ancestor for origin_leaves to find.
+// randomness, so the pair is made of no secret the two have in common.
 // What the first pair shares is a recipient whose key the attacker holds.
 //
 // The leak is load-bearing and was not always here. This model used to say the

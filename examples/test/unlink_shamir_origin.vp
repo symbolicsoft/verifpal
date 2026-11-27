@@ -7,10 +7,10 @@
 // not about how much the attacker knows, and putting the negative case behind
 // two leaked secrets rather than behind ignorance is what makes that precise.
 //
-// The witness here is common secret origin. origin_leaves withholds each value
-// from the attacker and asks what it would have to recompute it from; for the
-// first pair the answer is one secret in both cases, and for the second it is
-// two different ones. Nothing in the tree had exercised that witness through a
+// The witness here is common secret origin. The engine asks what the attacker
+// rebuilds each value from once that value's own disclosure is withheld; for
+// the first pair the answer is one secret in both cases, and for the second it
+// is two different ones. Nothing in the tree had exercised that witness through a
 // multi-output primitive, where the two values are different OUTPUTS of one
 // application rather than two applications of one function.
 

@@ -1,0 +1,29 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: u1 at one session and at two.
+//
+// a carries the key k in a visible field, and b is a ciphertext under k whose
+// plaintext starts with the public tag. The attacker splits a, opens b with
+// k and recognises tag, which confirms k as b's key: a and b link via k.
+// This was u0, since nothing was below a tuple the attacker could rebuild
+// only from its own fields. unlink_tuple_key_field_fresh.vp is the
+// counterweight.
+attacker[passive]
+
+principal Alice[
+	knows public tag
+	generates k, x, m
+	a = CONCAT(x, k)
+	b = ENC(k, CONCAT(tag, m))
+]
+
+Alice -> Bob: a, b
+
+principal Bob[
+	_ = HASH(a, b)
+]
+
+queries[
+	unlinkability? a, b
+]

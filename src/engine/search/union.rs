@@ -6,9 +6,9 @@ use std::sync::Arc;
 use super::{NodeIdx, Search, Union};
 use crate::engine::exec::Execution;
 use crate::engine::knowledge::{Knowledge, Origin};
+use crate::engine::program::{Program, RunIdx};
 use crate::protocol::ProtocolTrace;
 use crate::solve::control::Controllable;
-use crate::syntax::PrincipalId;
 use crate::term::Value;
 use crate::theory::{AttackerState, DerivationRecord, obtainable};
 use crate::util::IdMap;
@@ -20,19 +20,16 @@ impl Union {
 
 	pub(super) fn at_last_receive(
 		&self,
+		program: &Program,
 		km: &ProtocolTrace,
-		principal: PrincipalId,
+		run: RunIdx,
 	) -> Option<AttackerState> {
-		let last = &self.knowledge.state;
-		let controllable = Controllable::of(km, principal, last);
+		let controllable = Controllable::of(program, km, program.runs[run].id, km.max_phase);
 		let phase = km
 			.slots
-			.iter_enumerated()
-			.filter(|&(slot, _)| controllable.admits(principal, last, slot))
-			.map(|(_, slot)| {
-				let phases = slot.substitution_phases(principal);
-				phases.into_iter().max().unwrap_or(km.max_phase)
-			})
+			.indices()
+			.filter(|&slot| controllable.admits(slot))
+			.map(|slot| program.install_phase(run, slot).unwrap_or(km.max_phase))
 			.max()?;
 		let union = usize::try_from(phase)
 			.ok()

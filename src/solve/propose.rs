@@ -9,6 +9,7 @@ use super::goals::{goals_for_query, oracle_input_goals};
 use super::symbolic::SymbolicState;
 use super::vars::Substitution;
 use super::{Pass, debugging, diverge, vars};
+use crate::engine::program::{Program, RunIdx};
 use crate::primitive::CapabilityIndex;
 use crate::protocol::ProtocolTrace;
 use crate::protocol::SlotIdx;
@@ -22,19 +23,20 @@ use crate::verify::context::VerifyContext;
 
 pub(crate) fn propose(
 	ctx: &VerifyContext,
+	program: &Program,
 	km: &ProtocolTrace,
 	principal: PrincipalId,
 	pass: Pass,
-	attacker: &AttackerState,
 	sym: &SymbolicState,
 	deducer: Deducer,
 ) -> (Vec<Substitution>, Vec<Substitution>) {
 	let mut proposals: Vec<Substitution> = Vec::new();
 	let open = ctx.open_queries();
 	let protocol = ctx.term_bound(km).protocol();
+	let attacker = deducer.attacker();
 	if pass == Pass::Targeted {
 		proposals.extend(targeted_goals(
-			ctx, km, principal, attacker, sym, &deducer, &open,
+			ctx, program, km, principal, sym, &deducer, &open,
 		));
 	}
 
@@ -117,9 +119,9 @@ pub(crate) fn extended(
 
 fn targeted_goals(
 	ctx: &VerifyContext,
+	program: &Program,
 	km: &ProtocolTrace,
 	principal: PrincipalId,
-	attacker: &AttackerState,
 	sym: &SymbolicState,
 	deducer: &Deducer,
 	open: &[Query],
@@ -158,7 +160,7 @@ fn targeted_goals(
 	if debug {
 		eprintln!("[search] oracles {principal}: start");
 	}
-	proposals.extend(oracle_input_goals(km, principal, sym, attacker, deducer));
+	proposals.extend(oracle_input_goals(program, km, principal, sym, deducer));
 	proposals
 }
 
@@ -255,9 +257,9 @@ fn sibling_replay(km: &ProtocolTrace, sym: &SymbolicState, proposal: &Substituti
 		let Some(trace_slot) = km.slots.get(slot) else {
 			return false;
 		};
-		let installed = match sym.var_terms.get(slot) {
-			Some(Some(term)) => vars::apply(term, proposal),
-			_ => value.clone(),
+		let installed = match sym.term_of(id) {
+			Some(term) => vars::apply(term, proposal),
+			None => value.clone(),
 		};
 		let siblings = km.session_sibling_values(&trace_slot.constant);
 		if !siblings
@@ -276,6 +278,7 @@ pub(crate) fn emissions_under(
 	sym: &SymbolicState,
 	binding: &Substitution,
 ) -> Vec<Value> {
+	let binding = &sym.forwarding(binding);
 	km.slots
 		.indices()
 		.filter(|&e| {
@@ -294,15 +297,12 @@ pub(crate) fn leave_honest_slots(
 	proposal: Substitution,
 ) -> Substitution {
 	let mut dropped: Vec<VariableId> = Vec::new();
-	for (slot, term) in sym.variables() {
-		let id = vars::attacker_var_id(slot);
+	for (id, slot, term) in sym.inputs() {
 		if !proposal.contains_key(&id) || km.slots.get(slot).is_none() {
 			continue;
 		}
 		let ground = vars::ground_free(&vars::apply(term, &proposal));
-		if vars::contains_var(&ground)
-			|| crate::solve::control::attacker_authored(&ground, slot, km)
-		{
+		if vars::contains_var(&ground) || replaces(km, sym, &proposal, (&id, slot), &ground) {
 			continue;
 		}
 		let referenced = proposal
@@ -321,20 +321,63 @@ pub(crate) fn leave_honest_slots(
 		.collect()
 }
 
+fn replaces(
+	km: &ProtocolTrace,
+	sym: &SymbolicState,
+	proposal: &Substitution,
+	(id, slot): (&VariableId, SlotIdx),
+	ground: &Value,
+) -> bool {
+	let forwarded = sym
+		.forwarded(id)
+		.map(|forwarded| vars::ground_free(&vars::apply(forwarded, &sym.forwarding(proposal))))
+		.filter(|forwarded| !vars::contains_var(forwarded));
+	match forwarded {
+		Some(forwarded) => !crate::theory::reduce_once(ground)
+			.equivalent(&crate::theory::reduce_once(&forwarded), true),
+		None => crate::solve::control::attacker_authored(ground, slot, km),
+	}
+}
+
+pub(crate) fn everywhere(
+	km: &ProtocolTrace,
+	sym: &SymbolicState,
+	proposal: &Substitution,
+) -> Option<Substitution> {
+	let mut out = proposal.clone();
+	for other in &sym.others {
+		if proposal.contains_key(&other.id) {
+			continue;
+		}
+		let Some(value) = proposal.get(&sym.primary(other.slot)) else {
+			continue;
+		};
+		let mut with = proposal.clone();
+		with.insert(other.id.clone(), value.clone());
+		let ground = vars::ground_free(&vars::apply(&other.term, &with));
+		if vars::contains_var(&ground)
+			|| replaces(km, sym, proposal, (&other.id, other.slot), &ground)
+		{
+			out.insert(other.id.clone(), value.clone());
+		}
+	}
+	(out.len() > proposal.len()).then_some(out)
+}
+
 pub(crate) fn install_signature(
 	sym: &SymbolicState,
 	proposal: &Substitution,
-) -> Vec<(SlotIdx, Value)> {
+) -> Vec<(SlotIdx, Value, Vec<RunIdx>)> {
 	let mut out = Vec::new();
-	for (slot, term) in sym.variables() {
-		if !proposal.contains_key(&vars::attacker_var_id(slot)) {
+	for (id, slot, term) in sym.inputs() {
+		if !proposal.contains_key(&id) {
 			continue;
 		}
 		let ground = crate::theory::reduce_once(&vars::ground_free(&vars::apply(term, proposal)));
 		if vars::contains_var(&ground) {
 			continue;
 		}
-		out.push((slot, ground));
+		out.push((slot, ground, sym.installed_at(&id).to_vec()));
 	}
 	out
 }

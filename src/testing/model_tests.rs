@@ -4955,6 +4955,58 @@ fn a_held_value_inside_a_rebuild_keeps_only_its_own_ties() {
 }
 
 #[test]
+fn opening_a_tuple_reveals_its_fields() {
+	for sessions in [1, 2] {
+		run_model_sessions("unlink_tuple_shared_field.vp", sessions, "u1u1");
+		run_model_sessions("unlink_tuple_shared_field_public.vp", sessions, "u0");
+		run_model_sessions("unlink_tuple_shared_field_supplied.vp", sessions, "u0");
+		run_model_sessions("unlink_tuple_shares_recomposed.vp", sessions, "c1u0");
+		run_model_sessions("unlink_tuple_key_field.vp", sessions, "u1");
+		run_model_sessions("unlink_tuple_key_field_fresh.vp", sessions, "u0");
+		run_model_sessions("unlink_tuple_ciphertexts_one_public_key.vp", sessions, "u0");
+	}
+}
+
+#[test]
+fn a_check_follows_a_check() {
+	for sessions in [1, 2] {
+		run_model_sessions("unlink_check_chain.vp", sessions, "u1");
+		run_model_sessions("unlink_check_chain_unverifiable.vp", sessions, "u0");
+		run_model_sessions("unlink_check_chain_replayed.vp", sessions, "u0");
+	}
+}
+
+#[test]
+fn every_term_below_a_value_takes_its_own_step() {
+	for sessions in [1, 2] {
+		run_model_sessions("unlink_opened_mac_key.vp", sessions, "u1");
+		run_model_sessions("unlink_opened_mac_key_unleaked.vp", sessions, "u0");
+		run_model_sessions("unlink_check_inside_hashed_tuple.vp", sessions, "u1");
+		run_model_sessions(
+			"unlink_check_inside_hashed_tuple_unsent_key.vp",
+			sessions,
+			"u0",
+		);
+	}
+}
+
+#[test]
+fn what_opening_reveals_is_below_a_value_the_attacker_cannot_rebuild() {
+	for sessions in [1, 2] {
+		run_model_sessions("unlink_aead_opened_without_data.vp", sessions, "u1");
+		run_model_sessions(
+			"unlink_aead_opened_without_data_unsent_nonce.vp",
+			sessions,
+			"u0",
+		);
+		run_model_sessions("unlink_weak_ciphertext_content.vp", sessions, "u1");
+		run_model_sessions("unlink_weak_ciphertext_content_strong.vp", sessions, "u0");
+		run_model_sessions("unlink_reuse_opened_content.vp", sessions, "u1");
+		run_model_sessions("unlink_reuse_opened_content_fresh_nonce.vp", sessions, "u0");
+	}
+}
+
+#[test]
 fn opened_content_is_recognized_by_what_opening_reveals() {
 	for sessions in [1, 2] {
 		run_model_sessions("unlink_nested_key_not_content.vp", sessions, "u0");
@@ -5566,6 +5618,8 @@ fn test_search_unlink_check_inputs() {
 			("search_unlink_check_inside_hash.vp", "u1"),
 			("search_unlink_check_inside_hash_message_query.vp", "c1u1"),
 			("search_unlink_check_inside_hash_guarded.vp", "u0"),
+			("search_unlink_check_chain.vp", "u1"),
+			("search_unlink_check_chain_guarded.vp", "u0"),
 		] {
 			run_model_sessions(model, sessions, code);
 		}

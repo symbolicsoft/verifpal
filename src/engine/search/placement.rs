@@ -7,7 +7,7 @@ use super::{
 	Adders, AttemptIdx, Cheapest, Family, HONEST_NODE, Late, NodeIdx, Search, normalize, runs_of,
 	same_installs,
 };
-use crate::engine::exec::{Install, Installs, install_at};
+use crate::engine::exec::{Install, Installs};
 use crate::engine::knowledge::{Knowledge, Origin};
 use crate::engine::program::{DeliveryIdx, Event, RunIdx};
 use crate::protocol::SlotIdx;
@@ -349,65 +349,22 @@ impl<'a, 'b> Search<'a, 'b> {
 		best
 	}
 
-	fn targets(&self, r: RunIdx, slot: SlotIdx, addressed: bool) -> Vec<RunIdx> {
-		let receivers = &self.facts.receivers[slot];
-		if receivers.contains(&r) || addressed {
-			return vec![r];
-		}
-		let program = self.cx.program;
-		let mut reach = vec![r];
-		let mut upstream = Vec::new();
-		let mut at = 0;
-		while at < reach.len() {
-			let run = reach[at];
-			at += 1;
-			for delivery in &program.deliveries {
-				if delivery.recipient != run {
-					continue;
-				}
-				for &(s, guarded) in &delivery.slots {
-					if s != slot {
-						continue;
-					}
-					if !guarded {
-						if !upstream.contains(&run) {
-							upstream.push(run);
-						}
-					} else if !reach.contains(&delivery.sender) {
-						reach.push(delivery.sender);
-					}
-				}
-			}
-		}
-		if upstream.is_empty() {
-			return receivers.clone();
-		}
-		upstream
-	}
-
 	pub(super) fn try_flight(
 		&mut self,
 		r: RunIdx,
-		signature: Vec<(SlotIdx, Value)>,
-		addressed: bool,
+		signature: Vec<(SlotIdx, Value, Vec<RunIdx>)>,
 		chained: &[Value],
 		targeted: bool,
 	) -> Option<SlotIdx> {
 		let signature: Vec<(SlotIdx, Value, Vec<RunIdx>)> = signature
 			.into_iter()
-			.filter_map(|(slot, value)| {
-				let targets = self.targets(r, slot, addressed);
-				targets
-					.iter()
-					.any(|&run| self.relevant_input(run, slot))
-					.then(|| (slot, crate::term::hashing::hashcons(&value), targets))
-			})
+			.filter(|(slot, _, targets)| targets.iter().any(|&run| self.relevant_input(run, *slot)))
+			.map(|(slot, value, targets)| (slot, crate::term::hashing::hashcons(&value), targets))
 			.collect();
 		let bases = self.bases(&signature, chained, true, &[])?;
 		let km = self.cx.km;
 		let bound = self.ctx.term_bound(km);
 		let mut installs: Installs = Vec::new();
-		let mut shared: Installs = Vec::new();
 		for (slot, value, targets) in signature.iter().cloned() {
 			for run in targets {
 				let id = self.cx.program.runs[run].id;
@@ -421,34 +378,7 @@ impl<'a, 'b> Search<'a, 'b> {
 					value: value.clone(),
 				});
 			}
-			if addressed {
-				continue;
-			}
-			for &run in &self.facts.receivers[slot] {
-				if install_at(&installs, run, slot).is_some() {
-					continue;
-				}
-				let id = self.cx.program.runs[run].id;
-				let consumed = km.constant_used_by(id, &km.slots[slot].constant)
-					|| km.slots[slot]
-						.sent_by
-						.iter()
-						.any(|event| event.sender == id && event.guarded);
-				if consumed && bound.admits_at(id, slot, &value) {
-					shared.push(Install::Value {
-						run,
-						slot,
-						value: value.clone(),
-					});
-				}
-			}
 		}
-		let extra = runs_of(&shared);
-		let everywhere = (!shared.is_empty()).then(|| {
-			let mut everywhere = installs.clone();
-			everywhere.extend(shared);
-			everywhere
-		});
 		let merged = self.merged(&bases, installs.clone());
 		let mut at = self.consider(merged);
 		if self.outcome(at).is_some_and(|outcome| !outcome.settled)
@@ -484,12 +414,6 @@ impl<'a, 'b> Search<'a, 'b> {
 			&& let Some(unblocked) = self.unblocking(r, first)
 		{
 			at = unblocked;
-		}
-		if let Some(everywhere) = everywhere
-			&& !self.done()
-		{
-			let merged = self.merged(&bases, everywhere);
-			self.probe(merged, &extra);
 		}
 		let outcome = self.outcome(at)?;
 		outcome
@@ -558,60 +482,5 @@ impl<'a, 'b> Search<'a, 'b> {
 			}
 		}
 		None
-	}
-
-	fn probe(&mut self, installs: Installs, droppable: &[RunIdx]) {
-		let installs = self.project(installs);
-		if !self.attempts.probed.insert(&installs) {
-			return;
-		}
-		let Some(ex) = self.execute_counted(&installs) else {
-			return;
-		};
-		self.tally(Family::Shared, false);
-		if self.log.debug {
-			eprintln!(
-				"[search]   probe [{}] stuck={}",
-				self.shown(&installs),
-				ex.stuck.len()
-			);
-		}
-		if ex.stuck.is_empty() {
-			crate::engine::judge(self.ctx, self.cx, &ex, &installs, &self.honest);
-		}
-		if self.done() {
-			return;
-		}
-		let halted: Vec<RunIdx> = droppable
-			.iter()
-			.copied()
-			.filter(|&r| ex.runs[r].halted.is_some())
-			.collect();
-		let blocked: Vec<RunIdx> = if halted.is_empty() {
-			droppable
-				.iter()
-				.copied()
-				.filter(|&r| ex.runs[r].frozen)
-				.collect()
-		} else {
-			halted
-		};
-		if blocked.is_empty() {
-			return;
-		}
-		let fewer: Installs = installs
-			.iter()
-			.filter(|install| !blocked.contains(&install.run()))
-			.cloned()
-			.collect();
-		if fewer.is_empty() || fewer.len() == installs.len() {
-			return;
-		}
-		let rest: Vec<RunIdx> = droppable
-			.iter()
-			.copied()
-			.filter(|r| !blocked.contains(r))
-			.collect();
-		self.probe(fewer, &rest);
 	}
 }

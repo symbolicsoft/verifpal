@@ -1,0 +1,36 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: u1 at one session and at two.
+//
+// a is a signature over inner, inner is a signature over m, and b is the
+// hash of m. With both public keys, inner and m in hand, the attacker checks
+// that a signs inner and that inner signs m, and recomputes b from m: a and
+// b are linked via m, every step a check or a rebuild it performs.
+//
+// This was u0 while a and inner linked, and inner and b linked: what a check
+// confirms was followed through what it is made of, never through a second
+// check. unlink_check_chain_unverifiable.vp and
+// unlink_check_chain_replayed.vp are the counterweights.
+attacker[passive]
+
+principal Alice[
+	knows private skone, sktwo
+	generates m
+	pkone = PUBKEY(skone)
+	pktwo = PUBKEY(sktwo)
+	inner = SIGN(sktwo, m)
+	a = SIGN(skone, inner)
+	b = HASH(m)
+	leaks m
+]
+
+Alice -> Bob: pkone, pktwo, inner, a, b
+
+principal Bob[
+	_ = HASH(pkone, pktwo, inner, a, b)
+]
+
+queries[
+	unlinkability? a, b
+]

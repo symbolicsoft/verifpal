@@ -1,0 +1,28 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: u0 at one session and at two.
+//
+// unlink_aead_opened_without_data.vp without n2 on the wire. The attacker
+// opens a and holds s, but it cannot open b without its nonce, cannot
+// rebuild it without the associated data and cannot run AEAD_DEC on it:
+// nothing is below b, so the two have no term in common.
+attacker[passive]
+
+principal Alice[
+	knows private kone, ktwo, ad
+	generates s, n1, n2
+	a = AEAD_ENC(kone, n1, s, ad)
+	b = AEAD_ENC(ktwo, n2, s, ad)
+	leaks kone, ktwo
+]
+
+Alice -> Bob: n1, a, b
+
+principal Bob[
+	_ = HASH(a, b)
+]
+
+queries[
+	unlinkability? a, b
+]

@@ -1,0 +1,28 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: u0 at one session and at two.
+//
+// unlink_opened_mac_key.vp without the leak of k. The attacker opens both
+// ciphertexts and holds each message and its MAC, but cannot recompute
+// either MAC, so nothing is below them: a reaches d and MAC(k, d), b reaches
+// e and MAC(k, e), and the two have no term in common.
+attacker[passive]
+
+principal Alice[
+	knows private k, kone, ktwo
+	generates d, e
+	a = ENC(kone, CONCAT(d, MAC(k, d)))
+	b = ENC(ktwo, CONCAT(e, MAC(k, e)))
+	leaks kone, ktwo
+]
+
+Alice -> Bob: a, b
+
+principal Bob[
+	_ = HASH(a, b)
+]
+
+queries[
+	unlinkability? a, b
+]

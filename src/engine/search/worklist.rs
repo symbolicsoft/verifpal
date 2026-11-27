@@ -134,16 +134,6 @@ impl<'a, 'b> Search<'a, 'b> {
 		at
 	}
 
-	pub(super) fn settles(&mut self, installs: Installs) -> bool {
-		let (at, new) = self.enqueue(installs);
-		if !new {
-			return false;
-		}
-		self.advance(at);
-		self.drain();
-		self.outcome(at).is_some_and(|outcome| outcome.settled)
-	}
-
 	pub(super) fn outcome(&self, at: AttemptIdx) -> Option<&Outcome> {
 		self.attempts.tried.entries[at].1.outcome.as_ref()
 	}
@@ -506,9 +496,6 @@ impl<'a, 'b> Search<'a, 'b> {
 		node.knowledge = self.states.of(&ex);
 		self.push_node(node);
 		self.absorb(at, novel, &ex.knowledge);
-		if kept {
-			self.transfer(at);
-		}
 		kept
 	}
 }

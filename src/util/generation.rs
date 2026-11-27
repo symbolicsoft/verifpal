@@ -6,7 +6,6 @@ use std::sync::RwLock;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread::LocalKey;
 
-use super::IdMap;
 use super::sync::write_lock;
 
 thread_local! {
@@ -77,34 +76,5 @@ impl<T: Default> AnalysisKey<T> for LocalKey<AnalysisLocal<T>> {
 			}
 			f(&mut cell.1)
 		})
-	}
-}
-
-const RECENT_GROUPS: usize = 8;
-
-pub(crate) struct Recent<G, K, V> {
-	groups: Vec<(G, IdMap<K, V>)>,
-}
-
-impl<G, K, V> Default for Recent<G, K, V> {
-	fn default() -> Self {
-		Recent { groups: Vec::new() }
-	}
-}
-
-impl<G: PartialEq, K: std::hash::Hash + Eq, V> Recent<G, K, V> {
-	pub(crate) fn group(&mut self, group: G) -> &mut IdMap<K, V> {
-		match self.groups.iter().position(|(seen, _)| *seen == group) {
-			Some(0) => {}
-			Some(at) => {
-				let found = self.groups.remove(at);
-				self.groups.insert(0, found);
-			}
-			None => {
-				self.groups.truncate(RECENT_GROUPS - 1);
-				self.groups.insert(0, (group, IdMap::default()));
-			}
-		}
-		&mut self.groups[0].1
 	}
 }

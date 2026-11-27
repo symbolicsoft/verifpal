@@ -196,7 +196,6 @@ pub(crate) struct Search<'a, 'b> {
 struct Facts {
 	relevant: IndexVec<RunIdx, StepIdx>,
 	queried: IdSet<SlotIdx>,
-	receivers: IndexVec<SlotIdx, Vec<RunIdx>>,
 	honest_at: IdMap<(RunIdx, StepIdx), usize>,
 }
 
@@ -213,7 +212,6 @@ struct Union {
 struct Attempts {
 	tried: Tried<Attempt>,
 	pending: Vec<AttemptIdx>,
-	probed: Tried,
 	drops: Vec<Installs>,
 	merged: IdMap<(u64, NodeIdx), Vec<Vec<Value>>>,
 	family: Family,
@@ -317,11 +315,9 @@ enum Family {
 	Drop,
 	Merge,
 	Stuck,
-	Cleared,
 	Admitted,
 	Idle,
 	Unshaped,
-	Shared,
 	Rerouted,
 	Unblocked,
 	Extended,
@@ -338,24 +334,14 @@ impl Family {
 	fn derived(self) -> bool {
 		matches!(
 			self,
-			Family::Fill
-				| Family::Stuck
-				| Family::Cleared
-				| Family::Admitted
-				| Family::Unblocked
-				| Family::Extended
+			Family::Fill | Family::Stuck | Family::Admitted | Family::Unblocked | Family::Extended
 		)
 	}
 
 	fn constructs(self) -> bool {
 		matches!(
 			self,
-			Family::Base
-				| Family::Repair
-				| Family::Merge
-				| Family::Unshaped
-				| Family::Shared
-				| Family::Rerouted
+			Family::Base | Family::Repair | Family::Merge | Family::Unshaped | Family::Rerouted
 		)
 	}
 }
@@ -489,25 +475,6 @@ impl<'a, 'b> Search<'a, 'b> {
 			.enumerate()
 			.map(|(i, taken)| ((taken.run, taken.step), i))
 			.collect();
-		let receivers = cx
-			.km
-			.slots
-			.indices()
-			.map(|slot| {
-				let mut out = Vec::new();
-				for delivery in &cx.program.deliveries {
-					if delivery
-						.slots
-						.iter()
-						.any(|&(s, guarded)| s == slot && !guarded)
-						&& !out.contains(&delivery.recipient)
-					{
-						out.push(delivery.recipient);
-					}
-				}
-				out
-			})
-			.collect();
 		let mut search = Search {
 			ctx,
 			cx,
@@ -515,7 +482,6 @@ impl<'a, 'b> Search<'a, 'b> {
 			facts: Facts {
 				relevant: relevant_prefixes(ctx, cx),
 				queried,
-				receivers,
 				honest_at,
 			},
 			nodes: IndexVec::new(),
@@ -532,7 +498,6 @@ impl<'a, 'b> Search<'a, 'b> {
 			attempts: Attempts {
 				tried: Tried::default(),
 				pending: Vec::new(),
-				probed: Tried::default(),
 				drops: Vec::new(),
 				merged: IdMap::default(),
 				family: Family::Base,

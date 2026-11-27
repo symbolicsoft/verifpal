@@ -4,8 +4,8 @@
 use super::control::attacker_authored;
 use super::symbolic::SymbolicState;
 use super::vars::{
-	Substitution, apply, attacker_var_id, collect_free_vars, collect_vars, dedupe, ground_free,
-	is_slot_var_id, slot_of_var_id,
+	Substitution, apply, collect_free_vars, collect_vars, dedupe, ground_free, is_slot_var_id,
+	slot_of_var_id,
 };
 use crate::protocol::ProtocolTrace;
 use crate::term::{Value, VariableId, value_nil};
@@ -48,7 +48,7 @@ fn divergent_filler(km: &ProtocolTrace, sym: &SymbolicState, id: &VariableId) ->
 		return value_nil();
 	}
 	let slot = slot_of_var_id(id);
-	let Some(Some(term)) = sym.var_terms.get(slot) else {
+	let Some(term) = sym.term_of(id) else {
 		return value_nil();
 	};
 	fillers()
@@ -63,8 +63,8 @@ fn divergent_filler(km: &ProtocolTrace, sym: &SymbolicState, id: &VariableId) ->
 
 pub(crate) fn distinguish(sym: &SymbolicState, proposal: &Substitution) -> Option<Substitution> {
 	let mut free = Vec::new();
-	for (slot, term) in sym.variables() {
-		if proposal.contains_key(&attacker_var_id(slot)) {
+	for (id, _, term) in sym.inputs() {
+		if proposal.contains_key(&id) {
 			collect_free_vars(&apply(term, proposal), &mut free);
 		}
 	}
@@ -165,12 +165,13 @@ mod tests {
 		SymbolicState {
 			terms: IndexVec::from(vec![term.clone()]),
 			var_terms: IndexVec::from(vec![Some(term)]),
+			..SymbolicState::default()
 		}
 	}
 
 	fn install(v: Value) -> Substitution {
 		let mut s = Substitution::default();
-		s.insert(attacker_var_id(SlotIdx::new(0)), v);
+		s.insert(crate::solve::vars::attacker_var_id(SlotIdx::new(0)), v);
 		s
 	}
 
@@ -211,6 +212,8 @@ mod tests {
 			Value::primitive(PRIM_CONCAT, vec![free_var(0), free_var(1), free_var(2)], 0);
 		let proposal = install(installed.clone());
 		let out = distinguish(&sym, &proposal).expect("distinguished");
-		assert!(out[&attacker_var_id(SlotIdx::new(0))].equivalent(&installed, true));
+		assert!(
+			out[&crate::solve::vars::attacker_var_id(SlotIdx::new(0))].equivalent(&installed, true)
+		);
 	}
 }

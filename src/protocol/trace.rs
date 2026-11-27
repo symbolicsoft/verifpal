@@ -25,7 +25,6 @@ pub(crate) struct TraceSlot {
 	pub declared_at: i32,
 	pub phases: Vec<i32>,
 	pub mutatable_to: Vec<PrincipalId>,
-	pub delivery_phase: Option<i32>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -33,26 +32,12 @@ pub(crate) struct SendEvent {
 	pub sender: PrincipalId,
 	pub recipient: PrincipalId,
 	pub declared_at: i32,
-	pub phase: i32,
 	pub guarded: bool,
 }
 
 impl TraceSlot {
 	pub(crate) fn known_by_principal(&self, pid: PrincipalId) -> bool {
 		self.creator == pid || self.known_by.iter().any(|&(recipient, _)| recipient == pid)
-	}
-
-	pub(crate) fn sender_to(&self, pid: PrincipalId) -> PrincipalId {
-		self.known_by
-			.iter()
-			.find(|&&(recipient, _)| recipient == pid)
-			.map_or(self.creator, |&(_, from)| from)
-	}
-
-	pub(crate) fn guarded_for(&self, pid: PrincipalId) -> bool {
-		self.sent_by
-			.iter()
-			.any(|event| event.guarded && (event.recipient == pid || self.creator == pid))
 	}
 
 	pub(crate) fn sent_from(&self, pid: PrincipalId) -> bool {
@@ -65,40 +50,6 @@ impl TraceSlot {
 
 	pub(crate) fn mutation_reaches(&self, pid: PrincipalId) -> bool {
 		self.mutatable_to.contains(&pid)
-	}
-
-	pub(crate) fn substitution_phase(&self, recipient: PrincipalId) -> Option<i32> {
-		self.substitution_phases(recipient).into_iter().min()
-	}
-
-	pub(crate) fn substitution_phases(&self, recipient: PrincipalId) -> Vec<i32> {
-		let mut phases = Vec::new();
-		self.substitution_phases_from(recipient, &mut Vec::new(), &mut phases);
-		phases
-	}
-
-	fn substitution_phases_from(
-		&self,
-		recipient: PrincipalId,
-		visiting: &mut Vec<PrincipalId>,
-		phases: &mut Vec<i32>,
-	) {
-		if visiting.contains(&recipient) {
-			return;
-		}
-		visiting.push(recipient);
-		for event in self
-			.sent_by
-			.iter()
-			.filter(|event| event.recipient == recipient)
-		{
-			if event.guarded {
-				self.substitution_phases_from(event.sender, visiting, phases);
-			} else {
-				phases.push(event.phase);
-			}
-		}
-		visiting.pop();
 	}
 }
 
@@ -562,7 +513,6 @@ mod tests {
 				sender: 0,
 				recipient: 1,
 				declared_at: 1,
-				phase: 0,
 				guarded: false,
 			}],
 			..make_trace_slot(&Value::Constant(c), &value_nil(), 0)

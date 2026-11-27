@@ -48,13 +48,18 @@ pub(crate) struct Run {
 }
 
 impl Run {
-	fn push(&mut self, event: Event, phase: i32, gives: impl IntoIterator<Item = SlotIdx>) {
+	fn push(
+		&mut self,
+		event: Event,
+		phase: i32,
+		gives: impl IntoIterator<Item = SlotIdx>,
+	) -> StepIdx {
 		for slot in gives {
 			self.step_of_slot
 				.entry(slot)
 				.or_insert(self.steps.next_index());
 		}
-		self.steps.push(Step { event, phase });
+		self.steps.push(Step { event, phase })
 	}
 }
 
@@ -63,6 +68,10 @@ pub(crate) struct Program {
 	pub(crate) runs: IndexVec<RunIdx, Run>,
 	run_of: IdMap<PrincipalId, RunIdx>,
 	pub(crate) deliveries: IndexVec<DeliveryIdx, Delivery>,
+	pub(crate) order: Vec<(RunIdx, StepIdx)>,
+	receivers: IndexVec<SlotIdx, Vec<RunIdx>>,
+	carriers: IndexVec<SlotIdx, Vec<RunIdx>>,
+	emitted: IndexVec<SlotIdx, Vec<(RunIdx, bool)>>,
 }
 
 impl Program {
@@ -81,6 +90,7 @@ impl Program {
 		let run_of: IdMap<PrincipalId, RunIdx> =
 			runs.iter_enumerated().map(|(i, r)| (r.id, i)).collect();
 		let mut deliveries = IndexVec::new();
+		let mut order = Vec::new();
 		let mut phase = 0i32;
 		for block in &m.blocks {
 			match block {
@@ -97,7 +107,7 @@ impl Program {
 								Declaration::Assignment => (Event::Assign(slot), Some(slot)),
 								Declaration::Leaks => (Event::Leak(slot), None),
 							};
-							runs[run].push(event, phase, gives);
+							order.push((run, runs[run].push(event, phase, gives)));
 						}
 					}
 				}
@@ -113,12 +123,13 @@ impl Program {
 						.filter_map(|c| km.index_of(c).map(|slot| (slot, c.guard)))
 						.collect();
 					let d = deliveries.next_index();
-					runs[sender].push(Event::Send(d), phase, None);
-					runs[recipient].push(
+					order.push((sender, runs[sender].push(Event::Send(d), phase, None)));
+					let received = runs[recipient].push(
 						Event::Recv(d),
 						phase,
 						slots.iter().map(|&(slot, _)| slot),
 					);
+					order.push((recipient, received));
 					deliveries.push(Delivery {
 						sender,
 						recipient,
@@ -130,10 +141,34 @@ impl Program {
 				}
 			}
 		}
+		let mut receivers: IndexVec<SlotIdx, Vec<RunIdx>> =
+			IndexVec::from_elem(Vec::new(), km.slots.len());
+		let mut carriers = receivers.clone();
+		let mut emitted: IndexVec<SlotIdx, Vec<(RunIdx, bool)>> =
+			IndexVec::from_elem(Vec::new(), km.slots.len());
+		for delivery in &deliveries {
+			for &(slot, guarded) in &delivery.slots {
+				if !emitted[slot].contains(&(delivery.sender, guarded)) {
+					emitted[slot].push((delivery.sender, guarded));
+				}
+				if !guarded && !receivers[slot].contains(&delivery.recipient) {
+					receivers[slot].push(delivery.recipient);
+				}
+				if (!guarded || carriers[slot].contains(&delivery.sender))
+					&& !carriers[slot].contains(&delivery.recipient)
+				{
+					carriers[slot].push(delivery.recipient);
+				}
+			}
+		}
 		Program {
 			runs,
 			run_of,
 			deliveries,
+			order,
+			receivers,
+			carriers,
+			emitted,
 		}
 	}
 
@@ -152,6 +187,80 @@ impl Program {
 					.zip(sent)
 					.map(move |(&(slot, _), v)| (d, delivery, slot, v))
 			})
+	}
+
+	pub(crate) fn receivers(&self, slot: SlotIdx) -> &[RunIdx] {
+		&self.receivers[slot]
+	}
+
+	pub(crate) fn carriers(&self, slot: SlotIdx) -> &[RunIdx] {
+		&self.carriers[slot]
+	}
+
+	pub(crate) fn points(&self, run: RunIdx, slot: SlotIdx) -> Vec<RunIdx> {
+		let receivers = self.receivers(slot);
+		if receivers.contains(&run) {
+			return vec![run];
+		}
+		let mut reach = vec![run];
+		let mut upstream = Vec::new();
+		let mut at = 0;
+		while at < reach.len() {
+			let run = reach[at];
+			at += 1;
+			let Some((delivery, guarded, _)) = self.receipt(run, slot) else {
+				continue;
+			};
+			if !guarded {
+				upstream.push(run);
+			} else if !reach.contains(&delivery.sender) {
+				reach.push(delivery.sender);
+			}
+		}
+		if upstream.is_empty() {
+			return receivers.to_vec();
+		}
+		upstream
+	}
+
+	pub(crate) fn receipt(&self, run: RunIdx, slot: SlotIdx) -> Option<(&Delivery, bool, i32)> {
+		let step = self.runs[run].steps[*self.runs[run].step_of_slot.get(&slot)?];
+		let Event::Recv(d) = step.event else {
+			return None;
+		};
+		let delivery = &self.deliveries[d];
+		let &(_, guarded) = delivery.slots.iter().find(|&&(s, _)| s == slot)?;
+		Some((delivery, guarded, step.phase))
+	}
+
+	pub(crate) fn install_phase(&self, run: RunIdx, slot: SlotIdx) -> Option<i32> {
+		let mut at = run;
+		let mut seen = vec![run];
+		while let Some((delivery, guarded, phase)) = self.receipt(at, slot) {
+			if !guarded {
+				return Some(phase);
+			}
+			at = delivery.sender;
+			if seen.contains(&at) {
+				break;
+			}
+			seen.push(at);
+		}
+		None
+	}
+
+	pub(crate) fn first_install_phase(&self, slot: SlotIdx) -> Option<i32> {
+		self.receivers[slot]
+			.iter()
+			.filter_map(|&run| self.receipt(run, slot))
+			.map(|(_, _, phase)| phase)
+			.min()
+	}
+
+	pub(crate) fn emits(&self, run: RunIdx, slot: SlotIdx, guarded: Option<bool>) -> bool {
+		self.emitted[slot]
+			.iter()
+			.any(|&(sender, as_guarded)| sender == run && guarded.is_none_or(|g| g == as_guarded))
 	}
 
 	pub(crate) fn run_index(&self, id: PrincipalId) -> Option<RunIdx> {

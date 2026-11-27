@@ -112,32 +112,6 @@ impl<'a, 'b> Search<'a, 'b> {
 			.collect()
 	}
 
-	fn cleared(
-		&self,
-		plan: &Installs,
-		stuck: &[(RunIdx, SlotIdx)],
-		source: Source,
-		cone: &[(RunIdx, SlotIdx)],
-	) -> Option<Installs> {
-		let source = &self.nodes[source.node];
-		let kept: Installs = plan
-			.iter()
-			.filter(|install| {
-				let Install::Value { run, slot, value } = install else {
-					return true;
-				};
-				stuck.contains(&(*run, *slot))
-					|| !cone.contains(&(*run, *slot))
-					|| install_at(&source.installs, *run, *slot).is_some()
-					|| source
-						.held(*run, *slot)
-						.is_none_or(|h| h.value.equivalent(value, true))
-			})
-			.cloned()
-			.collect();
-		(kept.len() < plan.len()).then_some(kept)
-	}
-
 	pub(super) fn stuck_sources<'v>(
 		&self,
 		at: usize,
@@ -316,11 +290,8 @@ impl<'a, 'b> Search<'a, 'b> {
 				}
 			}
 			let plan = normalize(plan);
-			let cleared = self.cleared(&plan, slots, source, &cone);
-			let settled = !same_installs(&plan, installs)
-				&& self.as_family(Family::Stuck, |search| search.settles(plan));
-			if !settled && let Some(cleared) = cleared {
-				self.as_family(Family::Cleared, |search| search.consider(cleared));
+			if !same_installs(&plan, installs) {
+				self.as_family(Family::Stuck, |search| search.consider(plan));
 			}
 		}
 	}
