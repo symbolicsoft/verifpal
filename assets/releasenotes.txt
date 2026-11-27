@@ -1,60 +1,13 @@
-Verifpal 1.6.7
+Verifpal 1.6.8
 
-Changes since v1.6.6:
+Changes since v1.6.7:
 
-- Streamline tests
-- Fix performance regression + more tests
-
-Changes since v1.6.5:
-
-- More precise AEAD and forgery semantics
-- Engine: Additional fixes and regression tests
-- Expand search coverage, rule out more missed attacks
-- Fix unlinkability regression reported by Heba Ajjour
-
-Changes since v1.6.4:
-
-- Improve message dropping discipline for guarded messages
-- Fix #50
-- Performance improvements for multi-phase models
-- Clarify remote AA witness expectations
-- Clarify private NFC search limits and pin attack traces
-- Add private NFC comparisons for remote AA
-- Clarify plaintext NFC visibility in the remote AA examples
-
-Changes since v1.6.3:
-
-- Code quality pass
-- Cargo update
-- Major source refactoring/reorganization
-- Search: the rerouted pass bypasses the stuck run's own later send
-- Search: the rerouted pass uses only sends that reach past the wait
-- Deducer: reuse goals whose cycle cuts recur; fail clashing equations early
-- Search: a rerouted send can supply a stuck receive
-- Performance improvements
-- ePassport models
-- Unlinkability fixes
-- Cargo update
-- Scenario analysis bug found by Heba Ajjour
-- Fix #45, #46, #47
-
-Changes since v1.6.2:
-
-- Eliminate classes of missed attacks
-
-Changes since v1.6.1:
-
-- More engine tightening + bug fixes + tests
-- Remove vestiges of old engine
-- Minor bug fixes + more tests
-- Fix #44
-
-Changes since v1.6.0:
-
-- Remove --saturate (closes #43)
-- Fix #42
-- Fix #38, #39, #40, #41
-- Fix #37
-- LaTeX rendering improvements
-- Fix #32, #33, #34, #35, #36
-- Improvements for Verifpal Workbench
+- Fix #70, fix #71, fix #72
+- More unlinkability improvements
+- Performance improvement pass
+- Add additional tests
+- Fix #61, fix #62, fix #63, fix #64, fix #65, fix #66, fix #67, fix #68, fix #69
+- Fix #57, fix #59, fix #60
+- Fix #55, fix #56
+- Fix #51, fix #52, fix #53, fix #54 + docs editing pass
+- Field-wise AEAD nonce reuse; find PQXDH key confusion at two sessions
