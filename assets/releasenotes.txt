@@ -2,12 +2,16 @@ Verifpal 1.6.8
 
 Changes since v1.6.7:
 
+- Update .goreleaser.yml
 - Fix #70, fix #71, fix #72
 - More unlinkability improvements
 - Performance improvement pass
+- cargo update
 - Add additional tests
 - Fix #61, fix #62, fix #63, fix #64, fix #65, fix #66, fix #67, fix #68, fix #69
 - Fix #57, fix #59, fix #60
 - Fix #55, fix #56
 - Fix #51, fix #52, fix #53, fix #54 + docs editing pass
 - Field-wise AEAD nonce reuse; find PQXDH key confusion at two sessions
+- Scoop update for verifpal version v1.6.7
+- Homebrew cask update for verifpal version v1.6.7
