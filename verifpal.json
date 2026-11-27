@@ -1,12 +1,12 @@
 {
-    "version": "1.6.7",
+    "version": "1.6.8",
     "architecture": {
         "64bit": {
-            "url": "https://github.com/symbolicsoft/verifpal/releases/download/v1.6.7/verifpal_1.6.7_windows_amd64.zip",
+            "url": "https://github.com/symbolicsoft/verifpal/releases/download/v1.6.8/verifpal_1.6.8_windows_amd64.zip",
             "bin": [
                 "verifpal.exe"
             ],
-            "hash": "27b3383099c49b940e8a051db23a9693de3b15c7dfac3689ff826a1fae6d512d"
+            "hash": "71ddd8635417b1a0611abee027fe2191e220c74758c6a1dae6c95c6bb3eb54f2"
         }
     },
     "homepage": "https://verifpal.com",
