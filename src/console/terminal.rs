@@ -19,11 +19,7 @@ pub fn set_color_choice(choice: ColorChoice) {
 		ColorChoice::Never => 2,
 	};
 	COLOR_CHOICE.store(encoded, std::sync::atomic::Ordering::Relaxed);
-	match choice {
-		ColorChoice::Auto => colored::control::unset_override(),
-		ColorChoice::Always => colored::control::set_override(true),
-		ColorChoice::Never => colored::control::set_override(false),
-	}
+	colored::control::set_override(color_output_support());
 }
 
 fn env_is_set(name: &str) -> bool {
@@ -54,7 +50,11 @@ pub(crate) fn color_output_support() -> bool {
 	match COLOR_CHOICE.load(std::sync::atomic::Ordering::Relaxed) {
 		1 => true,
 		2 => false,
-		_ => *COLOR_AUTO.get_or_init(color_auto_detect),
+		_ => *COLOR_AUTO.get_or_init(|| {
+			let detected = color_auto_detect();
+			colored::control::set_override(detected);
+			detected
+		}),
 	}
 }
 

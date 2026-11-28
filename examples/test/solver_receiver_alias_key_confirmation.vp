@@ -1,0 +1,44 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0 at one session and at two.
+//
+// A key confirmation in the shape of solver_receiver_alias_echo.vp: Bob echoes
+// Alice's ga beside his own gb, and Carol checks the echo against her copy
+// before she encrypts secret under DH_KEX(gb_c, c). The attacker can put its own
+// key in place of gb, but Carol never sends PUBKEY(c), so nobody but Carol can
+// compute the key and secret stays confidential. The search once never returned
+// here.
+attacker[active]
+
+principal Alice[
+	generates a
+	ga = PUBKEY(a)
+]
+
+Alice -> Bob: ga
+
+Alice -> Carol: ga
+
+principal Bob[
+	generates b
+	gb = PUBKEY(b)
+	echo = CONCAT(gb, ga)
+]
+
+Bob -> Carol: echo
+
+principal Carol[
+	knows private secret
+	gb_c, ga_c = SPLIT(echo)?
+	_ = ASSERT(ga_c, ga)?
+	generates c
+	k = DH_KEX(gb_c, c)
+	e = ENC(k, secret)
+]
+
+Carol -> Bob: e
+
+queries[
+	confidentiality? secret
+]

@@ -44,7 +44,11 @@ impl Span {
 			.find('\n')
 			.map(|i| at + i)
 			.unwrap_or(source.len());
-		(line, start, end)
+		(
+			line,
+			start,
+			start + source[start..end].trim_end_matches('\r').len(),
+		)
 	}
 }
 
@@ -235,16 +239,26 @@ impl VerifpalError {
 		)
 	}
 
-	pub(crate) fn render(&self, file_name: &str, source: &str) -> String {
-		let header = match self.kind {
+	#[cfg_attr(not(feature = "language"), allow(dead_code))]
+	pub(crate) fn anchored_span(&self, source: &str) -> Option<Span> {
+		let span = self.narrowed_span(source)?;
+		Some(end_of_input_anchor(span, source).map_or(span, |(_, _, end)| Span::at(end)))
+	}
+
+	fn header(&self) -> String {
+		match self.kind {
 			ErrorKind::Internal => self.message.to_string(),
 			kind => format!("{}: {}", kind.label(), self.message),
-		};
+		}
+	}
+
+	pub(crate) fn render(&self, file_name: &str, source: &str) -> String {
+		let header = self.header();
 		let empty = Diagnostic::default();
 		let extra = self.extra.as_deref().unwrap_or(&empty);
 		let Some(span) = self.span else {
 			let mut out = format!("{}\n --> {}", header, file_name);
-			self.render_footnotes(&mut out, 1);
+			self.render_footnotes(&mut out, 1, false);
 			return out;
 		};
 		let span = self.narrowed_span(source).unwrap_or(span);
@@ -307,18 +321,18 @@ impl VerifpalError {
 			last_line = line;
 		}
 
-		self.render_footnotes(&mut out, width);
+		self.render_footnotes(&mut out, width, true);
 		out
 	}
 
-	fn render_footnotes(&self, out: &mut String, width: usize) {
+	fn render_footnotes(&self, out: &mut String, width: usize, below_source: bool) {
 		let empty = Diagnostic::default();
 		let extra = self.extra.as_deref().unwrap_or(&empty);
 		if extra.notes.is_empty() && extra.helps.is_empty() {
 			return;
 		}
 		let gutter = " ".repeat(width);
-		if self.span.is_some() {
+		if below_source {
 			out.push_str(&format!("\n{} |", gutter));
 		}
 		for (tag, entries) in [("note", &extra.notes), ("help", &extra.helps)] {
@@ -395,22 +409,19 @@ fn placement_of(span: Span, source: &str) -> Placement<'static> {
 	build_placement(span, source, line, line_start, line_end)
 }
 
-fn anchored_placement(span: Span, source: &str) -> Placement<'static> {
-	let (line, line_start, line_end) = span.line_bounds(source);
+fn end_of_input_anchor(span: Span, source: &str) -> Option<(usize, usize, usize)> {
+	let (_, line_start, line_end) = span.line_bounds(source);
 	let at = span.start.min(source.len());
-	if source[line_start..line_end].trim().is_empty()
-		&& at >= source.trim_end().len()
-		&& let Some((anchor_line, anchor_start, anchor_end)) = last_line_with_text(source)
-	{
-		return build_placement(
-			Span::at(anchor_end),
-			source,
-			anchor_line,
-			anchor_start,
-			anchor_end,
-		);
+	(source[line_start..line_end].trim().is_empty() && at >= source.trim_end().len())
+		.then(|| last_line_with_text(source))
+		.flatten()
+}
+
+fn anchored_placement(span: Span, source: &str) -> Placement<'static> {
+	match end_of_input_anchor(span, source) {
+		Some((line, start, end)) => build_placement(Span::at(end), source, line, start, end),
+		None => placement_of(span, source),
 	}
-	build_placement(span, source, line, line_start, line_end)
 }
 
 fn build_placement(
@@ -438,10 +449,9 @@ impl fmt::Display for VerifpalError {
 		if let Some(rendered) = &self.rendered {
 			return write!(f, "{}", rendered);
 		}
-		match self.kind {
-			ErrorKind::Internal => write!(f, "{}", self.message),
-			kind => write!(f, "{}: {}", kind.label(), self.message),
-		}
+		let mut out = self.header();
+		self.render_footnotes(&mut out, 1, false);
+		write!(f, "{}", out)
 	}
 }
 
@@ -603,6 +613,56 @@ mod tests {
 			e.render("m.vp", SRC),
 			"sanity error: bad\n --> m.vp\n  = help: try this"
 		);
+	}
+
+	#[test]
+	fn an_error_never_located_displays_its_notes_and_help() {
+		let e = VerifpalError::parse("bad name".into())
+			.note("why")
+			.help("do this");
+		assert_eq!(
+			e.to_string(),
+			"parse error: bad name\n  = note: why\n  = help: do this"
+		);
+		let spanned = VerifpalError::sanity("bad".into())
+			.at(Span::at(3))
+			.help("do this");
+		assert_eq!(
+			spanned.to_string(),
+			"sanity error: bad\n  = help: do this",
+			"with no source to quote there is no gutter to draw"
+		);
+		assert_eq!(
+			VerifpalError::internal("broke".into())
+				.note("how")
+				.to_string(),
+			"broke\n  = note: how"
+		);
+	}
+
+	#[test]
+	fn a_quoted_line_leaves_out_its_carriage_return() {
+		let source = "attacker[active]\r\nprincipal Alice[\r\n\tknows private\r\n]\r\n";
+		let at = source.find(']').map(|first| first + 1).expect("bracket");
+		let closing = at + source[at..].find(']').expect("the closing bracket");
+		let rendered = VerifpalError::parse("expected at least one constant".into())
+			.at(Span::new(closing, closing + 1))
+			.render("crlf.vp", source);
+		assert_eq!(
+			rendered,
+			concat!(
+				"parse error: expected at least one constant\n",
+				" --> crlf.vp:4:1\n",
+				"  |\n",
+				"4 | ]\n",
+				"  | ^"
+			)
+		);
+		let past = VerifpalError::parse("at the line's end".into())
+			.at(Span::at(source.find('\r').expect("a carriage return")))
+			.render("crlf.vp", source);
+		assert!(past.contains("1 | attacker[active]\n"), "{past:?}");
+		assert!(past.contains(" --> crlf.vp:1:17\n"), "{past:?}");
 	}
 
 	#[test]

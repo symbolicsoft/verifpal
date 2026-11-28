@@ -15,6 +15,7 @@ use crate::syntax::{PrincipalId, Query, Span};
 use crate::term::{Constant, Primitive, Value, ValueId};
 use crate::theory::{DerivationRecord, masked};
 use crate::util::IdMap;
+use crate::verify::StepKind;
 use crate::verify::{Subtype, TraceStep, TraceValue};
 
 pub(crate) struct Narrator<'a, 'b> {
@@ -180,6 +181,14 @@ impl<'a, 'b> Narrator<'a, 'b> {
 			.map_or(self.ex.knowledge.len(), |taken| taken.known)
 	}
 
+	fn phase(&self) -> i32 {
+		match (&self.within, self.ex.order.get(self.cutoff)) {
+			(Some(world), _) => world.state.current_phase,
+			(None, Some(taken)) => taken.phase,
+			(None, None) => self.ex.knowledge.state.current_phase,
+		}
+	}
+
 	fn view(&self) -> (&Knowledge, usize) {
 		match &self.within {
 			Some(world) => (world, world.len()),
@@ -307,13 +316,13 @@ impl<'a, 'b> Narrator<'a, 'b> {
 	}
 
 	fn say(&mut self, line: String) {
-		self.steps.push(TraceStep::new("derive", line));
+		self.steps.push(TraceStep::new(StepKind::Derive, line));
 	}
 
 	fn say_routed(
 		&mut self,
 		(sender, recipient): (RunIdx, RunIdx),
-		kind: &'static str,
+		kind: StepKind,
 		text: String,
 		values: Vec<TraceValue>,
 	) {
@@ -357,7 +366,7 @@ impl<'a, 'b> Narrator<'a, 'b> {
 
 	fn proving(&self, knowledge: &Knowledge, len: usize, v: &Value) -> Option<Knowledge> {
 		let nested = self.within.is_some();
-		knowledge.proving(v, |at, known| {
+		knowledge.proving(v, self.phase(), |at, known| {
 			at < len
 				&& (nested
 					|| !matches!(knowledge.origin(at), Origin::Derived(_))
@@ -378,7 +387,12 @@ impl<'a, 'b> Narrator<'a, 'b> {
 		let (knowledge, len) = self.view();
 		let capabilities = knowledge.capabilities().clone();
 		let keep: Vec<bool> = (0..knowledge.len()).map(|k| k < len).collect();
-		let restricted = knowledge.state.retaining(&keep).into_owned();
+		let mut restricted = knowledge.state.retaining(&keep).into_owned();
+		let phase = self.phase();
+		if phase != restricted.current_phase {
+			restricted.current_phase = phase;
+			restricted.chain = crate::theory::attacker::next_chain();
+		}
 		if let Value::Primitive(p) = v
 			&& let Some(built) =
 				crate::theory::can_reconstruct_primitive(p, &capabilities, &restricted)
@@ -441,11 +455,20 @@ impl<'a, 'b> Narrator<'a, 'b> {
 				}
 			}
 			Origin::Leak { run, slot } => {
-				let name = &self.cx.km.slots[slot].constant;
+				let name = self.cx.km.slots[slot].constant.to_string();
 				let leaker = &self.cx.program.runs[run].name;
-				self.say(format!(
-					"Attacker is handed {name} by a leaks declaration in {leaker}."
-				));
+				let mut step = TraceStep::new(
+					StepKind::Derive,
+					format!("Attacker is handed {name} by a leaks declaration in {leaker}."),
+				);
+				step.principal = Some(leaker.clone());
+				step.values = vec![TraceValue {
+					name,
+					installed: None,
+					was: None,
+					guarded: false,
+				}];
+				self.steps.push(step);
 			}
 			Origin::Derived(record) => {
 				for ingredient in record.held() {
@@ -666,7 +689,7 @@ impl<'a, 'b> Narrator<'a, 'b> {
 		for (run, state) in self.ex.runs.iter_enumerated() {
 			if state.idle {
 				let mut step = TraceStep::new(
-					"idle",
+					StepKind::Idle,
 					format!(
 						"{} never starts a session in this execution.",
 						program.runs[run].name
@@ -824,23 +847,32 @@ impl<'a, 'b> Narrator<'a, 'b> {
 			"{} to {}",
 			program.runs[delivery.sender].name, program.runs[delivery.recipient].name
 		);
-		let dropped: Vec<String> = delivery
+		let dropped: Vec<TraceValue> = delivery
 			.slots
 			.iter()
 			.filter(|&&(slot, _)| self.ex.runs[run].held(slot).is_none())
-			.map(|&(slot, _)| self.cx.km.slots[slot].constant.to_string())
+			.map(|&(slot, guarded)| TraceValue {
+				name: self.cx.km.slots[slot].constant.to_string(),
+				installed: None,
+				was: None,
+				guarded,
+			})
 			.collect();
 		if !dropped.is_empty() {
 			let recipient = &program.runs[delivery.recipient].name;
+			let names: Vec<&str> = dropped.iter().map(|value| value.name.as_str()).collect();
 			let mut step = TraceStep::new(
-				"drop",
+				StepKind::Drop,
 				format!(
 					"Attacker drops {} ({route}), and {recipient} continues without {}.",
-					dropped.join(", "),
+					names.join(", "),
 					if dropped.len() == 1 { "it" } else { "them" }
 				),
 			);
+			step.sender = Some(program.runs[delivery.sender].name.clone());
+			step.recipient = Some(recipient.clone());
 			step.principal = Some(recipient.clone());
+			step.values = dropped;
 			self.steps.push(step);
 		}
 		let replayed = self.replays(run, d, &route);
@@ -874,7 +906,7 @@ impl<'a, 'b> Narrator<'a, 'b> {
 		);
 		self.say_routed(
 			(delivery.sender, delivery.recipient),
-			"mutations",
+			StepKind::Mutations,
 			text,
 			items,
 		);
@@ -901,7 +933,7 @@ impl<'a, 'b> Narrator<'a, 'b> {
 			replayed.push(slot);
 			self.say_routed(
 				(delivery.sender, delivery.recipient),
-				"replay",
+				StepKind::Replay,
 				format!(
 					"Attacker replays {name} ({route}) from another {axis}, where it is {shown}."
 				),
@@ -994,7 +1026,7 @@ impl<'a, 'b> Narrator<'a, 'b> {
 		);
 		self.say_routed(
 			(sender, run),
-			"received",
+			StepKind::Received,
 			text,
 			vec![TraceValue {
 				name,
@@ -1017,7 +1049,7 @@ impl<'a, 'b> Narrator<'a, 'b> {
 			return;
 		}
 		self.steps.push(TraceStep::new(
-			"static",
+			StepKind::Static,
 			format!(
 				"No value {} is built from is generated fresh: {}.",
 				self.cx.km.slots[slot].constant,
@@ -1031,7 +1063,7 @@ impl<'a, 'b> Narrator<'a, 'b> {
 			let name = c.to_string();
 			let shown = self.spelled(v, &[&name]);
 			self.steps.push(TraceStep::new(
-				"resolves",
+				StepKind::Resolves,
 				format!("In this state {c} resolves to {shown}."),
 			));
 		}
@@ -1096,7 +1128,7 @@ impl<'a, 'b> Narrator<'a, 'b> {
 		let hidden: Vec<&str> = installed.iter().map(String::as_str).collect();
 		let shown = self.spelled(&h.pre, &hidden);
 		let mut step = TraceStep::new(
-			"gate",
+			StepKind::Gate,
 			format!("{principal}'s {shown} passes — the attacker controls one of its inputs."),
 		);
 		step.principal = Some(principal);

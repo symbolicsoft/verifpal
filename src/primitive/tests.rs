@@ -480,11 +480,35 @@ fn every_spec_index_is_within_the_primitive_it_is_declared_on() {
 	}
 }
 
+const PRIMITIVE_NAMED_OUTSIDE_ITS_SPEC: [(&str, &str, usize); 2] = [
+	("protocol/construct.rs", "HASH", 1),
+	("syntax/parser/expressions.rs", "HASH", 2),
+];
+
+fn names_whole(line: &str, name: &str) -> bool {
+	let word = |c: char| c.is_ascii_alphanumeric() || c == '_';
+	line.match_indices(name).any(|(at, _)| {
+		!line[..at].chars().next_back().is_some_and(word)
+			&& !line[at + name.len()..].chars().next().is_some_and(word)
+	})
+}
+
+#[test]
+fn a_primitive_is_found_inside_a_longer_literal_and_not_inside_a_longer_name() {
+	let diagnostic = "\"`SPLIT` takes field {} of a `CONCAT` that packs {} field{}\",";
+	assert!(names_whole(diagnostic, "SPLIT"));
+	assert!(names_whole(diagnostic, "CONCAT"));
+	assert!(names_whole("\"SPLIT\"", "SPLIT"));
+	assert!(!names_whole("\"`THRESHOLD_SPLIT` deals shares\"", "SPLIT"));
+	assert!(!names_whole("let split = SPLITTER;", "SPLIT"));
+}
+
 #[test]
 fn the_engine_names_no_primitive_outside_its_spec() {
 	let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
 	let names = names();
 	let mut offenders: Vec<String> = Vec::new();
+	let mut named: Vec<(String, &str, String)> = Vec::new();
 	let mut scanned = 0usize;
 	let mut stack = vec![root.clone()];
 	while let Some(dir) = stack.pop() {
@@ -516,12 +540,15 @@ fn the_engine_names_no_primitive_outside_its_spec() {
 				if line.starts_with("//") {
 					continue;
 				}
-				let quotes_one = names.iter().any(|name| {
-					line.contains(&format!("\"{name}\""))
-						|| line.contains(&format!("\"{}\"", name.to_lowercase()))
-				});
-				if line.contains("PRIM_") || quotes_one {
+				if line.contains("PRIM_") {
 					offenders.push(format!("{rel}:{}: {line}", n + 1));
+				}
+				for &name in &names {
+					if names_whole(line, name)
+						|| line.contains(&format!("\"{}\"", name.to_lowercase()))
+					{
+						named.push((rel.clone(), name, format!("{rel}:{}: {line}", n + 1)));
+					}
 				}
 			}
 		}
@@ -531,6 +558,24 @@ fn the_engine_names_no_primitive_outside_its_spec() {
 		"the scan found no engine source under {}",
 		root.display()
 	);
+	let times = |rel: &str, name: &str| {
+		named
+			.iter()
+			.filter(|(r, n, _)| r == rel && *n == name)
+			.count()
+	};
+	let known = |rel: &str, name: &str| {
+		PRIMITIVE_NAMED_OUTSIDE_ITS_SPEC
+			.iter()
+			.find(|(r, n, _)| *r == rel && *n == name)
+			.map_or(0, |&(_, _, lines)| lines)
+	};
+	offenders.extend(
+		named
+			.iter()
+			.filter(|(rel, name, _)| times(rel, name) > known(rel, name))
+			.map(|(_, _, line)| line.clone()),
+	);
 	assert!(
 		offenders.is_empty(),
 		"a primitive is declared once, in src/primitive/spec.rs, and the engine \
@@ -538,5 +583,15 @@ fn the_engine_names_no_primitive_outside_its_spec() {
 		 semantics the spec should carry as a field the engine reads generically. \
 		 Add the field, not the branch:\n  {}",
 		offenders.join("\n  ")
+	);
+	let stale: Vec<&(&str, &str, usize)> = PRIMITIVE_NAMED_OUTSIDE_ITS_SPEC
+		.iter()
+		.filter(|&&(rel, name, lines)| times(rel, name) < lines)
+		.collect();
+	assert!(
+		stale.is_empty(),
+		"PRIMITIVE_NAMED_OUTSIDE_ITS_SPEC lists {stale:?}, but the engine now names those \
+		 primitives on fewer lines there. Lower or delete the entries, so that a name cannot \
+		 come back unnoticed"
 	);
 }

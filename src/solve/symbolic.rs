@@ -105,8 +105,9 @@ impl SymbolicState {
 	pub(crate) fn forwarding(&self, proposal: &Substitution) -> Substitution {
 		let mut out = proposal.clone();
 		for other in &self.others {
-			out.entry(other.id.clone())
-				.or_insert_with(|| other.forwarded.clone());
+			if !out.contains_key(&other.id) {
+				super::vars::bind(&mut out, other.id.clone(), other.forwarded.clone());
+			}
 		}
 		out
 	}

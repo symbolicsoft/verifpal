@@ -3,9 +3,11 @@
 
 mod math;
 
-use super::msc::{ATTACKER, Chart, Lanes, ROW_KINDS, Route, Row, mark_label};
-use super::template::{Ctx, Dialect, escape_tex, escaped_tex, render, templates};
-use super::{Analysis, DISCLAIMER, ModelReport, QueryReport, Run};
+use super::msc::{ATTACKER, Chart, Lanes, ROW_KINDS, Route, Row};
+use super::template::{
+	Ctx, Dialect, escape_tex, escape_tex_verbatim, escaped_tex, render, templates,
+};
+use super::{Analysis, DISCLAIMER, ModelReport, QueryReport, Run, Tint};
 use crate::util::text::{article, plural};
 use crate::verify::TraceStep;
 use math::Names;
@@ -17,7 +19,14 @@ static TEX: Dialect = Dialect {
 	partial,
 };
 
-templates! { TEX,
+static VERBATIM: Dialect = Dialect {
+	open: "<<",
+	close: ">>",
+	escape: escape_tex_verbatim,
+	partial,
+};
+
+templates! { TEX {
 	PAGE "page" = "tpl/page.tex",
 	SUMMARY "summary" = "tpl/summary.tex",
 	MODEL "model" = "tpl/model.tex",
@@ -33,7 +42,9 @@ templates! { TEX,
 	SCOPE "scope" = "tpl/scope.tex",
 	CALLOUTS "callouts" = "tpl/callouts.tex",
 	SOURCE "source" = "tpl/source.tex",
-}
+} VERBATIM {
+	VERBATIM_LINE "verbatim_line" = "tpl/verbatim_line.tex",
+} }
 
 const PREAMBLE: &str = include_str!("preamble.tex");
 
@@ -180,7 +191,7 @@ fn abstract_of(run: &Run) -> String {
 }
 
 fn math_name(name: &str) -> String {
-	format!("\\texttt{{{}}}", escaped_tex(name))
+	format!("\\vpfile{{{}}}", escaped_tex(name))
 }
 
 fn result_code(a: &Analysis) -> String {
@@ -223,19 +234,11 @@ fn index(run: &Run) -> Vec<Ctx> {
 fn model_ctx(model: &ModelReport, index: usize) -> Ctx {
 	let slug = slug(model, index);
 	let names = Names::of(model);
-	let failed = match &model.error {
-		Some(error) => vec![
-			Ctx::new().raw(
-				"error",
-				error
-					.lines()
-					.map(|line| format!("\\mbox{{}}{}", escaped_tex(line).replace(' ', "~")))
-					.collect::<Vec<String>>()
-					.join("\\\\\n"),
-			),
-		],
-		None => Vec::new(),
-	};
+	let failed = model
+		.error
+		.iter()
+		.map(|error| Ctx::new().list("lines", verbatim([(None, error.as_str())])))
+		.collect();
 	let ctx = Ctx::new()
 		.raw("name", math_name(model.short_name()))
 		.text("nameplain", model.short_name())
@@ -250,9 +253,8 @@ fn model_ctx(model: &ModelReport, index: usize) -> Ctx {
 			.list("traces", Vec::new())
 			.list("scope", Vec::new());
 	};
-	let hits = a.attacked_values();
-	let protocol = Chart::protocol(model, &hits)
-		.map(|chart| diagram_ctx(&chart, format!("{slug}-protocol"), protocol_caption(&hits)));
+	let protocol = Chart::protocol(model)
+		.map(|chart| diagram_ctx(&chart, format!("{slug}-protocol"), protocol_caption(&chart)));
 	ctx.list("facts", vec![facts_ctx(a)])
 		.list("protocol", protocol.into_iter().collect())
 		.list("verdicts", vec![verdicts_ctx(a, &slug, &names)])
@@ -261,13 +263,13 @@ fn model_ctx(model: &ModelReport, index: usize) -> Ctx {
 		.list("scope", vec![scope_ctx(a, &names)])
 }
 
-fn protocol_caption(hits: &std::collections::HashMap<String, Vec<usize>>) -> String {
-	if hits.is_empty() {
-		"The protocol as written. Guarded values are bracketed.".to_string()
-	} else {
+fn protocol_caption(chart: &Chart) -> String {
+	if chart.marked() {
 		"The protocol as written. Guarded values are bracketed; a dagger marks every value \
 		 an attack below substitutes or replays."
 			.to_string()
+	} else {
+		"The protocol as written. Guarded values are bracketed.".to_string()
 	}
 }
 
@@ -347,28 +349,24 @@ fn row_ctx(lanes: &Lanes, row: &Row) -> Ctx {
 			values,
 		} => {
 			let breach = route.breached();
-			let style = match route {
-				Route::Replayed => "vpreplay",
-				Route::Forged => "vpforged",
-				Route::Direct => "vpplain",
+			let attacker = lanes.index(ATTACKER);
+			let (style, via, end) = match route {
+				Route::Direct => ("vpplain", None, lanes.index(to)),
+				Route::Forged => ("vpforged", Some(attacker), lanes.index(to)),
+				Route::Replayed => ("vpreplay", Some(attacker), lanes.index(to)),
+				Route::Dropped => ("vpdropped", None, attacker),
 			};
 			let label = values
 				.iter()
-				.map(|v| math::label(&v.name, v.guarded, v.hit() || breach))
+				.map(|v| math::label(&v.name, v.guarded, v.hit() || route.substituted()))
 				.collect::<Vec<String>>()
 				.join(", ");
 			ctx.flag("breach", breach)
 				.text("numstyle", if breach { "vpnumadv" } else { "vpnum" })
 				.num("from", lanes.index(from))
-				.num(
-					"via",
-					if breach {
-						lanes.index(ATTACKER) as i64
-					} else {
-						-1
-					},
-				)
-				.num("to", lanes.index(to))
+				.num("via", via.map_or(-1, |lane| lane as i64))
+				.num("to", end)
+				.text("note", route.note())
 				.text("style", style)
 				.text(
 					"step",
@@ -404,13 +402,11 @@ fn row_ctx(lanes: &Lanes, row: &Row) -> Ctx {
 		Row::Mark {
 			step,
 			principal,
-			bypass,
+			mark,
 		} => ctx
 			.num("lane", lanes.index(principal))
-			.text("markstyle", if *bypass { "vpnoteadv" } else { "vpnote" })
-			.text("numstyle", "vpnumadv")
 			.num("step", step)
-			.text("text", mark_label(*bypass)),
+			.text("text", mark.label()),
 		Row::Run { first, last } => {
 			let (numstyle, step) = if first == last {
 				("vpnum", first.to_string())
@@ -632,42 +628,102 @@ fn callouts(a: &Analysis, names: &Names) -> Vec<Ctx> {
 }
 
 fn source_ctx(model: &ModelReport, index: usize) -> Ctx {
+	let end = model.source.trim_end().len();
 	Ctx::new()
 		.raw("name", math_name(model.short_name()))
 		.text("nameplain", model.short_name())
 		.text("slug", slug(model, index))
-		.flag("empty", model.source.trim().is_empty())
-		.raw("source", listing_safe(model.source.trim_end()))
+		.flag("empty", end == 0)
+		.list("lines", verbatim(model.chunks(0, end)))
 }
 
-pub(crate) const LISTING: &str = "lstlisting";
+const TAB: usize = 4;
 
-const WITHHELD: &str = "// [line withheld: it would have closed this listing]";
+const STYLES: [&str; 4] = ["plain", "keyword", "primitive", "comment"];
 
-pub(crate) fn listing_terminator() -> String {
-	["\\", "end{", LISTING, "}"].concat()
+#[derive(Default)]
+struct Line {
+	indent: usize,
+	column: usize,
+	inked: bool,
+	tint: Option<Tint>,
+	held: String,
+	chunks: Vec<Ctx>,
 }
 
-fn closes_listing(line: &str, terminator: &str) -> bool {
-	line.chars()
-		.filter(|c| !c.is_whitespace())
-		.collect::<String>()
-		.contains(terminator)
-}
-
-fn listing_safe(source: &str) -> String {
-	let terminator = listing_terminator();
-	source
-		.lines()
-		.map(|line| {
-			if closes_listing(line, &terminator) {
-				WITHHELD.to_string()
-			} else {
-				line.chars().map(listing_glyph).collect()
+impl Line {
+	fn take(&mut self, tint: Option<Tint>, c: char) {
+		if tint != self.tint {
+			self.flush();
+			self.tint = tint;
+		}
+		let stop = if c == '\t' {
+			(self.column / TAB + 1) * TAB
+		} else {
+			self.column + 1
+		};
+		match c {
+			' ' | '\t' if !self.inked => self.indent = stop,
+			'\t' => self
+				.held
+				.extend(std::iter::repeat_n(' ', stop - self.column)),
+			c => {
+				self.inked = true;
+				self.held.push(listing_glyph(c));
 			}
-		})
-		.collect::<Vec<String>>()
-		.join("\n")
+		}
+		self.column = stop;
+	}
+
+	fn flush(&mut self) {
+		if self.held.is_empty() {
+			return;
+		}
+		let style = match self.tint {
+			Some(Tint::Keyword | Tint::Attacker | Tint::Query) => "keyword",
+			Some(Tint::Primitive) => "primitive",
+			Some(Tint::Comment) => "comment",
+			Some(Tint::Principal) | None => "plain",
+		};
+		self.chunks.push(
+			Ctx::new()
+				.one_of(&STYLES, style)
+				.text("text", std::mem::take(&mut self.held)),
+		);
+	}
+
+	fn finish(mut self) -> Ctx {
+		self.flush();
+		Ctx::new()
+			.num("indent", self.indent)
+			.list("chunks", self.chunks)
+	}
+}
+
+fn verbatim<'a>(pieces: impl IntoIterator<Item = (Option<Tint>, &'a str)>) -> Vec<Ctx> {
+	let mut stream = pieces
+		.into_iter()
+		.flat_map(|(tint, text)| text.chars().map(move |c| (tint, c)))
+		.peekable();
+	let mut lines: Vec<Ctx> = Vec::new();
+	let mut line = Line::default();
+	let mut open = false;
+	while let Some((tint, c)) = stream.next() {
+		if c == '\r' && stream.peek().is_some_and(|&(_, next)| next == '\n') {
+			continue;
+		}
+		if c == '\n' {
+			lines.push(std::mem::take(&mut line).finish());
+			open = false;
+			continue;
+		}
+		open = true;
+		line.take(tint, c);
+	}
+	if open {
+		lines.push(line.finish());
+	}
+	lines
 }
 
 fn listing_glyph(c: char) -> char {

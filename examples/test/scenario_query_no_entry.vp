@@ -1,0 +1,52 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: rejected — Alice uses `gd` under no scenario.
+//
+// scenario_query_each_entry.vp with a third key that Alice receives and no
+// scenario binds. A query is accepted when some scenario copy that answers
+// queries makes it meaningful; this one has none, so it is still an error,
+// reported on the query as the model writes it.
+
+attacker[active]
+
+principal Bob[
+	knows private b
+	gb = PUBKEY(b)
+]
+
+principal Carol[
+	knows private c
+	gc = PUBKEY(c)
+]
+
+principal Dave[
+	knows private d
+	gd = PUBKEY(d)
+]
+
+Bob -> Alice: [gb]
+Carol -> Alice: gc
+Dave -> Alice: gd
+
+principal Alice[
+	knows public gpeer
+	generates n
+	e = PKE_ENC(gpeer, n)
+]
+
+Alice -> Bob: e
+
+principal Bob[
+	opened = PKE_DEC(b, e)
+]
+
+scenarios[
+	Alice[gpeer = gc]
+	Alice[gpeer = gb]
+]
+
+queries[
+	authentication? Bob -> Alice: gb
+	authentication? Dave -> Alice: gd
+]

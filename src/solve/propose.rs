@@ -353,12 +353,14 @@ pub(crate) fn everywhere(
 			continue;
 		};
 		let mut with = proposal.clone();
-		with.insert(other.id.clone(), value.clone());
+		if !vars::bind(&mut with, other.id.clone(), value.clone()) {
+			continue;
+		}
 		let ground = vars::ground_free(&vars::apply(&other.term, &with));
 		if vars::contains_var(&ground)
 			|| replaces(km, sym, proposal, (&other.id, other.slot), &ground)
 		{
-			out.insert(other.id.clone(), value.clone());
+			vars::bind(&mut out, other.id.clone(), value.clone());
 		}
 	}
 	(out.len() > proposal.len()).then_some(out)

@@ -69,7 +69,6 @@ pub(crate) fn construct_protocol_trace(
 		principal_ids: principal_ids.to_vec(),
 		..ProtocolTrace::default()
 	};
-	let declared = model_declarations(m);
 	let mut declared_at = 0i32;
 	let mut current_phase = 0i32;
 
@@ -96,7 +95,7 @@ pub(crate) fn construct_protocol_trace(
 			Block::Principal(principal) => {
 				declared_at = construct_trace_render_principal(
 					&mut trace,
-					&declared,
+					m,
 					principal,
 					declared_at,
 					current_phase,
@@ -104,14 +103,8 @@ pub(crate) fn construct_protocol_trace(
 			}
 			Block::Message(message) => {
 				declared_at += 1;
-				construct_trace_render_message(
-					&mut trace,
-					&declared,
-					message,
-					current_phase,
-					declared_at,
-				)
-				.map_err(|e| e.or_span(message.span))?;
+				construct_trace_render_message(&mut trace, m, message, current_phase, declared_at)
+					.map_err(|e| e.or_span(message.span))?;
 			}
 			Block::Phase(phase) => {
 				current_phase = phase.number;
@@ -134,13 +127,18 @@ pub(crate) fn construct_protocol_trace(
 
 fn construct_capability_index(trace: &ProtocolTrace) -> CapabilityIndex {
 	let mut index = CapabilityIndex::default();
+	let mut seen = IdSet::default();
+	let mut resolved = Vec::new();
 	for slot in &trace.slots {
 		for term in crate::term::subterms(&slot.initial_value) {
 			if !matches!(term, Value::Primitive(p) if !p.capabilities.is_empty()) {
 				continue;
 			}
-			index.insert(term);
-			index.insert(&crate::protocol::trace::resolve_trace_term(term, trace));
+			index.insert_unseen(term, &mut seen);
+			resolved.push(crate::protocol::trace::resolve_trace_term(term, trace));
+			if let Some(term) = resolved.last() {
+				index.insert_unseen(term, &mut seen);
+			}
 		}
 	}
 	index
@@ -208,7 +206,7 @@ fn mentions_of_constant(
 
 fn construct_trace_render_principal(
 	trace: &mut ProtocolTrace,
-	declared: &Declarations,
+	m: &Model,
 	principal: &Principal,
 	mut declared_at: i32,
 	current_phase: i32,
@@ -225,20 +223,13 @@ fn construct_trace_render_principal(
 					.map_err(located)?;
 			}
 			Declaration::Assignment => {
-				construct_trace_render_assignment(trace, declared, principal, declared_at, expr)
+				construct_trace_render_assignment(trace, m, principal, declared_at, expr)
 					.map_err(located)?;
 			}
 			Declaration::Leaks => {
 				declared_at += 1;
-				construct_trace_render_leaks(
-					trace,
-					declared,
-					principal,
-					expr,
-					current_phase,
-					declared_at,
-				)
-				.map_err(located)?;
+				construct_trace_render_leaks(trace, m, principal, expr, current_phase, declared_at)
+					.map_err(located)?;
 			}
 		}
 	}
@@ -371,47 +362,63 @@ fn declared_constant(
 	}
 }
 
-type Declarations = IdMap<ValueId, (String, Span)>;
-
-fn model_declarations(m: &Model) -> Declarations {
-	let mut out: Declarations = IdMap::default();
-	for block in &m.blocks {
+fn declaration_of<'m>(m: &'m Model, c: &Constant) -> Option<(&'m Principal, Span)> {
+	m.blocks.iter().find_map(|block| {
 		let Block::Principal(p) = block else {
-			continue;
+			return None;
 		};
-		for expr in &p.expressions {
-			if matches!(expr.kind, Declaration::Leaks) {
-				continue;
-			}
-			for c in &expr.constants {
-				out.entry(c.id)
-					.or_insert((base_name(&p.name).to_string(), expr.span));
-			}
-		}
-	}
-	out
+		p.expressions
+			.iter()
+			.find(|expr| {
+				expr.kind != Declaration::Leaks && expr.constants.iter().any(|d| d.id == c.id)
+			})
+			.map(|expr| (p, expr.span))
+	})
 }
 
-fn trace_slot_of(trace: &ProtocolTrace, declared: &Declarations, c: &Constant) -> VResult<SlotIdx> {
+fn holding_of(m: &Model, c: &Constant, holder: PrincipalId) -> Option<Span> {
+	let named = |constants: &[Constant]| constants.iter().any(|d| d.id == c.id);
+	m.blocks.iter().find_map(|block| match block {
+		Block::Principal(p) if p.id == holder => p
+			.expressions
+			.iter()
+			.find(|expr| expr.kind != Declaration::Leaks && named(&expr.constants))
+			.map(|expr| expr.span),
+		Block::Message(msg) if msg.recipient == holder && named(&msg.constants) => Some(msg.span),
+		_ => None,
+	})
+}
+
+fn trace_slot_of(
+	trace: &ProtocolTrace,
+	m: &Model,
+	c: &Constant,
+	user: PrincipalId,
+) -> VResult<SlotIdx> {
 	if let Some(idx) = trace.index_of(c) {
 		return Ok(idx);
 	}
-	if let Some((principal, span)) = declared.get(&c.id) {
+	if let Some((declarer, span)) = declaration_of(m, c) {
+		let principal = base_name(&declarer.name);
 		return Err(VerifpalError::sanity(
 			format!("`{}` is used before it is declared", c.name).into(),
 		)
 		.narrow(c.name.to_string())
 		.labelled("used here")
-		.label(*span, format!("{principal} declares it further down"))
+		.label(span, format!("{principal} declares it further down"))
 		.note(
 			"a model reads top to bottom, so a block can only name values that \
 			 already exist where it appears",
 		)
-		.help(format!(
-			"move {principal}'s block above this one, and have {principal} send \
-			 `{}` before it is used",
-			c.name
-		)));
+		.help(if declarer.id == user {
+			format!("move the declaration of `{}` above this line", c.name)
+		} else {
+			format!(
+				"move {principal}'s block above this one, and have {principal} send \
+				 `{}` before it is used",
+				c.name
+			)
+		}));
 	}
 	Err(unknown_constant(c, trace))
 }
@@ -456,7 +463,7 @@ fn construct_trace_render_generates(
 
 fn construct_trace_render_assignment(
 	trace: &mut ProtocolTrace,
-	declared: &Declarations,
+	m: &Model,
 	principal: &Principal,
 	declared_at: i32,
 	expr: &Expression,
@@ -465,12 +472,23 @@ fn construct_trace_render_assignment(
 		VerifpalError::sanity("assignment has nothing on the right of the `=`".into())
 			.help("write the value being computed, e.g. `x = HASH(m)`")
 	})?;
-	let constants = sanity_assignment_constants(assigned, &[])?;
-	if let Value::Primitive(p) = assigned {
-		sanity_primitive(p, &expr.constants)?;
-	}
+	let constants = sanity_assignment_constants(assigned)?;
+	sanity_primitive(assigned, &expr.constants)?;
 	for c in &constants {
-		let idx = trace_slot_of(trace, declared, c)?;
+		let bound = expr.constants.iter().filter(|o| o.id == c.id).count();
+		if bound > 0 && trace.index_of(c).is_none() {
+			return Err(VerifpalError::sanity(
+				format!("`{}` is computed from itself", c.name).into(),
+			)
+			.narrow_occurrence(c.name.to_string(), bound)
+			.labelled("used here, in its own definition")
+			.note(
+				"an assignment names the result of a computation over values that \
+				 already exist, so its result cannot be one of its inputs",
+			)
+			.help("give the result a name of its own"));
+		}
+		let idx = trace_slot_of(trace, m, c, principal.id)?;
 		let knows = trace.slots[idx].known_by_principal(principal.id);
 		if !knows {
 			return Err(VerifpalError::sanity(
@@ -529,14 +547,14 @@ fn construct_trace_render_assignment(
 
 fn construct_trace_render_leaks(
 	trace: &mut ProtocolTrace,
-	declared: &Declarations,
+	m: &Model,
 	principal: &Principal,
 	expr: &Expression,
 	current_phase: i32,
 	declared_at: i32,
 ) -> VResult<()> {
 	for c in &expr.constants {
-		let idx = trace_slot_of(trace, declared, c)?;
+		let idx = trace_slot_of(trace, m, c, principal.id)?;
 		let known = trace.slots[idx].known_by_principal(principal.id);
 		if !known {
 			return Err(VerifpalError::sanity(
@@ -570,14 +588,14 @@ fn construct_trace_render_leaks(
 
 fn construct_trace_render_message(
 	trace: &mut ProtocolTrace,
-	declared: &Declarations,
+	m: &Model,
 	message: &Message,
 	current_phase: i32,
 	declared_at: i32,
 ) -> VResult<()> {
 	sanity_message_principals(message)?;
 	for c in &message.constants {
-		let idx = trace_slot_of(trace, declared, c)?;
+		let idx = trace_slot_of(trace, m, c, message.sender)?;
 		let sender_knows = trace.slots[idx].known_by_principal(message.sender);
 		let recipient_knows = trace.slots[idx].known_by_principal(message.recipient);
 		if !sender_knows {
@@ -607,7 +625,9 @@ fn construct_trace_render_message(
 			.narrow(c.name.to_string())
 			.labelled("nothing new arrives here")
 			.label(
-				trace.slots[idx].declared_span,
+				holding_of(m, c, message.recipient)
+					.filter(|&held| held != message.span)
+					.unwrap_or(trace.slots[idx].declared_span),
 				format!("{} already holds `{}` from here", message.recipient_name, c),
 			)
 			.note(
@@ -671,6 +691,84 @@ mod tests {
 			crate::syntax::parser::parse_string("capability-transcript.vp", &source).unwrap();
 		let trace = crate::protocol::sanity::sanity(&model).unwrap();
 		assert!(trace.capabilities.is_empty());
+	}
+
+	fn rejected(source: &str) -> String {
+		let m = crate::syntax::parser::parse_string("cst.vp", source).expect("parses");
+		crate::protocol::sanity::sanity(&m)
+			.expect_err("must be rejected")
+			.located(&m.file_name, &m.source)
+			.to_string()
+	}
+
+	#[test]
+	fn a_value_sent_again_points_at_where_its_recipient_came_to_hold_it() {
+		let model = |before: &str, bob: &str| {
+			format!(
+				"attacker[active]\nprincipal Alice[\n\tknows private rsd_a\n\t\
+				 rsd_x = HASH(rsd_a)\n\tknows public rsd_p\n]\n{before}\
+				 principal Bob[\n\tknows private rsd_b{bob}\n]\n\
+				 Alice -> Bob: rsd_x, rsd_a, rsd_p\n\
+				 queries[\n\tconfidentiality? rsd_b\n]\n"
+			)
+		};
+		let text = rejected(&model("Alice -> Bob: rsd_x\n", ""));
+		assert!(text.contains("Bob already knows `rsd_x`"), "{text}");
+		assert!(text.contains(" --> cst.vp:11:15\n"), "{text}");
+		assert!(
+			text.contains(
+				" 7 | Alice -> Bob: rsd_x\n   | ------------------- Bob already holds `rsd_x` from here"
+			),
+			"an earlier delivery, not Alice's assignment: {text}"
+		);
+		let text = rejected(&model("", "\n\tknows private rsd_a"));
+		assert!(text.contains("Bob already knows `rsd_a`"), "{text}");
+		assert!(
+			text.contains(
+				"9 |     knows private rsd_a\n   |     ------------------- Bob already holds `rsd_a` from here"
+			),
+			"his own declaration, not Alice's: {text}"
+		);
+		let text = rejected(&model("", "").replace("rsd_x, rsd_a, rsd_p", "rsd_x, rsd_p"));
+		assert!(text.contains("Bob already knows `rsd_p`"), "{text}");
+		assert!(
+			text.contains(
+				"5 |     knows public rsd_p\n   |     ------------------ Bob already holds `rsd_p` from here"
+			),
+			"a public constant is held from its declaration: {text}"
+		);
+	}
+
+	#[test]
+	fn a_value_used_before_its_own_principal_declares_it_says_so() {
+		let model = |body: &str| {
+			format!(
+				"attacker[active]\nprincipal Alice[\n\tknows private ubd_a\n{body}]\n\
+				 queries[\n\tconfidentiality? ubd_a\n]\n"
+			)
+		};
+		let text = rejected(&model("\tubd_x = HASH(ubd_x)\n"));
+		assert!(text.contains("`ubd_x` is computed from itself"), "{text}");
+		assert!(text.contains(" --> cst.vp:4:15\n"), "{text}");
+		assert!(!text.contains("further down"), "{text}");
+		let text = rejected(&model("\tubd_y = HASH(ubd_x)\n\tubd_x = HASH(ubd_a)\n"));
+		assert!(
+			text.contains("`ubd_x` is used before it is declared"),
+			"{text}"
+		);
+		assert!(text.contains(" --> cst.vp:4:15\n"), "{text}");
+		assert!(
+			text.contains("move the declaration of `ubd_x` above this line"),
+			"{text}"
+		);
+		let text = rejected(
+			&model("\tubd_y = HASH(ubd_x)\n")
+				.replace("queries[", "principal Bob[\n\tgenerates ubd_x\n]\nqueries["),
+		);
+		assert!(
+			text.contains("move Bob's block above this one, and have Bob send `ubd_x`"),
+			"{text}"
+		);
 	}
 
 	fn slot(km: &ProtocolTrace, name: &str) -> SlotIdx {

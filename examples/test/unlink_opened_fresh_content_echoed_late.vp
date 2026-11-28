@@ -1,0 +1,65 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: u0 at one session and at two.
+//
+// unlink_opened_fresh_content_echoed.vp with a decrypting Echo and with the
+// nonces leaving Alice by a second route only in phase 1, sealed to Echo. With
+// c1 withheld the attacker can supply Echo's phase-0 input only from that later
+// ciphertext, so Echo's reply is no route to n1 that avoids c1, and the
+// ciphertexts stay unlinked.
+attacker[active]
+
+principal Echo[
+	knows private ske
+	ge = PUBKEY(ske)
+]
+
+Echo -> Alice: [ge]
+
+principal Alice[
+	knows private k
+	generates n1, n2
+	c1 = ENC(k, n1)
+	c2 = ENC(k, n2)
+	t = CONCAT(n1, n2)
+	et = PKE_ENC(ge, t)
+	leaks k
+]
+
+Alice -> Bob: c1, c2
+
+principal Bob[
+	_ = HASH(c1, c2)
+]
+
+Echo -> Carol: [ge]
+
+principal Carol[
+	generates ya, yb
+	y = PKE_ENC(ge, CONCAT(ya, yb))
+]
+
+Carol -> Echo: y
+
+principal Echo[
+	d = PKE_DEC(ske, y)
+]
+
+Echo -> Dave: d
+
+principal Dave[
+	_ = HASH(d)
+]
+
+phase[1]
+
+Alice -> Dave: et
+
+principal Dave[
+	_ = HASH(et)
+]
+
+queries[
+	unlinkability? c1, c2
+]

@@ -158,6 +158,7 @@ pub(crate) struct Model {
 	pub scenarios: Vec<Scenario>,
 	pub scenarios_comments: BracketComments,
 	pub queries: Vec<Query>,
+	pub variants: Vec<Vec<Query>>,
 	pub queries_comments: BracketComments,
 	pub tail_comments: Vec<Comment>,
 }

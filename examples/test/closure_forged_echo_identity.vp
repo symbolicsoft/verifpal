@@ -1,0 +1,46 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0 at one session and at two.
+//
+// closure_forged_echo_container.vp with Bob taking the tuple apart again before
+// he sends, so what he sends is the very term the attacker installed. Bob holds
+// it as a value he computed, not as one he received, and his send is a wire
+// disclosure of x itself. It is still the attacker's minted x and nothing else:
+// the disclosure rests on an install that only a forgery of x could supply, so
+// x is not Alice's copy and s1 stays confidential.
+// closure_forged_echo_identity_leaked.vp is the counterweight.
+attacker[active]
+
+principal Alice[
+	generates k, na, m
+	s1, s2 = THRESHOLD_SPLIT[2](k)
+	ca = PUBKEY(na)
+	x = THRESHOLD_SIGN[forgeable](s1, na, ca, m)
+	leaks na
+]
+
+Alice -> Bob: ca, m
+
+principal Carol[
+	generates kc, nc, mc
+	c1, c2 = THRESHOLD_SPLIT[2](kc)
+	cc = PUBKEY(nc)
+	y = THRESHOLD_SIGN(c1, nc, cc, mc)
+]
+
+Carol -> Bob: y
+
+principal Bob[
+	w1, w2 = SPLIT(CONCAT(y, nil))
+]
+
+Bob -> Dave: w1
+
+principal Dave[
+	_ = HASH(w1)
+]
+
+queries[
+	confidentiality? s1
+]

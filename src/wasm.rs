@@ -373,8 +373,8 @@ pub fn wasm_language(input: &str, request: &str) -> String {
 
 fn suggest(input: &str) -> VResult<Vec<String>> {
 	let m = crate::syntax::parser::parse_string_queries_optional(FILE_NAME, input)?;
-	let km = crate::protocol::sanity::sanity(&m).map_err(|e| e.located(&m.file_name, &m.source))?;
-	Ok(crate::protocol::autoquery::auto_queries(&m, &km)
+	Ok(crate::protocol::autoquery::auto_queries(&m)
+		.map_err(|e| e.located(&m.file_name, &m.source))?
 		.iter()
 		.map(|q| q.to_string())
 		.collect())
@@ -498,6 +498,37 @@ mod tests {
 	fn at(source: &str, needle: &str) -> serde_json::Value {
 		let (line, character) = position(source, needle);
 		serde_json::json!({"line": line, "character": character})
+	}
+
+	#[test]
+	fn an_editor_call_starts_from_an_empty_term_table() {
+		let model = crate::syntax::parser::parse_string(FILE_NAME, PASSIVE).expect("parses");
+		let trace = crate::protocol::sanity::sanity(&model).expect("a sane model");
+		let assigned = trace
+			.slots
+			.iter()
+			.map(|slot| &slot.initial_value)
+			.find(|value| matches!(value, crate::term::Value::Primitive(_)))
+			.expect("the model assigns a primitive");
+		let calls: [(&str, fn() -> String); 3] = [
+			("wasm_check", || wasm_check(PASSIVE)),
+			("wasm_language", || {
+				wasm_language(PASSIVE, r#"{"method":"documentSymbols"}"#)
+			}),
+			("wasm_suggest_queries", || wasm_suggest_queries(PASSIVE)),
+		];
+		for (name, call) in calls {
+			let crate::term::Value::Primitive(held) = crate::term::hashing::hashcons(assigned)
+			else {
+				panic!("a primitive stays one");
+			};
+			assert!(crate::term::hashing::hashconsed(&held));
+			call();
+			assert!(
+				!crate::term::hashing::hashconsed(&held),
+				"{name} keeps the terms of the text before it"
+			);
+		}
 	}
 
 	#[test]

@@ -73,12 +73,9 @@ pub(crate) fn semantic_tokens(doc: &Document) -> Vec<u32> {
 		{
 			modifiers |= 1 << 0;
 		}
-		for (from, to) in line_segments(doc.text(), token.span) {
-			let start = doc.line.position(from);
-			let end = doc.line.position(to);
-			if start.line != end.line {
-				continue;
-			}
+		for part in doc.line.lines(token.span) {
+			let start = doc.line.position(part.start);
+			let end = doc.line.position(part.end);
 			let delta_line = start.line - previous.line;
 			let delta_start = if delta_line == 0 {
 				start.character - previous.character
@@ -88,7 +85,7 @@ pub(crate) fn semantic_tokens(doc: &Document) -> Vec<u32> {
 			data.extend_from_slice(&[
 				delta_line,
 				delta_start,
-				end.character.saturating_sub(start.character),
+				end.character - start.character,
 				ty,
 				modifiers,
 			]);
@@ -96,21 +93,6 @@ pub(crate) fn semantic_tokens(doc: &Document) -> Vec<u32> {
 		}
 	}
 	data
-}
-
-fn line_segments(text: &str, span: Span) -> Vec<(usize, usize)> {
-	let end = span.end.min(text.len());
-	let start = span.start.min(end);
-	let mut segments = Vec::new();
-	let mut from = start;
-	for (i, byte) in text.as_bytes()[start..end].iter().enumerate() {
-		if *byte == b'\n' {
-			segments.push((from, start + i));
-			from = start + i + 1;
-		}
-	}
-	segments.push((from, end.max(from)));
-	segments
 }
 
 fn is_nil(text: &str) -> bool {
@@ -233,18 +215,22 @@ fn constant_hover(doc: &Document, token: &Token) -> Option<String> {
 		slot.initial_value,
 		trace.principal_name(slot.creator)
 	);
-	if !slot.known_by.is_empty() {
-		let known: Vec<String> = slot
-			.known_by
+	let mut known: Vec<String> = Vec::new();
+	for (i, &(holder, sender)) in slot.known_by.iter().enumerate() {
+		if slot.known_by[..i]
 			.iter()
-			.map(|&(recipient, sender)| {
-				format!(
-					"{} (from {})",
-					trace.principal_name(recipient),
-					trace.principal_name(sender)
-				)
-			})
-			.collect();
+			.any(|&(earlier, _)| earlier == holder)
+		{
+			continue;
+		}
+		let name = trace.principal_name(holder);
+		known.push(if sender == holder {
+			name.to_string()
+		} else {
+			format!("{name} (from {})", trace.principal_name(sender))
+		});
+	}
+	if !known.is_empty() {
 		out.push_str(&format!("\n\nKnown by: {}", known.join(", ")));
 	}
 	if !slot.phases.is_empty() {
@@ -381,34 +367,41 @@ pub(crate) fn folding_ranges(doc: &Document) -> Vec<FoldingRange> {
 	ranges
 }
 
-fn block_close(text: &str, from: usize) -> Option<usize> {
+fn code(text: &str, from: usize) -> impl Iterator<Item = (usize, u8)> + '_ {
 	let bytes = text.as_bytes();
-	let mut i = from;
+	let mut at = from;
+	std::iter::from_fn(move || {
+		loop {
+			let rest = bytes.get(at..)?;
+			if rest.starts_with(b"//") {
+				at += rest.iter().position(|&b| b == b'\n').unwrap_or(rest.len());
+			} else if rest.starts_with(b"/*") {
+				at += rest[2..]
+					.windows(2)
+					.position(|pair| pair == b"*/")
+					.map_or(rest.len(), |close| close + 4);
+			} else {
+				let byte = *rest.first()?;
+				at += 1;
+				return Some((at - 1, byte));
+			}
+		}
+	})
+}
+
+fn block_close(text: &str, from: usize) -> Option<usize> {
 	let mut depth = 0usize;
-	while i < bytes.len() {
-		match bytes[i] {
-			b'/' if bytes.get(i + 1) == Some(&b'/') => {
-				while i < bytes.len() && bytes[i] != b'\n' {
-					i += 1;
-				}
-			}
-			b'/' if bytes.get(i + 1) == Some(&b'*') => {
-				i += 2;
-				while i + 1 < bytes.len() && !(bytes[i] == b'*' && bytes[i + 1] == b'/') {
-					i += 1;
-				}
-				i += 1;
-			}
+	for (at, byte) in code(text, from) {
+		match byte {
 			b'[' => depth += 1,
 			b']' => {
 				depth = depth.checked_sub(1)?;
 				if depth == 0 {
-					return Some(i + 1);
+					return Some(at + 1);
 				}
 			}
 			_ => {}
 		}
-		i += 1;
 	}
 	None
 }
@@ -670,25 +663,25 @@ pub(crate) fn signature_help(doc: &Document, position: Position) -> Option<Signa
 }
 
 fn enclosing_call(before: &str) -> Option<(&str, usize)> {
-	let bytes = before.as_bytes();
-	let mut depth = 0i32;
-	let mut commas = 0usize;
-	let mut i = bytes.len();
-	while i > 0 {
-		i -= 1;
-		match bytes[i] {
-			b')' => depth += 1,
-			b'(' => {
-				if depth == 0 {
-					return Some((callee(&before[..i])?, commas));
-				}
-				depth -= 1;
+	let mut open: Vec<(usize, usize)> = Vec::new();
+	for (at, byte) in code(before, 0) {
+		match byte {
+			b'(' | b'[' => open.push((at, 0)),
+			b')' | b']' => {
+				open.pop();
 			}
-			b',' if depth == 0 => commas += 1,
+			b',' => {
+				if let Some((_, commas)) = open.last_mut() {
+					*commas += 1;
+				}
+			}
 			_ => {}
 		}
 	}
-	None
+	let &(at, commas) = open
+		.iter()
+		.rfind(|&&(at, _)| before.as_bytes()[at] == b'(')?;
+	Some((callee(&before[..at])?, commas))
 }
 
 fn callee(head: &str) -> Option<&str> {
@@ -744,46 +737,30 @@ fn is_placeholder_name(name: &str) -> bool {
 }
 
 fn argument_offsets(text: &str, after_name: usize) -> Vec<usize> {
-	let bytes = text.as_bytes();
-	let mut i = after_name;
-	while i < bytes.len() && (bytes[i] as char).is_whitespace() {
-		i += 1;
+	let mut code = code(text, after_name)
+		.filter(|(_, byte)| !byte.is_ascii_whitespace())
+		.peekable();
+	if code.next_if(|&(_, byte)| byte == b'[').is_some() {
+		code.find(|&(_, byte)| byte == b']');
 	}
-	if i < bytes.len() && bytes[i] == b'[' {
-		while i < bytes.len() && bytes[i] != b']' {
-			i += 1;
-		}
-		i += 1;
-		while i < bytes.len() && (bytes[i] as char).is_whitespace() {
-			i += 1;
-		}
-	}
-	if i >= bytes.len() || bytes[i] != b'(' {
+	if code.next_if(|&(_, byte)| byte == b'(').is_none() {
 		return Vec::new();
 	}
-	i += 1;
 	let mut starts = Vec::new();
-	let mut depth = 0i32;
+	let mut depth = 0usize;
 	let mut expecting = true;
-	while i < bytes.len() {
-		match bytes[i] {
-			b'(' => depth += 1,
-			b')' => {
-				if depth == 0 {
-					break;
-				}
-				depth -= 1;
-			}
+	for (at, byte) in code {
+		match byte {
+			b'(' | b'[' => depth += 1,
+			b')' | b']' if depth == 0 => break,
+			b')' | b']' => depth -= 1,
 			b',' if depth == 0 => expecting = true,
-			c if (c as char).is_whitespace() => {}
-			_ => {
-				if expecting {
-					starts.push(i);
-					expecting = false;
-				}
+			_ if expecting => {
+				starts.push(at);
+				expecting = false;
 			}
+			_ => {}
 		}
-		i += 1;
 	}
 	starts
 }
@@ -858,6 +835,44 @@ queries[\n\
 			panic!("expected markup");
 		};
 		assert_eq!(used.value, m.value, "a use resolves to the slot it names");
+	}
+
+	#[test]
+	fn a_holder_is_named_once_and_with_a_sender_only_for_what_it_received() {
+		let src = "attacker[passive]\n\
+			principal Alice[\n\
+			\tknows public hk_c\n\
+			\tknows private hk_psk\n\
+			\tgenerates hk_m\n\
+			\thk_e = ENC(hk_psk, hk_m)\n\
+			]\n\
+			Alice -> Bob: hk_e\n\
+			principal Bob[\n\
+			\tknows public hk_c\n\
+			\tknows private hk_psk\n\
+			\t_ = DEC(hk_psk, hk_e)\n\
+			]\n\
+			principal Carol[\n\
+			\tknows public hk_c\n\
+			]\n\
+			queries[\n\
+			\tconfidentiality? hk_m\n\
+			]\n";
+		let d = &open("hk.vp", src);
+		let known = |needle: &str| {
+			let at = d.line.position(src.find(needle).expect("in the source"));
+			let lsp_types::HoverContents::Markup(m) = hover(d, at).expect("a hover").contents
+			else {
+				panic!("expected markup");
+			};
+			m.value
+				.split("\n\n")
+				.find_map(|part| part.strip_prefix("Known by: ").map(str::to_string))
+		};
+		assert_eq!(known("hk_c").as_deref(), Some("Bob, Carol"));
+		assert_eq!(known("hk_psk").as_deref(), Some("Bob"));
+		assert_eq!(known("hk_e").as_deref(), Some("Bob (from Alice)"));
+		assert_eq!(known("hk_m"), None);
 	}
 
 	#[test]
@@ -1136,6 +1151,146 @@ queries[\n\
 		let data = semantic_tokens(d);
 		let comments = data.chunks(5).filter(|c| c[3] == comment).count();
 		assert_eq!(comments, 2, "{data:?}");
+	}
+
+	#[test]
+	fn a_block_comment_token_covers_the_text_of_each_line_and_no_line_ending() {
+		let comment = TOKEN_TYPES
+			.iter()
+			.position(|t| *t == "comment")
+			.expect("comment") as u32;
+		for ending in ["\n", "\r\n", "\r"] {
+			let src = "/* one\n\n   three */\nattacker[passive]\n".replace('\n', ending);
+			let d = &open("bl.vp", &src);
+			let data = semantic_tokens(d);
+			let comments: Vec<&[u32]> = data.chunks(5).filter(|c| c[3] == comment).collect();
+			assert_eq!(
+				comments,
+				[[0, 0, 6, comment, 0], [2, 0, 11, comment, 0]],
+				"{ending:?}"
+			);
+		}
+	}
+
+	#[test]
+	fn a_comment_between_arguments_is_neither_an_argument_nor_a_separator() {
+		let src = "attacker[passive]\n\
+			principal Alice[\n\
+			\tknows private ca_k\n\
+			\tgenerates ca_n, ca_m\n\
+			\tknows public ca_ad\n\
+			\tca_e = AEAD_ENC(\n\
+			\t\tca_k, // the key, shared in advance\n\
+			\t\tca_n,\n\
+			\t\tca_m, /* plaintext, fresh (see the note) */\n\
+			\t\tca_ad\n\
+			\t)\n\
+			\tca_f = AEAD_ENC(ca_k, /* nonce (reused, see note */ ca_n, ca_m, ca_ad)\n\
+			]\n\
+			queries[\n\
+			\tconfidentiality? ca_m\n\
+			]\n";
+		let d = &open("ca.vp", src);
+		assert!(d.error.is_none(), "{:?}", d.error);
+		let whole = Range::new(Position::new(0, 0), d.line.end());
+		let hints: Vec<(String, &str)> = inlay_hints(d, whole)
+			.into_iter()
+			.map(|hint| {
+				let InlayHintLabel::String(label) = hint.label else {
+					panic!("a plain label");
+				};
+				(label, leading_word(&src[d.line.offset(hint.position)..]))
+			})
+			.collect();
+		let named = [
+			("key: ", "ca_k"),
+			("nonce: ", "ca_n"),
+			("plaintext: ", "ca_m"),
+			("ad: ", "ca_ad"),
+		];
+		let twice: Vec<(String, &str)> = named
+			.iter()
+			.chain(&named)
+			.map(|(label, argument)| (label.to_string(), *argument))
+			.collect();
+		assert_eq!(hints, twice);
+		for (needle, active) in [
+			("ca_k, //", 0),
+			("ca_n,\n", 1),
+			("ca_m, /*", 2),
+			("ca_ad\n\t)", 3),
+			("ca_n, ca_m, ca_ad)", 1),
+			("ca_m, ca_ad)", 2),
+		] {
+			let at = d.line.position(src.find(needle).expect("in the source"));
+			let help = signature_help(d, at).expect("help inside the call");
+			assert_eq!(help.active_parameter, Some(active), "{needle:?}");
+		}
+		let commented = src.replace(
+			"principal Alice[\n",
+			"// AEAD_ENC(the key, the nonce\nprincipal Alice[\n",
+		);
+		let d = &open("cb.vp", &commented);
+		let at = d
+			.line
+			.position(commented.find("ca_k\n").expect("in the source"));
+		assert!(
+			signature_help(d, at).is_none(),
+			"a parenthesis inside a comment opens no call"
+		);
+	}
+
+	#[test]
+	fn a_comma_between_capabilities_separates_no_arguments() {
+		let src = "attacker[passive]\n\
+			principal Alice[\n\
+			\tknows private nb_k\n\
+			\tgenerates nb_n, nb_m\n\
+			\tknows public nb_ad\n\
+			\tnb_d = AEAD_DEC(nb_k, nb_n, AEAD_ENC[weak, forgeable](nb_k, nb_n, nb_m, nb_ad), nb_ad)\n\
+			]\n\
+			queries[\n\
+			\tconfidentiality? nb_m\n\
+			]\n";
+		let d = &open("nb.vp", src);
+		let whole = Range::new(Position::new(0, 0), d.line.end());
+		let hints: Vec<(String, &str)> = inlay_hints(d, whole)
+			.into_iter()
+			.map(|hint| {
+				let InlayHintLabel::String(label) = hint.label else {
+					panic!("a plain label");
+				};
+				(label, leading_word(&src[d.line.offset(hint.position)..]))
+			})
+			.collect();
+		let expected = [
+			("key: ", "nb_k"),
+			("nonce: ", "nb_n"),
+			("ciphertext: ", "AEAD_ENC"),
+			("ad: ", "nb_ad"),
+			("key: ", "nb_k"),
+			("nonce: ", "nb_n"),
+			("plaintext: ", "nb_m"),
+			("ad: ", "nb_ad"),
+		]
+		.map(|(label, argument)| (label.to_string(), argument));
+		assert_eq!(hints, expected);
+		let last = d
+			.line
+			.position(src.find("nb_ad)\n").expect("in the source"));
+		assert_eq!(
+			signature_help(d, last).expect("help").active_parameter,
+			Some(3)
+		);
+		let between = d
+			.line
+			.position(src.find("forgeable").expect("in the source"));
+		let outer = signature_help(d, between).expect("help");
+		assert_eq!(
+			outer.signatures[0].label,
+			"AEAD_DEC(key, nonce, ciphertext, ad)"
+		);
+		assert_eq!(outer.active_parameter, Some(2));
 	}
 
 	#[test]

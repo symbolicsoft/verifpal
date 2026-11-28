@@ -19,7 +19,6 @@
 \usepackage{longtable}
 \usepackage{enumitem}
 \usepackage{caption}
-\usepackage{listings}
 \usepackage{microtype}
 \usepackage[hidelinks]{hyperref}
 
@@ -50,6 +49,9 @@
 \newcommand{\vpdagger}[1]{\ensuremath{{#1}^{\dagger}}}
 \newcommand{\vpguarded}[1]{[#1]}
 \newcommand{\vpcode}[1]{\texttt{#1}}
+\DeclareRobustCommand{\vpfile}[1]{%
+  {\ttfamily\let\vpfileus\_\def\_{\vpfileus\allowbreak}#1}}
+\newcommand{\vpwirenote}[1]{\textnormal{(#1)}}
 \newcommand{\vpprecondition}[1]{%
   {\normalfont\footnotesize\color{vpslate}\textsf{precondition}\enspace#1}}
 
@@ -105,6 +107,7 @@
   vpplain/.style={draw=vpink!75},
   vpforged/.style={draw=vpaccent,line width=0.7pt},
   vpreplay/.style={draw=vpaccent,line width=0.7pt,dash pattern=on 3pt off 1.6pt},
+  vpdropped/.style={draw=vpaccent,line width=0.7pt,-{Rays[n=4,length=2mm,width=2mm]}},
   vpmuted/.style={draw=vprule,line width=0.55pt},
   vplabel/.style={font=\footnotesize,fill=white,inner sep=2.5pt,text=vpink},
   vplabeladv/.style={vplabel,text=vpaccent},
@@ -113,7 +116,6 @@
   vpboxtext/.style={text=vpink!85},
   vpnote/.style={draw=vprule,fill=vpband,line width=0.5pt,rounded corners=1.5pt,
     font=\scriptsize,text=vpslate,inner sep=3pt},
-  vpnoteadv/.style={vpnote,draw=vpaccent!45,fill=white,text=vpaccent},
   vpnum/.style={font=\scriptsize,text=vpslate,inner sep=0pt,anchor=east},
   vpnumadv/.style={vpnum,text=vpaccent},
   vpnumwide/.style={vpnum},
@@ -386,39 +388,36 @@
   {\scriptsize\textsf{#1}\,\ensuremath{\rightarrow}\,\textsf{#2}}%
   \begingroup\parfillskip=0pt\par\endgroup}
 
-% Model source listings.
-\lstdefinelanguage{Verifpal}{
-  morekeywords={attacker,active,passive,principal,knows,generates,leaks,phase,
-    queries,scenarios,precondition,public,private,confidentiality,
-    authentication,freshness,unlinkability,equivalence,weak,forgeable,malleable,from},
-  morekeywords=[2]{ASSERT,CONCAT,SPLIT,HASH,HKDF,AEAD_ENC,AEAD_DEC,ENC,DEC,
-    MAC,PUBKEY,DH_KEX,SIGN,SIGNVERIF,PKE_ENC,PKE_DEC,THRESHOLD_SPLIT,THRESHOLD_JOIN,THRESHOLD_SIGN,
-    RINGSIGN,RINGSIGNVERIF,BLIND,UNBLIND,KEM_ENCAP,KEM_DECAP},
-  sensitive=false,
-  morecomment=[l]{//},
-  morecomment=[s]{/*}{*/},
-  literate={->}{{$\rightarrow$}}2 {→}{{$\rightarrow$}}1,
-}
-\lstset{
-  language=Verifpal,
-  basicstyle=\ttfamily\footnotesize,
-  keywordstyle=\color{vpaccent},
-  keywordstyle=[2]\color{vpslate}\bfseries,
-  commentstyle=\color{vpslate}\itshape,
-  showstringspaces=false,
-  breaklines=true,
-  breakindent=2em,
-  columns=fullflexible,
-  keepspaces=true,
-  tabsize=4,
-  frame=leftline,
-  framesep=6pt,
-  rulecolor=\color{vprule},
-  xleftmargin=10pt,
-  numbers=left,
-  numberstyle=\tiny\color{vpslate!70},
-  numbersep=8pt,
-}
+% Verbatim text: model source and diagnostics. Each line of the text is one
+% \vpline, given the width of its indentation in columns; a line too long for
+% the measure wraps and hangs under itself. The text is escaped, never read
+% under changed category codes, so it can stand inside any argument.
+\newcommand{\vpverbatim}{\ttfamily\frenchspacing\raggedright}
+\newcommand{\vpline}[2]{%
+  \hangindent=\dimexpr#1\fontdimen2\font+2em\relax\hangafter=1
+  \noindent\strut\hskip#1\fontdimen2\font\relax#2\strut\par}
+\newcommand{\vpsrckeyword}[1]{{\color{vpaccent}#1}}
+\newcommand{\vpsrcprimitive}[1]{{\color{vpslate}\bfseries#1}}
+\newcommand{\vpsrccomment}[1]{{\color{vpslate}\itshape#1}}
+
+% Model source listings: numbered lines against a rule that runs unbroken down
+% the left, each line a box as tall as its wrapped text.
+\newcounter{vpsrcline}
+\newenvironment{vplisting}{%
+  \par\addvspace{\medskipamount}%
+  \setcounter{vpsrcline}{0}%
+  \vpverbatim\footnotesize
+  \parskip=0pt\lineskip=0pt\lineskiplimit=\maxdimen
+  \let\vpplainline\vpline
+  \renewcommand{\vpline}[2]{%
+    \stepcounter{vpsrcline}%
+    \noindent\hbox{%
+      \hbox to 2pt{\hss\normalfont\tiny\color{vpslate!70}\arabic{vpsrcline}}%
+      \hskip2pt{\color{vprule}\vrule width 0.4pt}\hskip6pt
+      \vtop{\hsize=\dimexpr\linewidth-10.4pt\relax\lineskiplimit=0pt
+        \vpplainline{##1}{##2}}}\par}%
+}{%
+  \par\addvspace{\medskipamount}}
 %% --- END verifpal preamble ---
 \ifPDFTeX\usepackage{lmodern}\fi
 \usepackage{fancyhdr}
@@ -475,11 +474,11 @@
 {\color{vprule}\hrule height 0.5pt}
 \vspace{2.4ex}
 
-\noindent This report describes the analysis of the Verifpal model \texttt{golden.vp} against an active attacker, with each principal running 2 concurrent sessions. Of its 2 queries, 1 was broken. Every attack reported here is a witness against the model as written. A query reported as holding means that this search found no attack at these parameters, which is not a proof that none exists.
+\noindent This report describes the analysis of the Verifpal model \vpfile{golden.vp} against an active attacker, with each principal running 2 concurrent sessions. Of its 2 queries, 1 was broken. Every attack reported here is a witness against the model as written. A query reported as holding means that this search found no attack at these parameters, which is not a proof that none exists.
 
 
 
-\section{\texorpdfstring{\texttt{golden.vp}}{golden.vp}}
+\section{\texorpdfstring{\vpfile{golden.vp}}{golden.vp}}
 \label{sec:golden-vp-0}
 
 \noindent\begin{tabular}{@{}>{\sffamily\small\color{vpslate}}l@{\hspace{1.6em}}>{\raggedright\arraybackslash}p{0.72\linewidth}@{}}
@@ -552,8 +551,7 @@ Analysis time & 12 ms \\
 \vprun{2}{vpnumwide}{1--3}{computes}
 \vphopforged{1}{2}{0}{vpforged}{vpnumadv}{4}{\vpdagger{\vpguarded{\vpterm{\vpconst{ga}}}}, \vpdagger{\vpterm{\vpconst{e}}}}
 \vpmark{0}{vpnote}{vpnumadv}{5}{check passes}
-\vpmark{1}{vpnoteadv}{vpnumadv}{6}{check defeated}
-\vprun{2}{vpnumwide}{7--8}{computes}
+\vprun{2}{vpnumwide}{6--7}{computes}
 \end{vpdiagram}
 \captionof{figure}{How the attacker breaks \textnormal{\textsf{confidentiality?}~\vpterm{\vpconst{m}}}. Substituted values carry a dagger.}
 \label{fig:golden-vp-0-attack-0}
@@ -563,11 +561,10 @@ Analysis time & 12 ms \\
 
 \begin{vptrace}
 \item \vpactor{Attacker} constructs \vpterm{\vpprimo{PUBKEY}(\vpconst{nil})} from nil.
-\item \vpactor{Attacker} is handed \vpterm{\vpconst{b}} by a leaks declaration.
+\item \vpactor{Attacker} is handed \vpterm{\vpconst{b}} by a leaks declaration in \vpactor{Bob}.
 \item \vpactor{Attacker} obtains \vpterm{\vpconst{ga}} on the wire.
 \item \vpactor{Attacker} replaces \vpterm{\vpconst{ga}} with \vpterm{\vpprimo{PUBKEY}(\vpconst{nil})}.\vpon{Alice}{Bob}
 \item \vpactor{Bob}'s \vpterm{\vpprim{AEAD}{DEC}\vpchecked{}(\vpconst{k},\vpsep \vpconst{n},\vpsep \vpconst{e},\vpsep \vpconst{ad})} check passes on an attacker-controlled key.
-\item \vpactor{Alice}'s \vpterm{\vpprimo{SIGNVERIF}} check is defeated, accepting \vpterm{\vpprimo{PUBKEY}(\vpconst{nil})}.
 \item \vpactor{Attacker} computes \vpterm{\vpprim{DH}{KEX}(\vpprimo{PUBKEY}(\vpconst{a}),\vpsep \vpconst{nil})}, obtaining k.
 \item \vpactor{Attacker} decrypts \vpterm{\vpconst{e}}, obtaining m.
 \end{vptrace}
@@ -595,34 +592,34 @@ Analysis time & 12 ms \\
 
 \section{Model source}
 
-\subsection{\texorpdfstring{\texttt{golden.vp}}{golden.vp}}
+\subsection{\texorpdfstring{\vpfile{golden.vp}}{golden.vp}}
 \label{lst:golden-vp-0}
 %% --- BEGIN verifpal listing: golden-vp-0 ---
-\begin{lstlisting}
-attacker[active]
-
-principal Alice[
-	generates a
-	ga = PUBKEY(a)
-	knows private m
-	knows private n
-	e = AEAD_ENC(k, n, m, ad)
-]
-
-Alice -> Bob: [ga], e
-
-phase[1]
-
-principal Bob[
-	leaks b
-	d = AEAD_DEC(k, n, e, ad)?
-]
-
-queries[
-	confidentiality? m
-	authentication? Alice -> Bob: e
-]
-\end{lstlisting}
+\begin{vplisting}
+\vpline{0}{attacker[active]}
+\vpline{0}{}
+\vpline{0}{principal Alice[}
+\vpline{4}{generates a}
+\vpline{4}{ga = PUBKEY(a)}
+\vpline{4}{knows private m}
+\vpline{4}{knows private n}
+\vpline{4}{e = AEAD\_ENC(k, n, m, ad)}
+\vpline{0}{]}
+\vpline{0}{}
+\vpline{0}{Alice -\textgreater{} Bob: [ga], e}
+\vpline{0}{}
+\vpline{0}{phase[1]}
+\vpline{0}{}
+\vpline{0}{principal Bob[}
+\vpline{4}{leaks b}
+\vpline{4}{d = AEAD\_DEC(k, n, e, ad)?}
+\vpline{0}{]}
+\vpline{0}{}
+\vpline{0}{queries[}
+\vpline{4}{confidentiality? m}
+\vpline{4}{authentication? Alice -\textgreater{} Bob: e}
+\vpline{0}{]}
+\end{vplisting}
 %% --- END verifpal listing: golden-vp-0 ---
 
 

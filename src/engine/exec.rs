@@ -4,7 +4,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use super::knowledge::{Knowledge, Origin};
+use super::knowledge::{Knowledge, Need, Origin, Point};
 use super::program::{DeliveryIdx, Event, Program, RunIdx, StepIdx};
 use crate::protocol::ProtocolTrace;
 use crate::protocol::SlotIdx;
@@ -87,6 +87,7 @@ pub(crate) struct Held {
 	pub(crate) sender: Option<RunIdx>,
 	pub(crate) installed: Option<Arc<[Value]>>,
 	pub(crate) authored: bool,
+	pub(crate) fed: Arc<[(RunIdx, SlotIdx)]>,
 }
 
 #[derive(Clone, Debug)]
@@ -102,6 +103,7 @@ pub(crate) struct RunState {
 	pub(crate) halted: Option<Halt>,
 	pub(crate) frozen: bool,
 	pub(crate) idle: bool,
+	pub(crate) past: Arc<[Point]>,
 }
 
 impl RunState {
@@ -119,6 +121,7 @@ pub(crate) struct Execution {
 	pub(crate) runs: IndexVec<RunIdx, RunState>,
 	pub(crate) knowledge: Knowledge,
 	pub(crate) sent: IndexVec<DeliveryIdx, Option<Vec<Value>>>,
+	pasts: IndexVec<DeliveryIdx, Arc<[Point]>>,
 	pub(crate) order: Vec<Taken>,
 	pub(crate) stuck: Vec<(RunIdx, SlotIdx)>,
 	pub(crate) withheld: Vec<(RunIdx, SlotIdx)>,
@@ -130,6 +133,7 @@ pub(crate) struct Taken {
 	pub(crate) run: RunIdx,
 	pub(crate) step: StepIdx,
 	pub(crate) known: usize,
+	pub(crate) phase: i32,
 }
 
 impl Execution {
@@ -219,7 +223,11 @@ fn deliverable(v: &Value) -> bool {
 		})
 }
 
-fn installed_components(value: &Value, knowledge: &Knowledge) -> Arc<[Value]> {
+fn installed_components(
+	value: &Value,
+	knowledge: &Knowledge,
+	runs: &IndexVec<RunIdx, RunState>,
+) -> Arc<[Value]> {
 	let capabilities = knowledge.capabilities();
 	let _memo = crate::theory::DeductionMemo::scoped(capabilities, &knowledge.state);
 	let mut seen = crate::term::hashing::TermSet::default();
@@ -235,9 +243,70 @@ fn installed_components(value: &Value, knowledge: &Knowledge) -> Arc<[Value]> {
 		{
 			pending.extend(recipe.supplied().iter().cloned());
 		}
+		pending.extend(
+			knowledge
+				.rests_on(&value)
+				.filter_map(|(run, slot)| runs[run].held(slot)?.installed.as_deref())
+				.flatten()
+				.cloned(),
+		);
 		out.push(value);
 	}
 	out.into()
+}
+
+fn fed_through(
+	env: &IndexVec<SlotIdx, Option<Held>>,
+	reads: &[SlotIdx],
+) -> Arc<[(RunIdx, SlotIdx)]> {
+	let mut out: Vec<(RunIdx, SlotIdx)> = Vec::new();
+	for held in reads.iter().filter_map(|&slot| env.get(slot)?.as_ref()) {
+		for point in held.fed.iter() {
+			if !out.contains(point) {
+				out.push(*point);
+			}
+		}
+	}
+	if out.is_empty() {
+		Arc::default()
+	} else {
+		out.into()
+	}
+}
+
+pub(crate) fn installed_into<'e>(
+	runs: &'e IndexVec<RunIdx, RunState>,
+	held: &'e Held,
+) -> impl Iterator<Item = &'e Held> {
+	held.fed
+		.iter()
+		.filter_map(|&(run, slot)| runs[run].held(slot))
+}
+
+fn needs(cx: &Context, runs: &IndexVec<RunIdx, RunState>, held: &Held) -> Arc<[Need]> {
+	held.fed
+		.iter()
+		.filter_map(|&(run, slot)| {
+			let program = &cx.program.runs[run];
+			let step = *program.step_of_slot.get(&slot)?;
+			Some(Need {
+				at: (run, slot),
+				phase: program.steps[step].phase,
+				value: runs[run].held(slot)?.value.clone(),
+			})
+		})
+		.collect()
+}
+
+fn after(past: &Arc<[Point]>, more: impl IntoIterator<Item = Point>) -> Arc<[Point]> {
+	let mut joined: Option<Vec<Point>> = None;
+	for point in more {
+		let held = joined.as_deref().unwrap_or(past);
+		if !held.contains(&point) {
+			joined.get_or_insert_with(|| past.to_vec()).push(point);
+		}
+	}
+	joined.map_or_else(|| Arc::clone(past), Arc::from)
 }
 
 fn delivered(installs: &Installs, run: RunIdx, slot: SlotIdx) -> Option<Value> {
@@ -305,11 +374,13 @@ pub(crate) fn execute(cx: &Context, installs: &Installs) -> Result<Execution, Ca
 					halted: None,
 					frozen: idle,
 					idle,
+					past: Arc::default(),
 				}
 			})
 			.collect(),
 		knowledge: cx.initial.clone(),
 		sent: IndexVec::from_elem(None, program.deliveries.len()),
+		pasts: IndexVec::from_elem(Arc::default(), program.deliveries.len()),
 		order: Vec::new(),
 		stuck: Vec::new(),
 		withheld: Vec::new(),
@@ -403,6 +474,7 @@ fn advance(
 			run: r,
 			step: pc,
 			known,
+			phase,
 		});
 		ex.runs[r].pc = pc.next();
 		progress = true;
@@ -547,12 +619,14 @@ fn assign(cx: &Context, ex: &mut Execution, r: RunIdx, slot: SlotIdx) {
 		});
 		return;
 	}
+	let fed = fed_through(&ex.runs[r].env, km.reads(slot));
 	ex.runs[r].env[slot] = Some(Held {
 		value,
 		pre,
 		sender: None,
 		installed: None,
 		authored: false,
+		fed,
 	});
 }
 
@@ -574,13 +648,16 @@ fn step_run(
 				sender: None,
 				installed: None,
 				authored: false,
+				fed: Arc::default(),
 			});
 		}
 		Event::Assign(slot) => assign(cx, ex, r, slot),
 		Event::Leak(slot) => {
 			if let Some(h) = ex.runs[r].held(slot).filter(|h| !h.authored) {
-				let v = h.value.clone();
-				ex.knowledge.learn(&v, Origin::Leak { run: r, slot });
+				let (v, needs) = (h.value.clone(), needs(cx, &ex.runs, h));
+				let past = Arc::clone(&ex.runs[r].past);
+				ex.knowledge
+					.disclose(&v, Origin::Leak { run: r, slot }, past, needs);
 			}
 		}
 		Event::Send(d) => {
@@ -591,11 +668,15 @@ fn step_run(
 				let v =
 					held.map_or_else(|| km.slots[slot].initial_value.clone(), |h| h.value.clone());
 				if !held.is_some_and(|h| h.authored) {
-					ex.knowledge.learn(&v, Origin::Wire { run: r, slot });
+					let needs = held.map(|h| needs(cx, &ex.runs, h)).unwrap_or_default();
+					let past = Arc::clone(&ex.runs[r].past);
+					ex.knowledge
+						.disclose(&v, Origin::Wire { run: r, slot }, past, needs);
 				}
 				values.push(v);
 			}
 			ex.sent[d] = Some(values);
+			ex.pasts[d] = Arc::clone(&ex.runs[r].past);
 		}
 		Event::Recv(d) => {
 			let delivery = &cx.program.deliveries[d];
@@ -626,19 +707,30 @@ fn step_run(
 					(None, None) => return false,
 				}
 			}
+			let installs = received
+				.iter()
+				.filter(|&&(_, _, installed)| installed)
+				.map(|&(slot, _, _)| (r, slot));
+			let carried = sent.iter().flat_map(|_| ex.pasts[d].iter().copied());
+			ex.runs[r].past = after(&ex.runs[r].past, carried.chain(installs));
 			for (slot, value, installed) in received {
-				let components = installed.then(|| installed_components(&value, &ex.knowledge));
+				let components =
+					installed.then(|| installed_components(&value, &ex.knowledge, &ex.runs));
 				ex.knowledge.note_protocol(&value, &value, false);
-				let relayed = !installed
-					&& ex.runs[delivery.sender]
-						.held(slot)
-						.is_some_and(|h| h.authored);
+				let forwarded = ex.runs[delivery.sender].held(slot).filter(|_| !installed);
+				let relayed = forwarded.is_some_and(|h| h.authored);
+				let fed = match forwarded {
+					_ if installed => [(r, slot)].into(),
+					Some(h) => Arc::clone(&h.fed),
+					None => Arc::default(),
+				};
 				ex.runs[r].env[slot] = Some(Held {
 					pre: value.clone(),
 					value,
 					sender: Some(delivery.sender),
 					installed: components,
 					authored: installed || relayed,
+					fed,
 				});
 			}
 		}

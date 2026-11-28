@@ -1,0 +1,52 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: u1 at one session and at two.
+//
+// unlink_container_echo_laundered.vp with Alice sending b as well: both values
+// are observed from Alice's own send, and the leaked s links them.
+attacker[active]
+
+principal Alice[
+	knows private s
+	generates n1, n2
+	a = HASH(s, n1)
+	b = HASH(s, n2)
+	leaks s
+]
+
+Alice -> Relay: n1, n2, a, b
+
+principal Relay[
+	knows private kr
+	w = ENC(kr, a)
+]
+
+Relay -> Bob: n1, n2, w
+
+principal Bob[
+	_ = HASH(n1, n2, w)
+]
+
+principal Carol[
+	knows private kr
+	generates gj
+	y = ENC(kr, gj)
+]
+
+Carol -> Opener: y
+
+principal Opener[
+	knows private kr
+	v = DEC(kr, y)
+]
+
+Opener -> Dave: v
+
+principal Dave[
+	_ = HASH(v)
+]
+
+queries[
+	unlinkability? a, b
+]

@@ -1,0 +1,41 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1 at one session and at two.
+//
+// solver_receiver_alias_echo.vp with the echo sealed under a public key and
+// Carol encrypting to the key she checked. The attacker replaces Alice's ga
+// with its own public key at Bob and at Carol alike, Carol's check of Bob's
+// echo against her copy passes, and she encrypts m to the attacker. The search
+// once never returned on this model either, for the same self-bound variable.
+attacker[active]
+
+principal Alice[
+	generates a
+	ga = PUBKEY(a)
+]
+
+Alice -> Bob: ga
+
+Alice -> Carol: ga
+
+principal Bob[
+	knows public pk
+	sealed = ENC(pk, ga)
+]
+
+Bob -> Carol: sealed
+
+principal Carol[
+	knows public pk
+	ga_c = DEC(pk, sealed)
+	_ = ASSERT(ga_c, ga)?
+	generates m
+	e = PKE_ENC(ga, m)
+]
+
+Carol -> Alice: e
+
+queries[
+	confidentiality? m
+]

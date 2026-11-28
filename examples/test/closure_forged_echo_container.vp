@@ -1,0 +1,50 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0 at one session and at two.
+//
+// Alice signs m with her share s1 and discloses the nonce, the commitment and
+// the message, but the partial x never leaves her. It is declared `forgeable`,
+// so the attacker can mint a term equal to x, and a minted partial reveals no
+// share (threshold_sign_forged_partial_keeps_share.vp). Here the attacker
+// installs its minted x as Bob's y, and Bob wraps what he received in a tuple
+// and sends it on. That tuple is a principal's send, and splitting it gives x
+// back. The engine once took this for a principal's copy of x, opened it with
+// na, ca and m, and read s1 out of the attacker's own forgery. A send computed
+// from an install exists only because the attacker could derive that install,
+// so it is evidence of nothing the attacker needed a forgery to supply.
+// closure_forged_echo_container_leaked.vp is the counterweight.
+attacker[active]
+
+principal Alice[
+	generates k, na, m
+	s1, s2 = THRESHOLD_SPLIT[2](k)
+	ca = PUBKEY(na)
+	x = THRESHOLD_SIGN[forgeable](s1, na, ca, m)
+	leaks na
+]
+
+Alice -> Bob: ca, m
+
+principal Carol[
+	generates kc, nc, mc
+	c1, c2 = THRESHOLD_SPLIT[2](kc)
+	cc = PUBKEY(nc)
+	y = THRESHOLD_SIGN(c1, nc, cc, mc)
+]
+
+Carol -> Bob: y
+
+principal Bob[
+	w = CONCAT(y, nil)
+]
+
+Bob -> Dave: w
+
+principal Dave[
+	_ = HASH(w)
+]
+
+queries[
+	confidentiality? s1
+]

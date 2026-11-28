@@ -1,0 +1,39 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0 at one session and at two.
+//
+// Server sends its public key ns to Alice and to Bob, both unguarded, and Bob
+// echoes it to Alice inside a tuple, which Alice checks against her own copy.
+// xs never leaves Server, so it stays confidential. The model is here for the
+// search, which once never returned: Alice's check makes the solver bind her
+// variable for ns to Bob's, which is itself unbound, and trying that flight at
+// every other receiver then bound Bob's variable to itself, a substitution that
+// applying follows forever. A receiver's variable is bound only through the
+// occurs check. solver_receiver_alias_sealed_echo.vp is the counterweight.
+attacker[active]
+
+principal Server[
+	knows private xs
+	ns = PUBKEY(xs)
+]
+
+Server -> Alice: ns
+
+Server -> Bob: ns
+
+principal Bob[
+	generates gb
+	hello = CONCAT(gb, ns)
+]
+
+Bob -> Alice: hello
+
+principal Alice[
+	gb_a, ns_a = SPLIT(hello)?
+	_ = ASSERT(ns_a, ns)?
+]
+
+queries[
+	confidentiality? xs
+]

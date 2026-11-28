@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
 //
-// Expected: e1e1
+// Expected: e1e1 at two sessions, e1e0 at one.
 //
 // Key agreement on completion. The client's share is guarded, so the
 // attacker can only replace the server's share gs. With its own share the

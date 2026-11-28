@@ -54,12 +54,12 @@ impl Live {
 		true
 	}
 
-	fn complete(&self, publish: impl FnOnce()) -> bool {
+	fn complete(&self, store: impl FnOnce()) -> bool {
 		let mut state = self.state();
 		if *state != LiveState::Running {
 			return false;
 		}
-		publish();
+		store();
 		*state = LiveState::Finished;
 		true
 	}
@@ -81,7 +81,6 @@ pub(crate) struct Job {
 	pub sessions: u8,
 	pub token: String,
 	pub progress: bool,
-	pub passing: bool,
 }
 
 impl Job {
@@ -109,6 +108,10 @@ pub(crate) struct Runner {
 	running: HashMap<String, (Arc<Live>, Worker)>,
 	retiring: Vec<Worker>,
 	verdicts: Verdicts,
+	reports: (
+		crossbeam_channel::Sender<AnalysisReport>,
+		crossbeam_channel::Receiver<AnalysisReport>,
+	),
 }
 
 impl Runner {
@@ -118,7 +121,12 @@ impl Runner {
 			running: HashMap::new(),
 			retiring: Vec::new(),
 			verdicts: Arc::default(),
+			reports: crossbeam_channel::unbounded(),
 		}
+	}
+
+	pub(crate) fn reports(&self) -> &crossbeam_channel::Receiver<AnalysisReport> {
+		&self.reports.1
 	}
 
 	pub(crate) fn cancel_token(&mut self, token: &str) -> bool {
@@ -180,6 +188,7 @@ impl Runner {
 		let running = Arc::clone(&live);
 		let sender = self.sender.clone();
 		let verdicts = Arc::clone(&self.verdicts);
+		let reports = self.reports.0.clone();
 		let worker = std::thread::Builder::new().stack_size(ANALYSIS_STACK);
 		let uri = key.clone();
 		let spawned = worker.spawn(move || {
@@ -210,26 +219,17 @@ impl Runner {
 			let completed = live.complete(|| {
 				if let Some(analysis) = &report.analysis {
 					let all = crate::lsp::diagnostics::of_verdicts(analysis, &job.line);
-					let shown = crate::lsp::diagnostics::shown(&all, job.passing);
 					verdicts
 						.lock()
 						.unwrap_or_else(|e| e.into_inner())
 						.insert(key, (job.version, all));
-					notify(
-						&sender,
-						"textDocument/publishDiagnostics",
-						lsp_types::PublishDiagnosticsParams {
-							uri: job.uri.clone(),
-							diagnostics: shown,
-							version: Some(job.version),
-						},
-					);
 				}
-				notify(&sender, "verifpal/analysisReport", report);
 			});
-			if !completed {
-				notify(&sender, "verifpal/analysisReport", job.report(Err(None)));
-			}
+			let _ = reports.send(if completed {
+				report
+			} else {
+				job.report(Err(None))
+			});
 		});
 		let worker = spawned.expect("spawn the analysis worker");
 		self.running.insert(uri, (running, worker));
@@ -284,23 +284,33 @@ mod tests {
 			sessions: 1,
 			token: token.to_string(),
 			progress: false,
-			passing: true,
 		}
 	}
 
-	fn await_report(receiver: &crossbeam_channel::Receiver<Message>) -> serde_json::Value {
-		let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
-		while std::time::Instant::now() < deadline {
-			let Ok(Message::Notification(note)) =
-				receiver.recv_timeout(std::time::Duration::from_secs(30))
-			else {
-				break;
-			};
-			if note.method == "verifpal/analysisReport" {
-				return note.params;
-			}
-		}
-		panic!("no report arrived");
+	fn await_report(runner: &Runner) -> serde_json::Value {
+		let report = runner
+			.reports()
+			.recv_timeout(std::time::Duration::from_secs(30))
+			.expect("the worker reports");
+		serde_json::to_value(report).expect("a report serializes")
+	}
+
+	#[test]
+	fn a_worker_stores_its_verdicts_and_sends_the_client_nothing() {
+		let (sender, receiver) = crossbeam_channel::unbounded();
+		let mut runner = Runner::new(sender);
+		let uri = "file:///quiet.vp";
+		runner.start(job(uri, "q1"));
+		let report = await_report(&runner);
+		assert_eq!(report["ok"], true, "{report}");
+		assert_eq!(report["uri"], uri, "{report}");
+		assert!(runner.verdicts(uri, 1).is_some());
+		let sent: Vec<Message> = receiver.try_iter().collect();
+		assert!(
+			sent.is_empty(),
+			"the server publishes diagnostics and forwards the report, so that both follow \
+			 the document and the settings as they are then: {sent:?}"
+		);
 	}
 
 	#[test]
@@ -325,11 +335,11 @@ mod tests {
 
 	#[test]
 	fn verdicts_are_kept_for_the_analyzed_version_and_forgotten_on_change() {
-		let (sender, receiver) = crossbeam_channel::unbounded();
+		let (sender, _receiver) = crossbeam_channel::unbounded();
 		let mut runner = Runner::new(sender);
 		let uri = "file:///vd.vp";
 		runner.start(job(uri, "v1"));
-		let report = await_report(&receiver);
+		let report = await_report(&runner);
 		assert_eq!(report["token"], "v1", "{report}");
 		let stored = runner
 			.verdicts(uri, 1)
@@ -367,25 +377,11 @@ mod tests {
 
 	#[test]
 	fn an_analysis_that_already_finished_is_not_cancellable() {
-		let (sender, receiver) = crossbeam_channel::unbounded();
+		let (sender, _receiver) = crossbeam_channel::unbounded();
 		let mut runner = Runner::new(sender);
 		let uri = "file:///an.vp".to_string();
 		runner.start(job(&uri, "t1"));
-
-		let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
-		let mut reported = false;
-		while std::time::Instant::now() < deadline {
-			let Ok(Message::Notification(note)) =
-				receiver.recv_timeout(std::time::Duration::from_secs(30))
-			else {
-				break;
-			};
-			if note.method == "verifpal/analysisReport" {
-				reported = true;
-				break;
-			}
-		}
-		assert!(reported, "the worker sent its report");
+		await_report(&runner);
 
 		let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
 		while std::time::Instant::now() < deadline
@@ -443,7 +439,7 @@ mod tests {
 
 	#[test]
 	fn a_replacement_analysis_waits_for_the_one_it_cancelled() {
-		let (sender, receiver) = crossbeam_channel::unbounded();
+		let (sender, _receiver) = crossbeam_channel::unbounded();
 		let mut runner = Runner::new(sender);
 		let uri = "file:///rw.vp";
 		let cancel = Arc::new(AtomicBool::new(false));
@@ -469,14 +465,15 @@ mod tests {
 			"starting a replacement cancels the analysis it replaces"
 		);
 		assert!(
-			receiver
+			runner
+				.reports()
 				.recv_timeout(std::time::Duration::from_millis(300))
 				.is_err(),
 			"the replacement must not analyze while the cancelled worker still runs"
 		);
 		assert!(observed.try_recv().is_err());
 		release.send(()).expect("the old worker is waiting");
-		let report = await_report(&receiver);
+		let report = await_report(&runner);
 		assert_eq!(report["token"], "new", "{report}");
 		assert_eq!(report["ok"], true, "{report}");
 		assert!(

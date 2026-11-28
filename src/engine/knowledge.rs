@@ -111,6 +111,7 @@ impl Candidates {
 pub(crate) struct Knowledge {
 	pub(crate) state: Arc<AttackerState>,
 	origins: Arc<Vec<Origin>>,
+	told: Arc<Vec<Told>>,
 	pub(crate) protocol: Arc<Vec<(Value, Value, bool)>>,
 	pub(crate) built: Arc<TermSet>,
 	capabilities: Arc<CapabilityIndex>,
@@ -119,21 +120,171 @@ pub(crate) struct Knowledge {
 	settled: Arc<Vec<u8>>,
 	genuine: Arc<TermSet>,
 	proofs: Arc<Proofs>,
+	scope: Scope,
+	awaiting: Arc<Vec<Awaited>>,
 	closed: bool,
 }
 
-type Proofs = Vec<(Vec<Value>, Arc<AttackerState>)>;
+pub(crate) type Point = (RunIdx, SlotIdx);
 
-fn proof<'p>(proofs: &'p Proofs, unforgeable: &[Value]) -> Option<&'p Arc<AttackerState>> {
+#[derive(Clone)]
+pub(crate) struct Need {
+	pub(crate) at: Point,
+	pub(crate) phase: i32,
+	pub(crate) value: Value,
+}
+
+#[derive(Clone)]
+struct Event {
+	phase: i32,
+	past: Arc<[Point]>,
+	needs: Arc<[Need]>,
+}
+
+impl Event {
+	fn covers(&self, other: &Event) -> bool {
+		self.phase <= other.phase
+			&& self.past.iter().all(|point| other.past.contains(point))
+			&& self
+				.needs
+				.iter()
+				.all(|need| other.needs.iter().any(|held| held.at == need.at))
+	}
+}
+
+#[derive(Clone, Default)]
+struct Told {
+	free: Option<i32>,
+	bound: Option<Arc<[Event]>>,
+}
+
+impl Told {
+	fn bound(&self) -> &[Event] {
+		self.bound.as_deref().unwrap_or_default()
+	}
+
+	fn tell(&mut self, event: Event) -> bool {
+		if self.free.is_some_and(|phase| phase <= event.phase) {
+			return false;
+		}
+		if event.past.is_empty() && event.needs.is_empty() {
+			self.free = Some(event.phase);
+			let kept: Vec<Event> = self
+				.bound()
+				.iter()
+				.filter(|held| held.phase < event.phase)
+				.cloned()
+				.collect();
+			self.bound = (!kept.is_empty()).then(|| kept.into());
+			return true;
+		}
+		if self.bound().iter().any(|held| held.covers(&event)) {
+			return false;
+		}
+		let mut kept: Vec<Event> = self
+			.bound()
+			.iter()
+			.filter(|held| !event.covers(held))
+			.cloned()
+			.collect();
+		kept.push(event);
+		self.bound = Some(kept.into());
+		true
+	}
+
+	fn hear(&mut self, other: &Told) -> bool {
+		let mut news = false;
+		if let Some(phase) = other.free {
+			news |= self.tell(Event {
+				phase,
+				past: Arc::default(),
+				needs: Arc::default(),
+			});
+		}
+		for event in other.bound() {
+			news |= self.tell(event.clone());
+		}
+		news
+	}
+
+	fn freely(&self, scope: &Scope) -> bool {
+		self.free.is_some_and(|phase| phase <= scope.phase)
+			|| self
+				.bound()
+				.iter()
+				.any(|event| event.needs.is_empty() && scope.sees(event))
+	}
+
+	fn awaited<'t>(&'t self, scope: &'t Scope) -> impl Iterator<Item = &'t Arc<[Need]>> {
+		self.bound()
+			.iter()
+			.filter(|event| !event.needs.is_empty() && scope.sees(event))
+			.map(|event| &event.needs)
+	}
+
+	fn rests_on(&self) -> impl Iterator<Item = Point> + '_ {
+		self.bound()
+			.iter()
+			.filter(|_| self.free.is_none())
+			.flat_map(|event| event.needs.iter().map(|need| need.at))
+	}
+}
+
+#[derive(Clone, PartialEq, Eq)]
+struct Scope {
+	phase: i32,
+	before: Vec<Point>,
+}
+
+impl Scope {
+	fn whole() -> Scope {
+		Scope {
+			phase: i32::MAX,
+			before: Vec::new(),
+		}
+	}
+
+	fn sees(&self, event: &Event) -> bool {
+		event.phase <= self.phase && !self.before.iter().any(|point| event.past.contains(point))
+	}
+
+	fn until(&self, need: &Need) -> Scope {
+		let mut before = self.before.clone();
+		if let Err(at) = before.binary_search(&need.at) {
+			before.insert(at, need.at);
+		}
+		Scope {
+			phase: self.phase.min(need.phase),
+			before,
+		}
+	}
+}
+
+#[derive(Clone)]
+struct Awaited {
+	value: Value,
+	origin: Origin,
+	record: DerivationRecord,
+	told: Told,
+}
+
+type Proofs = Vec<(Vec<Value>, Scope, Arc<AttackerState>)>;
+
+fn proof<'p>(
+	proofs: &'p Proofs,
+	unforgeable: &[Value],
+	scope: &Scope,
+) -> Option<&'p Arc<AttackerState>> {
 	proofs
 		.iter()
-		.find(|(held, _)| {
-			held.len() == unforgeable.len()
+		.find(|(held, within, _)| {
+			within == scope
+				&& held.len() == unforgeable.len()
 				&& unforgeable
 					.iter()
 					.all(|v| held.iter().any(|h| h.equivalent(v, true)))
 		})
-		.map(|(_, world)| world)
+		.map(|(_, _, world)| world)
 }
 
 const DECOMPOSED: u8 = 1;
@@ -150,6 +301,7 @@ impl Knowledge {
 				..AttackerState::default()
 			}),
 			origins: Arc::new(Vec::new()),
+			told: Arc::new(Vec::new()),
 			protocol: Arc::new(Vec::new()),
 			built: Arc::new(TermSet::default()),
 			capabilities: Arc::new(CapabilityIndex::default()),
@@ -158,6 +310,8 @@ impl Knowledge {
 			settled: Arc::new(Vec::new()),
 			genuine: Arc::new(TermSet::default()),
 			proofs: Arc::default(),
+			scope: Scope::whole(),
+			awaiting: Arc::default(),
 			closed: true,
 		}
 	}
@@ -191,20 +345,57 @@ impl Knowledge {
 	}
 
 	pub(crate) fn learn(&mut self, v: &Value, origin: Origin) -> bool {
-		if let Some(at) = self.state.knows(v) {
-			let replaces = !matches!(origin, Origin::Derived(_))
-				&& !disclosure(&self.state.derivations[at.get()]);
-			if replaces {
-				let state = Arc::make_mut(&mut self.state);
-				Arc::make_mut(&mut state.derivations)[at.get()] = origin.record();
-				state.chain = next_chain();
-				self.reopen();
-			}
+		self.disclose(v, origin, Arc::default(), Arc::default())
+	}
+
+	pub(crate) fn disclose(
+		&mut self,
+		v: &Value,
+		origin: Origin,
+		past: Arc<[Point]>,
+		needs: Arc<[Need]>,
+	) -> bool {
+		let record = origin.record();
+		let mut told = Told::default();
+		if disclosure(&record) {
+			told.tell(Event {
+				phase: self.state.current_phase,
+				past,
+				needs,
+			});
+		}
+		self.hear(v, origin, record, &told)
+	}
+
+	fn hear(&mut self, v: &Value, origin: Origin, record: DerivationRecord, told: &Told) -> bool {
+		let Some(at) = self.state.knows(v).map(|at| at.get()) else {
+			let at = self.len();
+			self.push(v, origin, record);
+			Arc::make_mut(&mut self.told)[at] = told.clone();
+			return true;
+		};
+		if !disclosure(&record) {
 			return false;
 		}
-		let record = origin.record();
-		self.push(v, origin, record);
-		true
+		let derived = !disclosure(&self.state.derivations[at]);
+		let mut held = self.told[at].clone();
+		if !held.hear(told) && !derived {
+			return false;
+		}
+		if derived {
+			let state = Arc::make_mut(&mut self.state);
+			Arc::make_mut(&mut state.derivations)[at] = record;
+			state.chain = next_chain();
+		}
+		Arc::make_mut(&mut self.told)[at] = held;
+		self.reopen();
+		false
+	}
+
+	pub(crate) fn rests_on(&self, v: &Value) -> impl Iterator<Item = Point> + '_ {
+		self.knows(v)
+			.into_iter()
+			.flat_map(|at| self.told[at].rests_on())
 	}
 
 	fn push(&mut self, v: &Value, origin: Origin, record: DerivationRecord) {
@@ -219,37 +410,138 @@ impl Knowledge {
 		Arc::make_mut(&mut state.derivations).push(record);
 		state.chain = next_chain();
 		Arc::make_mut(&mut self.origins).push(origin);
+		Arc::make_mut(&mut self.told).push(Told::default());
 		self.closed = false;
 		if disclosed {
 			self.reopen();
 		}
 	}
 
-	fn disclosed(&self, without: Option<&Value>) -> Knowledge {
-		self.disclosed_where(|_, known| without.is_none_or(|w| !known.equivalent(w, true)))
+	fn disclosed(&self, without: Option<&Value>, scope: &Scope) -> Knowledge {
+		self.disclosed_where(
+			|_, known| without.is_none_or(|w| !known.equivalent(w, true)),
+			scope,
+		)
 	}
 
-	fn disclosed_where(&self, keep: impl Fn(usize, &Value) -> bool) -> Knowledge {
+	fn disclosed_where(
+		&self,
+		keep: impl Fn(Option<usize>, &Value) -> bool,
+		scope: &Scope,
+	) -> Knowledge {
 		let mut out = Knowledge {
 			protocol: Arc::clone(&self.protocol),
 			built: Arc::clone(&self.built),
 			capabilities: Arc::clone(&self.capabilities),
 			candidates: Arc::clone(&self.candidates),
-			..Knowledge::new(self.state.current_phase)
+			scope: scope.clone(),
+			..Knowledge::new(self.state.current_phase.min(scope.phase))
 		};
-		for (at, ((known, record), origin)) in self
+		let mut awaiting: Vec<Awaited> = Vec::new();
+		let held = self
 			.state
 			.known
 			.iter()
 			.zip(self.state.derivations.iter())
 			.zip(self.origins.iter())
+			.zip(self.told.iter())
 			.enumerate()
-		{
-			if disclosure(record) && keep(at, known) {
-				out.push(known, origin.clone(), record.clone());
+			.filter(|(at, (((known, record), _), _))| disclosure(record) && keep(Some(*at), known))
+			.map(|(_, (((known, record), origin), told))| (known, origin, record, told));
+		let waited = self
+			.awaiting
+			.iter()
+			.filter(|awaited| keep(None, &awaited.value))
+			.map(|awaited| {
+				(
+					&awaited.value,
+					&awaited.origin,
+					&awaited.record,
+					&awaited.told,
+				)
+			});
+		for (value, origin, record, told) in held.chain(waited) {
+			if told.freely(scope) {
+				out.hear(value, origin.clone(), record.clone(), told);
+			} else if told.awaited(scope).next().is_some() {
+				awaiting.push(Awaited {
+					value: value.clone(),
+					origin: origin.clone(),
+					record: record.clone(),
+					told: told.clone(),
+				});
 			}
 		}
+		out.awaiting = Arc::new(awaiting);
 		out
+	}
+
+	fn admit(
+		&mut self,
+		capabilities: &CapabilityIndex,
+		withheld: Option<&Value>,
+		stop: &dyn Fn() -> bool,
+		proofs: &mut Arc<Proofs>,
+	) -> Option<bool> {
+		let mut waiting = Vec::new();
+		let mut ready = Vec::new();
+		for awaited in self.awaiting.iter() {
+			let mut supplied = false;
+			for needs in awaited.told.awaited(&self.scope) {
+				let mut all = true;
+				for need in needs.iter() {
+					if !self.supplies(need, capabilities, withheld, stop, proofs)? {
+						all = false;
+						break;
+					}
+				}
+				if all {
+					supplied = true;
+					break;
+				}
+			}
+			if supplied {
+				ready.push(awaited.clone());
+			} else {
+				waiting.push(awaited.clone());
+			}
+		}
+		if ready.is_empty() {
+			return Some(false);
+		}
+		self.awaiting = Arc::new(waiting);
+		for Awaited {
+			value,
+			origin,
+			record,
+			told,
+		} in ready
+		{
+			self.hear(&value, origin, record, &told);
+		}
+		Some(true)
+	}
+
+	fn supplies(
+		&self,
+		need: &Need,
+		capabilities: &CapabilityIndex,
+		withheld: Option<&Value>,
+		stop: &dyn Fn() -> bool,
+		proofs: &mut Arc<Proofs>,
+	) -> Option<bool> {
+		let scope = self.scope.until(need);
+		let unforgeable = capabilities.unforgeable();
+		if let Some(world) = proof(proofs, unforgeable, &scope) {
+			return Some(obtainable(&need.value, capabilities, world));
+		}
+		let mut world = self.disclosed(withheld, &scope);
+		if !world.closing(capabilities, withheld, stop, proofs) {
+			return None;
+		}
+		let supplied = obtainable(&need.value, capabilities, &world.state);
+		Arc::make_mut(proofs).push((unforgeable.to_vec(), scope, world.state));
+		Some(supplied)
 	}
 
 	pub(crate) fn declaring(mut self, capabilities: &CapabilityIndex) -> Knowledge {
@@ -263,13 +555,16 @@ impl Knowledge {
 	}
 
 	pub(crate) fn disclosing(&self, keep: impl Fn(usize, &Value) -> bool) -> Knowledge {
-		let mut out = self.disclosed_where(keep);
+		let mut out = self.disclosed_where(
+			|at, known| at.is_some_and(|at| keep(at, known)),
+			&self.scope,
+		);
 		out.close();
 		out
 	}
 
 	pub(crate) fn withholding(&self, v: &Value) -> Knowledge {
-		let mut out = self.disclosed(Some(v));
+		let mut out = self.disclosed(Some(v), &self.scope);
 		let capabilities = Arc::clone(&self.capabilities);
 		out.closing(&capabilities, Some(v), &|| false, &mut Arc::default());
 		out
@@ -285,15 +580,15 @@ impl Knowledge {
 	) -> Option<bool> {
 		let mut unforgeable = capabilities.unforgeable().to_vec();
 		unforgeable.push(v.clone());
-		if let Some(world) = proof(proofs, &unforgeable) {
+		if let Some(world) = proof(proofs, &unforgeable, &self.scope) {
 			return Some(world.knows(v).is_some());
 		}
-		let mut world = self.disclosed(withheld);
+		let mut world = self.disclosed(withheld, &self.scope);
 		if !world.closing(&capabilities.without_forging(v), withheld, stop, proofs) {
 			return None;
 		}
 		let derived = world.state.knows(v).is_some();
-		Arc::make_mut(proofs).push((unforgeable, world.state));
+		Arc::make_mut(proofs).push((unforgeable, self.scope.clone(), world.state));
 		Some(derived)
 	}
 
@@ -304,9 +599,17 @@ impl Knowledge {
 	pub(crate) fn proving(
 		&self,
 		v: &Value,
+		phase: i32,
 		disclosed: impl Fn(usize, &Value) -> bool,
 	) -> Option<Knowledge> {
-		let mut world = self.disclosed_where(disclosed);
+		let scope = Scope {
+			phase,
+			before: Vec::new(),
+		};
+		let mut world = self.disclosed_where(
+			|at, known| at.is_some_and(|at| disclosed(at, known)),
+			&scope,
+		);
 		world.closing(
 			&self.capabilities.without_forging(v),
 			None,
@@ -407,6 +710,8 @@ impl Knowledge {
 					built: &self.built,
 					pools: &self.pools,
 					genuine: &self.genuine,
+					told: &self.told,
+					scope: &self.scope,
 					stop,
 				}
 				.run(&self.candidates, &self.settled)
@@ -451,6 +756,11 @@ impl Knowledge {
 			if self.state.chain != chain {
 				continue;
 			}
+			match self.admit(capabilities, withheld, stop, proofs) {
+				None => return false,
+				Some(true) => continue,
+				Some(false) => {}
+			}
 			let mut proven = false;
 			for at in unproven {
 				let v = self.state.known[at].clone();
@@ -487,6 +797,8 @@ struct Pass<'s> {
 	built: &'s TermSet,
 	pools: &'s IdMap<(usize, usize), usize>,
 	genuine: &'s TermSet,
+	told: &'s [Told],
+	scope: &'s Scope,
 	stop: &'s dyn Fn() -> bool,
 }
 
@@ -619,7 +931,12 @@ impl Pass<'_> {
 	fn openable(&self, found: &mut Found, at: usize, p: &Arc<Primitive>, known: &Value) -> bool {
 		let attacker = self.attacker;
 		let built = self.built.contains(known);
-		if built && (disclosure(&attacker.derivations[at]) || self.genuine.contains(known)) {
+		let disclosed = disclosure(&attacker.derivations[at])
+			&& self
+				.told
+				.get(at)
+				.is_some_and(|told| told.freely(self.scope));
+		if built && (disclosed || self.genuine.contains(known)) {
 			return true;
 		}
 		if !can_reconstruct_primitive(p, self.capabilities, attacker).is_some_and(|b| b.forged()) {
@@ -1052,6 +1369,92 @@ mod tests {
 	}
 
 	#[test]
+	fn a_send_computed_from_an_install_is_no_copy_of_what_was_installed() {
+		let model = |computed: &str, early: &str, late: &str| {
+			format!(
+				"attacker[active]\n\
+				principal Alice[\n\
+				knows public sci_cl, sci_m\n\
+				generates sci_k, sci_n\n\
+				sci_s1, sci_s2 = THRESHOLD_SPLIT[2](sci_k)\n\
+				sci_p = THRESHOLD_SIGN[forgeable](sci_s1, sci_n, sci_cl, sci_m)\n\
+				leaks sci_n\n\
+				{early}\
+				]\n\
+				principal Carol[\n\
+				generates sci_x\n\
+				]\n\
+				Carol -> Bob: sci_x\n\
+				principal Bob[\n\
+				{computed}\n\
+				]\n\
+				Bob -> Dave: sci_w\n\
+				principal Dave[\n\
+				_ = HASH(sci_w)\n\
+				]\n\
+				{late}\
+				queries[\n\
+				confidentiality? sci_s1\n\
+				]\n"
+			)
+		};
+		let later = "phase[1]\nprincipal Alice[\nleaks sci_p\n]\n";
+		let shapes = [
+			"sci_w = CONCAT(sci_x, nil)",
+			"sci_w, sci_v = SPLIT(CONCAT(sci_x, nil))",
+			"sci_w = ENC(nil, sci_x)",
+		];
+		for computed in shapes {
+			for (early, late, disclosed) in [
+				("", "", false),
+				("leaks sci_p\n", "", true),
+				("", later, true),
+			] {
+				let _generation = crate::util::generation::GenerationGuard::enter();
+				let m =
+					crate::syntax::parser::parse_string("sci.vp", &model(computed, early, late))
+						.expect("parses");
+				let km = crate::protocol::sanity::sanity(&m).expect("sane");
+				let program = Program::of(&m, &km);
+				let cx = Context::new(&program, &km);
+				let slot = |name: &str| {
+					km.slots
+						.position(|s| s.constant.name.as_ref() == name)
+						.expect("declared")
+				};
+				let honest = |name: &str| {
+					crate::theory::reduce_once(&crate::protocol::trace::resolve_trace_constant(
+						&km.slots[slot(name)].constant,
+						&km,
+					))
+				};
+				let bob = program.runs.position(|r| r.name == "Bob").expect("run");
+				let ex = execute(
+					&cx,
+					&vec![Install::Value {
+						run: bob,
+						slot: slot("sci_x"),
+						value: honest("sci_p"),
+					}],
+				)
+				.expect("uncancelled");
+				assert!(ex.stuck.is_empty(), "{computed}");
+				let sent = ex.runs[bob].held(slot("sci_w")).expect("computed");
+				assert!(!sent.authored && sent.fed.as_ref() == [(bob, slot("sci_x"))]);
+				assert_eq!(
+					obtainable(
+						&honest("sci_s1"),
+						ex.knowledge.capabilities(),
+						&ex.knowledge.state
+					),
+					disclosed,
+					"{computed} {early} {late}"
+				);
+			}
+		}
+	}
+
+	#[test]
 	fn an_install_is_delivered_as_its_reduct() {
 		let source = "attacker[active]\n\
 			principal Alice[\n\
@@ -1259,7 +1662,7 @@ mod tests {
 		);
 		assert!(ex.knowledge.knows(&secret).is_some());
 		let passes = |limit: usize| {
-			let mut world = ex.knowledge.disclosed_where(|_, _| true);
+			let mut world = ex.knowledge.disclosed_where(|_, _| true, &Scope::whole());
 			let asked = std::cell::Cell::new(0usize);
 			let closed = world.close_unless(&|| {
 				asked.set(asked.get() + 1);

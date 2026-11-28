@@ -1,0 +1,58 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: u0 at one session and at two.
+//
+// unlink_container_echo_not_observed.vp with the echo cut in two. Relay seals
+// what it received under a key the attacker never holds, and Opener opens
+// whatever it is sent under that key. The attacker installs its own
+// HASH(s, n2) at Relay and Relay's ciphertext at Opener, and Opener sends b
+// back in the clear. Opener's install is opaque to the attacker, but it is
+// Relay's output over what the attacker supplied, so b is still the attacker's
+// own value and is not observed. What an install rests on is supplied with it.
+// unlink_container_echo_laundered_sent.vp is the counterweight.
+attacker[active]
+
+principal Alice[
+	knows private s
+	generates n1, n2
+	a = HASH(s, n1)
+	b = HASH(s, n2)
+	leaks s
+]
+
+Alice -> Relay: n1, n2, a
+
+principal Relay[
+	knows private kr
+	w = ENC(kr, a)
+]
+
+Relay -> Bob: n1, n2, w
+
+principal Bob[
+	_ = HASH(n1, n2, w)
+]
+
+principal Carol[
+	knows private kr
+	generates gj
+	y = ENC(kr, gj)
+]
+
+Carol -> Opener: y
+
+principal Opener[
+	knows private kr
+	v = DEC(kr, y)
+]
+
+Opener -> Dave: v
+
+principal Dave[
+	_ = HASH(v)
+]
+
+queries[
+	unlinkability? a, b
+]

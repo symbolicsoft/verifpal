@@ -6,8 +6,8 @@ pub(crate) mod record;
 pub(crate) mod result;
 
 pub(crate) use result::{
-	Envelope, QueryOptionResult, ScenarioSummary, Subtype, TraceStep, TraceValue, Truncation,
-	VerifyResult,
+	Envelope, QueryOptionResult, ScenarioSummary, StepKind, Subtype, TraceStep, TraceValue,
+	Truncation, VerifyResult,
 };
 
 use std::sync::Arc;
@@ -17,7 +17,6 @@ use crate::console::InfoLevel;
 use crate::primitive::{Capability, Reach};
 use crate::protocol::sanity::sanity;
 use crate::protocol::{ProtocolTrace, TraceSlot};
-use crate::syntax::parser::parse_file;
 use crate::syntax::{AttackerKind, Model, PrincipalId, Query, QueryKind, VResult, VerifpalError};
 use crate::term::{Value, ValueId};
 use crate::util::{IdMap, IdSet};
@@ -37,26 +36,56 @@ pub(crate) struct Expansion {
 	pub(crate) model: Model,
 	pub(crate) corrupt_from: Option<IdMap<PrincipalId, i32>>,
 	pub(crate) scenarios: Vec<ScenarioSummary>,
-	pub(crate) variants: Vec<Vec<Query>>,
 	pub(crate) siblings: IdMap<ValueId, Arc<Vec<ValueId>>>,
 	pub(crate) interchangeable: IdMap<PrincipalId, PrincipalId>,
 	pub(crate) actors: IdMap<PrincipalId, PrincipalId>,
 	pub(crate) dependent: IdSet<ValueId>,
 }
 
+impl Expansion {
+	pub(crate) fn answers(&self, principal: PrincipalId) -> bool {
+		self.corrupt_from
+			.as_ref()
+			.filter(|corrupt_from| !corrupt_from.is_empty())
+			.is_none_or(|corrupt_from| corrupt_from.contains_key(&principal))
+	}
+}
+
 pub(crate) fn expand(m: &Model, sessions: u8, cancel: &AtomicBool) -> VResult<Expansion> {
 	let sessions = sessions.max(1);
 	let e = crate::protocol::scenario::expand_scenarios(m, sessions, cancel)?;
+	if let Some(scenarios) = crate::protocol::scenario::announcement(&e.scenarios) {
+		crate::console::message(&scenarios, InfoLevel::Info);
+	}
 	if sessions == 1 {
 		return Ok(e);
 	}
 	crate::protocol::sessions::expand_sessions(e, sessions)
 }
 
+#[cfg_attr(not(feature = "language"), allow(dead_code))]
+pub(crate) fn check(m: &Model, sessions: u8) -> VResult<()> {
+	admitted(m, sessions, Arc::default(), crate::engine::check).map(drop)
+}
+
 pub(crate) fn analyze_sessions_cancellable(
 	m: &Model,
 	sessions: u8,
 	cancel: Arc<AtomicBool>,
+) -> VResult<VerifyContext> {
+	let ctx = admitted(m, sessions, cancel, crate::engine::verify)?;
+	if ctx.cancelled() {
+		return Err(VerifpalError::cancelled());
+	}
+	ctx.finalize_envelopes();
+	Ok(ctx)
+}
+
+fn admitted(
+	m: &Model,
+	sessions: u8,
+	cancel: Arc<AtomicBool>,
+	engine: fn(&VerifyContext, &Model, &ProtocolTrace) -> VResult<()>,
 ) -> VResult<VerifyContext> {
 	let sessions = sessions.max(1);
 	let _generation = crate::util::generation::GenerationGuard::enter();
@@ -66,7 +95,6 @@ pub(crate) fn analyze_sessions_cancellable(
 		model,
 		corrupt_from,
 		scenarios,
-		variants,
 		siblings,
 		interchangeable,
 		actors,
@@ -80,16 +108,19 @@ pub(crate) fn analyze_sessions_cancellable(
 	trace.actors = actors;
 	trace.scenario_dependent = dependent;
 	trace.equivalence_queried =
-		equivalence_queried(m.queries.iter().chain(variants.iter().flatten()));
+		equivalence_queried(m.queries.iter().chain(m.variants.iter().flatten()));
 	capability_reach_notice(&trace);
-	let mut ctx = VerifyContext::new(m, variants, sessions, corrupt_from, scenarios, assumptions);
+	let mut ctx = VerifyContext::new(
+		m,
+		m.variants.clone(),
+		sessions,
+		corrupt_from,
+		scenarios,
+		assumptions,
+	);
 	ctx.set_cancel(cancel);
 	let ctx = ctx;
-	crate::engine::verify(&ctx, m, &trace)?;
-	if ctx.cancelled() {
-		return Err(VerifpalError::cancelled());
-	}
-	ctx.finalize_envelopes();
+	engine(&ctx, m, &trace)?;
 	Ok(ctx)
 }
 
@@ -178,15 +209,24 @@ pub(crate) fn verify_report_with_source(
 	file_path: &str,
 	sessions: u8,
 ) -> VResult<(VerifyReport, String)> {
-	verify_report_with_source_opts(file_path, sessions, false)
+	let (report, source) = verify_report_with_source_opts(file_path, sessions, false);
+	report.map(|report| (report, source))
 }
 
 pub fn verify_report_with_source_opts(
 	file_path: &str,
 	sessions: u8,
 	auto_queries: bool,
-) -> VResult<(VerifyReport, String)> {
-	verify_parsed(parse_file(file_path)?, sessions, auto_queries)
+) -> (VResult<VerifyReport>, String) {
+	match crate::syntax::parser::read_file(file_path) {
+		Err(e) => (Err(e), String::new()),
+		Ok((file_name, source)) => {
+			let report = crate::syntax::parser::parse_string(&file_name, &source)
+				.and_then(|m| verify_parsed(m, sessions, auto_queries))
+				.map(|(report, _)| report);
+			(report, source)
+		}
+	}
 }
 
 pub(crate) fn verify_parsed(
@@ -196,8 +236,8 @@ pub(crate) fn verify_parsed(
 ) -> VResult<(VerifyReport, String)> {
 	let source = m.source.to_string();
 	if auto_queries {
-		let km = sanity(&m).map_err(|e| e.located(&m.file_name, &m.source))?;
-		m.queries = crate::protocol::autoquery::auto_queries(&m, &km);
+		m.queries = crate::protocol::autoquery::auto_queries(&m)
+			.map_err(|e| e.located(&m.file_name, &m.source))?;
 	}
 	let mut report = verify_model(&m, sessions).map_err(|e| e.located(&m.file_name, &m.source))?;
 	report.auto_queries = auto_queries;
@@ -210,7 +250,8 @@ pub(crate) fn verify_auto_queries(
 	sessions: u8,
 ) -> VResult<(Vec<VerifyResult>, String)> {
 	verify_report_with_source_opts(file_path, sessions, true)
-		.map(|(report, _)| (report.results, report.code))
+		.0
+		.map(|report| (report.results, report.code))
 }
 
 #[cfg(test)]
@@ -449,6 +490,54 @@ mod tests {
 			"a session count below one runs a single session, and the envelope has \
 			 to say what ran: `search exhausted at 0 sessions` describes no search"
 		);
+	}
+
+	#[test]
+	fn a_query_sane_in_a_later_scenario_passes_every_check_a_caller_makes() {
+		for model in [
+			"scenario_query_each_entry.vp",
+			"scenario_query_each_entry_reversed.vp",
+		] {
+			let m = crate::syntax::parser::parse_file(&format!("examples/test/{model}"))
+				.expect("parses");
+			crate::protocol::sanity::sanity(&m)
+				.unwrap_or_else(|e| panic!("{model} as written: {e}"));
+			for sessions in [1, 2] {
+				let e = super::expand(&m, sessions, &std::sync::atomic::AtomicBool::new(false))
+					.expect("expands");
+				crate::protocol::sanity::sanity(&e.model)
+					.unwrap_or_else(|e| panic!("{model} at {sessions}: {e}"));
+				assert_eq!(
+					e.model.queries.len(),
+					2,
+					"the written queries stay as written"
+				);
+				assert!(e.model.variants.iter().all(|copies| !copies.is_empty()));
+			}
+		}
+		let m = crate::syntax::parser::parse_file("examples/test/scenario_query_no_entry.vp")
+			.expect("parses");
+		crate::protocol::sanity::sanity(&m).expect("its queries are read in its scenario copies");
+		let e = super::expand(&m, 2, &std::sync::atomic::AtomicBool::new(false)).expect("expands");
+		let error = crate::protocol::sanity::sanity(&e.model).expect_err("no copy uses gd");
+		assert!(error.message.contains("`gd` but never uses it"), "{error}");
+	}
+
+	#[test]
+	fn the_source_shown_for_a_model_is_the_text_that_was_read_or_nothing() {
+		let stem = std::env::temp_dir().join(format!("verifpal-source-{}", std::process::id()));
+		let (refused, broken) = (stem.with_extension("txt"), stem.with_extension("vp"));
+		std::fs::write(&refused, "not a model").expect("creates fixture");
+		std::fs::write(&broken, "attacker[active]\nprincipal").expect("creates fixture");
+		let (report, source) =
+			super::verify_report_with_source_opts(&refused.to_string_lossy(), 2, false);
+		assert!(report.is_err() && source.is_empty(), "{source}");
+		let (report, source) =
+			super::verify_report_with_source_opts(&broken.to_string_lossy(), 2, false);
+		assert!(report.is_err());
+		assert_eq!(source, "attacker[active]\nprincipal");
+		std::fs::remove_file(&refused).expect("removes fixture");
+		std::fs::remove_file(&broken).expect("removes fixture");
 	}
 
 	#[test]

@@ -20,9 +20,10 @@ pub(crate) struct LineIndex {
 
 impl LineIndex {
 	pub(crate) fn new(source: &str, encoding: &PositionEncodingKind) -> LineIndex {
+		let bytes = source.as_bytes();
 		let mut starts = vec![0usize];
-		for (i, b) in source.bytes().enumerate() {
-			if b == b'\n' {
+		for (i, &b) in bytes.iter().enumerate() {
+			if b == b'\n' || (b == b'\r' && bytes.get(i + 1) != Some(&b'\n')) {
 				starts.push(i + 1);
 			}
 		}
@@ -41,19 +42,12 @@ impl LineIndex {
 		&self.text
 	}
 
-	pub(crate) fn position(&self, offset: usize) -> Position {
-		let offset = self.clamp(offset);
-		let line = self.starts.partition_point(|&s| s <= offset).max(1) - 1;
-		let start = self.starts[line];
-		let character = self.width(&self.text[start..offset]);
-		Position::new(line as u32, character as u32)
+	fn line_of(&self, offset: usize) -> usize {
+		self.starts.partition_point(|&s| s <= offset).max(1) - 1
 	}
 
-	pub(crate) fn offset(&self, position: Position) -> usize {
-		let line = position.line as usize;
-		let Some(&start) = self.starts.get(line) else {
-			return self.text.len();
-		};
+	fn text_end(&self, line: usize) -> usize {
+		let start = self.starts[line];
 		let mut end = self
 			.starts
 			.get(line + 1)
@@ -66,6 +60,36 @@ impl LineIndex {
 		if end > start && bytes[end - 1] == b'\r' {
 			end -= 1;
 		}
+		end
+	}
+
+	pub(crate) fn line_end(&self, offset: usize) -> usize {
+		self.text_end(self.line_of(self.clamp(offset)))
+	}
+
+	pub(crate) fn lines(&self, span: Span) -> Vec<Span> {
+		let end = self.clamp(span.end);
+		let start = self.clamp(span.start).min(end);
+		(self.line_of(start)..=self.line_of(end))
+			.map(|line| Span::new(self.starts[line].max(start), self.text_end(line).min(end)))
+			.filter(|part| part.end > part.start)
+			.collect()
+	}
+
+	pub(crate) fn position(&self, offset: usize) -> Position {
+		let offset = self.clamp(offset);
+		let line = self.line_of(offset);
+		let start = self.starts[line];
+		let character = self.width(&self.text[start..offset]);
+		Position::new(line as u32, character as u32)
+	}
+
+	pub(crate) fn offset(&self, position: Position) -> usize {
+		let line = position.line as usize;
+		let Some(&start) = self.starts.get(line) else {
+			return self.text.len();
+		};
+		let end = self.text_end(line);
 		let slice = &self.text[start..end];
 		let mut wanted = position.character as usize;
 		for (i, c) in slice.char_indices() {
@@ -173,6 +197,36 @@ mod tests {
 		let index = LineIndex::new(SRC, &PositionEncodingKind::UTF8);
 		assert_eq!(index.offset(Position::new(999, 0)), SRC.len());
 		assert_eq!(index.offset(Position::new(0, 999)), 16);
+	}
+
+	#[test]
+	fn a_lone_carriage_return_ends_a_line() {
+		let src = "attacker[active]\rprincipal Alice[\n\tknows private m\r\n]\r";
+		let index = LineIndex::new(src, &PositionEncodingKind::UTF8);
+		let principal = src.find("principal").expect("in the source");
+		assert_eq!(index.position(principal), Position::new(1, 0));
+		assert_eq!(index.offset(Position::new(1, 0)), principal);
+		assert_eq!(index.offset(Position::new(0, 999)), principal - 1);
+		let knows = src.find("knows").expect("in the source");
+		assert_eq!(index.position(knows), Position::new(2, 1));
+		let close = src.rfind(']').expect("in the source");
+		assert_eq!(index.position(close), Position::new(3, 0));
+		assert_eq!(index.end(), Position::new(4, 0));
+	}
+
+	#[test]
+	fn a_span_is_cut_into_the_text_of_each_line_it_covers() {
+		let src = "/* one\r\n\r\n   three */\rnext";
+		let index = LineIndex::new(src, &PositionEncodingKind::UTF8);
+		let comment = Span::new(0, src.find("next").expect("in the source") - 1);
+		let parts: Vec<&str> = index
+			.lines(comment)
+			.into_iter()
+			.map(|part| &src[part.start..part.end])
+			.collect();
+		assert_eq!(parts, ["/* one", "   three */"]);
+		assert_eq!(index.line_end(2), 6);
+		assert_eq!(index.line_end(src.len()), src.len());
 	}
 
 	#[test]

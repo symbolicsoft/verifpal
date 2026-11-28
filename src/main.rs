@@ -30,6 +30,13 @@ macro_rules! outp {
 	}};
 }
 
+macro_rules! err {
+	($($arg:tt)*) => {{
+		use std::io::Write as _;
+		let _ = writeln!(std::io::stderr().lock(), $($arg)*);
+	}};
+}
+
 #[derive(Parser)]
 #[command(
 	name = "verifpal",
@@ -48,8 +55,8 @@ macro_rules! outp {
 	              The language itself is documented in the Verifpal User Manual, at \
 	              https://verifpal.com.\n\n\
 	              Exit status is 0 on success, 1 if a model could not be read, parsed or \
-	              analyzed, and 2 if an attack was found and 'verify --fail-on-attack' was \
-	              given.",
+	              analyzed or the command line was not understood, and 2 if an attack was \
+	              found and 'verify --fail-on-attack' was given.",
 	after_long_help = "Examples:\n  \
 	                   verifpal verify protocol.vp\n  \
 	                   verifpal verify protocol.vp --sessions 3 --fail-on-attack\n  \
@@ -479,7 +486,7 @@ fn status<E: std::fmt::Display>(result: Result<(), E>) -> i32 {
 	match result {
 		Ok(()) => 0,
 		Err(e) => {
-			eprintln!("{}", e);
+			err!("{}", e);
 			EXIT_ERROR
 		}
 	}
@@ -544,7 +551,7 @@ fn run_verify(args: VerifyArgs) -> i32 {
 	} = args;
 	let structured = format != FormatArg::Text;
 	if structured && result_code {
-		eprintln!(
+		err!(
 			"error: --result-code writes to standard output, so it cannot be combined with a \
 			 structured --format; the code is in the document's results instead"
 		);
@@ -571,8 +578,9 @@ fn run_verify(args: VerifyArgs) -> i32 {
 		if index > 0 && chrome {
 			out!();
 		}
-		match verify_report_with_source_opts(model, sessions, auto_queries) {
-			Ok((report, source)) => {
+		let (report, source) = verify_report_with_source_opts(model, sessions, auto_queries);
+		match report {
+			Ok(report) => {
 				if result_code {
 					if single {
 						out!("{}", report.code());
@@ -581,21 +589,16 @@ fn run_verify(args: VerifyArgs) -> i32 {
 					}
 				}
 				outcomes.push((model.clone(), Ok(report)));
-				sources.push(source);
 			}
 			Err(e) => {
 				let text = e.to_string();
 				if !structured {
-					eprintln!("{}", text);
+					err!("{}", text);
 				}
 				outcomes.push((model.clone(), Err(text)));
-				sources.push(if structured {
-					std::fs::read_to_string(model).unwrap_or_default()
-				} else {
-					String::new()
-				});
 			}
 		}
+		sources.push(source);
 	}
 
 	let run = || Run::of(VERSION, &outcomes, &sources);
@@ -604,7 +607,7 @@ fn run_verify(args: VerifyArgs) -> i32 {
 		FormatArg::Json => match serde_json::to_string(&run()) {
 			Ok(text) => out!("{}", text),
 			Err(e) => {
-				eprintln!("could not serialize the report: {}", e);
+				err!("could not serialize the report: {}", e);
 				return EXIT_ERROR;
 			}
 		},
@@ -632,7 +635,7 @@ fn run_pretty(models: Vec<String>, write: bool, check: bool) -> i32 {
 		let output = match pretty_print(model) {
 			Ok(output) => output,
 			Err(e) => {
-				eprintln!("{}", e);
+				err!("{}", e);
 				status = EXIT_ERROR;
 				continue;
 			}
@@ -645,7 +648,7 @@ fn run_pretty(models: Vec<String>, write: bool, check: bool) -> i32 {
 			Ok(true) => changed.push(model.clone()),
 			Ok(false) => {}
 			Err(e) => {
-				eprintln!("{}: {}", model, e);
+				err!("{}: {}", model, e);
 				status = EXIT_ERROR;
 			}
 		}
@@ -670,7 +673,10 @@ fn pretty_file_changed(model: &str, output: &str, write: bool) -> std::io::Resul
 }
 
 fn main() {
-	let cli = Cli::parse();
+	let cli = Cli::try_parse().unwrap_or_else(|e| {
+		let _ = e.print();
+		std::process::exit(if e.use_stderr() { EXIT_ERROR } else { 0 })
+	});
 	let status = match cli.command {
 		Commands::Verify(args) => run_verify(args),
 		Commands::Pretty {
@@ -697,7 +703,9 @@ fn main() {
 		}
 		Commands::Completion { shell } => {
 			let mut command = Cli::command();
-			clap_complete::generate(shell, &mut command, "verifpal", &mut std::io::stdout());
+			let mut script = Vec::new();
+			clap_complete::generate(shell, &mut command, "verifpal", &mut script);
+			outp!("{}", String::from_utf8_lossy(&script));
 			0
 		}
 		Commands::Man { output } => status(run_man(output)),

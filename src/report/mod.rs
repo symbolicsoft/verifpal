@@ -8,13 +8,11 @@ pub(crate) mod template;
 mod tests;
 pub(crate) mod tex;
 
-use std::collections::HashMap;
-
 use serde::Serialize;
 
 use crate::primitive::Capability;
-use crate::syntax::names::{copy_base_name, is_anonymous_name};
-use crate::syntax::tokens::Token;
+use crate::syntax::names::is_anonymous_name;
+use crate::syntax::tokens::{Token, TokenKind};
 use crate::syntax::{Block, Declaration, Expression, Span};
 use crate::term::Value;
 use crate::util::collections::append_unique;
@@ -248,7 +246,65 @@ impl Run {
 	}
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Tint {
+	Keyword,
+	Attacker,
+	Principal,
+	Primitive,
+	Query,
+	Comment,
+}
+
+impl Tint {
+	fn of(kind: TokenKind) -> Option<Tint> {
+		match kind {
+			TokenKind::Keyword | TokenKind::Qualifier => Some(Tint::Keyword),
+			TokenKind::AttackerMode | TokenKind::Capability => Some(Tint::Attacker),
+			TokenKind::PrincipalName => Some(Tint::Principal),
+			TokenKind::PrimitiveName => Some(Tint::Primitive),
+			TokenKind::QueryKind => Some(Tint::Query),
+			TokenKind::Comment => Some(Tint::Comment),
+			TokenKind::ConstantName
+			| TokenKind::PhaseNumber
+			| TokenKind::Threshold
+			| TokenKind::Arrow
+			| TokenKind::Assign
+			| TokenKind::Check
+			| TokenKind::Anonymous => None,
+		}
+	}
+}
+
 impl ModelReport {
+	pub(crate) fn chunks(&self, from: usize, to: usize) -> Vec<(Option<Tint>, &str)> {
+		let source = self.source.as_str();
+		let mut out: Vec<(Option<Tint>, &str)> = Vec::new();
+		let mut at = from;
+		for t in &self.tokens {
+			if t.span.start < at
+				|| t.span.end > to
+				|| t.span.start >= t.span.end
+				|| !source.is_char_boundary(t.span.start)
+				|| !source.is_char_boundary(t.span.end)
+			{
+				continue;
+			}
+			let Some(tint) = Tint::of(t.kind) else {
+				continue;
+			};
+			if at < t.span.start {
+				out.push((None, &source[at..t.span.start]));
+			}
+			out.push((Some(tint), &source[t.span.start..t.span.end]));
+			at = t.span.end;
+		}
+		if at < to {
+			out.push((None, &source[at..to]));
+		}
+		out
+	}
+
 	pub(crate) fn short_name(&self) -> &str {
 		match &self.analysis {
 			Some(a) => &a.model,
@@ -299,24 +355,6 @@ impl Analysis {
 		}
 	}
 
-	pub(crate) fn attacked_values(&self) -> HashMap<String, Vec<usize>> {
-		let mut out: HashMap<String, Vec<usize>> = HashMap::new();
-		for (qi, q) in self.queries.iter().enumerate() {
-			for s in &q.steps {
-				if s.kind != "replay" && s.kind != "mutations" {
-					continue;
-				}
-				for v in &s.values {
-					append_unique(
-						out.entry(copy_base_name(&v.name).to_string()).or_default(),
-						qi,
-					);
-				}
-			}
-		}
-		out
-	}
-
 	pub(crate) fn code_pairs(&self) -> impl Iterator<Item = &str> {
 		self.code
 			.as_bytes()
@@ -350,7 +388,7 @@ impl Analysis {
 
 fn truncation_reasons(queries: &[QueryReport]) -> Vec<&str> {
 	let mut reasons: Vec<&str> = Vec::new();
-	for t in queries.iter().flat_map(|q| &q.envelope.truncations) {
+	for t in queries.iter().flat_map(QueryReport::cut) {
 		append_unique(&mut reasons, t.as_str());
 	}
 	reasons
@@ -386,6 +424,14 @@ impl QueryReport {
 
 	pub(crate) fn has_trace(&self) -> bool {
 		self.resolved && !self.steps.is_empty()
+	}
+
+	pub(crate) fn cut(&self) -> &[String] {
+		if self.resolved {
+			&[]
+		} else {
+			&self.envelope.truncations
+		}
 	}
 }
 

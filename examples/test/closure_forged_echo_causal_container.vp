@@ -1,0 +1,59 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0 at one session, c1 at two.
+//
+// closure_forged_echo_same_phase_container.vp with Alice sending e only after
+// she has received Bob's guarded reply. At one session the genuine e exists
+// only because Bob already answered, so it cannot be what Bob was handed, and
+// his echo of the attacker's forgery is no copy of Alice's x. At two sessions
+// the first Alice's e can be handed to the second Bob, whose reply is then
+// Alice's own x, and s1 is revealed.
+attacker[active]
+
+principal Bob[
+	knows private skb
+	gb = PUBKEY(skb)
+]
+
+Bob -> Alice: [gb]
+
+principal Alice[
+	generates k, na, m
+	s1, s2 = THRESHOLD_SPLIT[2](k)
+	ca = PUBKEY(na)
+	x = THRESHOLD_SIGN[forgeable](s1, na, ca, m)
+	e = PKE_ENC(gb, x)
+	leaks na
+]
+
+Alice -> Bob: ca, m
+
+Bob -> Carol: [gb]
+
+principal Carol[
+	generates mc
+	y = PKE_ENC(gb, mc)
+]
+
+Carol -> Bob: y
+
+principal Bob[
+	d = PKE_DEC(skb, y)
+]
+
+Bob -> Alice: [d]
+
+principal Alice[
+	_ = HASH(d)
+]
+
+Alice -> Dave: e
+
+principal Dave[
+	_ = HASH(e)
+]
+
+queries[
+	confidentiality? s1
+]

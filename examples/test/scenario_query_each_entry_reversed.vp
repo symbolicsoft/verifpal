@@ -1,0 +1,51 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a0a1 at one session and at two, as scenario_query_each_entry.vp gives with
+// its entries the other way round.
+//
+// The order of the entries decides only which copy keeps the unsuffixed
+// names, never which queries a model may ask or what they find. Written this
+// way round, the first query was the one rejected: "Alice receives `gb` but
+// never uses it".
+//
+// a0: `gb` is guarded, and the copy bound to it takes Bob's own value.
+// a1: `gc` travels unguarded, so in the copy bound to it the attacker
+// replaces it with a key of its own and Alice encrypts to that.
+
+attacker[active]
+
+principal Bob[
+	knows private b
+	gb = PUBKEY(b)
+]
+
+principal Carol[
+	knows private c
+	gc = PUBKEY(c)
+]
+
+Bob -> Alice: [gb]
+Carol -> Alice: gc
+
+principal Alice[
+	knows public gpeer
+	generates n
+	e = PKE_ENC(gpeer, n)
+]
+
+Alice -> Bob: e
+
+principal Bob[
+	d = PKE_DEC(b, e)
+]
+
+scenarios[
+	Alice[gpeer = gc]
+	Alice[gpeer = gb]
+]
+
+queries[
+	authentication? Bob -> Alice: gb
+	authentication? Carol -> Alice: gc
+]

@@ -68,16 +68,18 @@ fn alert(newer: &str, current: &str) {
 		"Verifpal {} is available; you have {}. Get it at https://verifpal.com/",
 		newer, current
 	);
-	if color_output_support() {
-		eprintln!(
+	use std::io::Write as _;
+	let line = if color_output_support() {
+		format!(
 			"  {} {} {}",
 			"Update".red().bold(),
 			"\u{25b2}".red().bold(),
 			message.red()
-		);
-		return;
-	}
-	eprintln!("  Update ! {}", message);
+		)
+	} else {
+		format!("  Update ! {}", message)
+	};
+	let _ = writeln!(std::io::stderr().lock(), "{}", line);
 }
 
 fn newer_version(body: &str, current: &str) -> Option<String> {

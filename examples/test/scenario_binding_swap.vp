@@ -1,0 +1,39 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1c0 at one session and at two.
+//
+// The entry swaps Alice's two keys. Substitution is simultaneous, so `x` is
+// sealed under `t2`, which Bob leaks, and `y` under `t1`, which nobody does:
+// the verdicts are those of the model as written, exchanged. Each target is
+// also the other's value, so Alice still holds both. Dropping every rebound
+// target from her `knows` once left her using `t2` without declaring it,
+// and the model was rejected with "unknown constant `t2`".
+//
+// scenario_binding_chain.vp is the counterweight: `t1 = t2, t2 = t3` gives
+// c0c1, since `t1` becomes `t2` and stops there.
+
+attacker[passive]
+
+principal Alice[
+	knows private t1, t2
+	generates n1, n2
+	x = ENC(t1, n1)
+	y = ENC(t2, n2)
+]
+
+Alice -> Bob: x, y
+
+principal Bob[
+	knows private t2
+	leaks t2
+]
+
+scenarios[
+	Alice[t1 = t2, t2 = t1]
+]
+
+queries[
+	confidentiality? n1
+	confidentiality? n2
+]

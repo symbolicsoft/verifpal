@@ -15,7 +15,6 @@
 \usepackage{longtable}
 \usepackage{enumitem}
 \usepackage{caption}
-\usepackage{listings}
 \usepackage{microtype}
 \usepackage[hidelinks]{hyperref}
 
@@ -46,6 +45,9 @@
 \newcommand{\vpdagger}[1]{\ensuremath{{#1}^{\dagger}}}
 \newcommand{\vpguarded}[1]{[#1]}
 \newcommand{\vpcode}[1]{\texttt{#1}}
+\DeclareRobustCommand{\vpfile}[1]{%
+  {\ttfamily\let\vpfileus\_\def\_{\vpfileus\allowbreak}#1}}
+\newcommand{\vpwirenote}[1]{\textnormal{(#1)}}
 \newcommand{\vpprecondition}[1]{%
   {\normalfont\footnotesize\color{vpslate}\textsf{precondition}\enspace#1}}
 
@@ -101,6 +103,7 @@
   vpplain/.style={draw=vpink!75},
   vpforged/.style={draw=vpaccent,line width=0.7pt},
   vpreplay/.style={draw=vpaccent,line width=0.7pt,dash pattern=on 3pt off 1.6pt},
+  vpdropped/.style={draw=vpaccent,line width=0.7pt,-{Rays[n=4,length=2mm,width=2mm]}},
   vpmuted/.style={draw=vprule,line width=0.55pt},
   vplabel/.style={font=\footnotesize,fill=white,inner sep=2.5pt,text=vpink},
   vplabeladv/.style={vplabel,text=vpaccent},
@@ -109,7 +112,6 @@
   vpboxtext/.style={text=vpink!85},
   vpnote/.style={draw=vprule,fill=vpband,line width=0.5pt,rounded corners=1.5pt,
     font=\scriptsize,text=vpslate,inner sep=3pt},
-  vpnoteadv/.style={vpnote,draw=vpaccent!45,fill=white,text=vpaccent},
   vpnum/.style={font=\scriptsize,text=vpslate,inner sep=0pt,anchor=east},
   vpnumadv/.style={vpnum,text=vpaccent},
   vpnumwide/.style={vpnum},
@@ -382,36 +384,33 @@
   {\scriptsize\textsf{#1}\,\ensuremath{\rightarrow}\,\textsf{#2}}%
   \begingroup\parfillskip=0pt\par\endgroup}
 
-% Model source listings.
-\lstdefinelanguage{Verifpal}{
-  morekeywords={attacker,active,passive,principal,knows,generates,leaks,phase,
-    queries,scenarios,precondition,public,private,confidentiality,
-    authentication,freshness,unlinkability,equivalence,weak,forgeable,malleable,from},
-  morekeywords=[2]{ASSERT,CONCAT,SPLIT,HASH,HKDF,AEAD_ENC,AEAD_DEC,ENC,DEC,
-    MAC,PUBKEY,DH_KEX,SIGN,SIGNVERIF,PKE_ENC,PKE_DEC,THRESHOLD_SPLIT,THRESHOLD_JOIN,THRESHOLD_SIGN,
-    RINGSIGN,RINGSIGNVERIF,BLIND,UNBLIND,KEM_ENCAP,KEM_DECAP},
-  sensitive=false,
-  morecomment=[l]{//},
-  morecomment=[s]{/*}{*/},
-  literate={->}{{$\rightarrow$}}2 {→}{{$\rightarrow$}}1,
-}
-\lstset{
-  language=Verifpal,
-  basicstyle=\ttfamily\footnotesize,
-  keywordstyle=\color{vpaccent},
-  keywordstyle=[2]\color{vpslate}\bfseries,
-  commentstyle=\color{vpslate}\itshape,
-  showstringspaces=false,
-  breaklines=true,
-  breakindent=2em,
-  columns=fullflexible,
-  keepspaces=true,
-  tabsize=4,
-  frame=leftline,
-  framesep=6pt,
-  rulecolor=\color{vprule},
-  xleftmargin=10pt,
-  numbers=left,
-  numberstyle=\tiny\color{vpslate!70},
-  numbersep=8pt,
-}
+% Verbatim text: model source and diagnostics. Each line of the text is one
+% \vpline, given the width of its indentation in columns; a line too long for
+% the measure wraps and hangs under itself. The text is escaped, never read
+% under changed category codes, so it can stand inside any argument.
+\newcommand{\vpverbatim}{\ttfamily\frenchspacing\raggedright}
+\newcommand{\vpline}[2]{%
+  \hangindent=\dimexpr#1\fontdimen2\font+2em\relax\hangafter=1
+  \noindent\strut\hskip#1\fontdimen2\font\relax#2\strut\par}
+\newcommand{\vpsrckeyword}[1]{{\color{vpaccent}#1}}
+\newcommand{\vpsrcprimitive}[1]{{\color{vpslate}\bfseries#1}}
+\newcommand{\vpsrccomment}[1]{{\color{vpslate}\itshape#1}}
+
+% Model source listings: numbered lines against a rule that runs unbroken down
+% the left, each line a box as tall as its wrapped text.
+\newcounter{vpsrcline}
+\newenvironment{vplisting}{%
+  \par\addvspace{\medskipamount}%
+  \setcounter{vpsrcline}{0}%
+  \vpverbatim\footnotesize
+  \parskip=0pt\lineskip=0pt\lineskiplimit=\maxdimen
+  \let\vpplainline\vpline
+  \renewcommand{\vpline}[2]{%
+    \stepcounter{vpsrcline}%
+    \noindent\hbox{%
+      \hbox to 2pt{\hss\normalfont\tiny\color{vpslate!70}\arabic{vpsrcline}}%
+      \hskip2pt{\color{vprule}\vrule width 0.4pt}\hskip6pt
+      \vtop{\hsize=\dimexpr\linewidth-10.4pt\relax\lineskiplimit=0pt
+        \vpplainline{##1}{##2}}}\par}%
+}{%
+  \par\addvspace{\medskipamount}}

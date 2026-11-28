@@ -8,7 +8,6 @@ use std::sync::atomic::AtomicBool;
 
 use super::sanity::MAX_PRINCIPALS;
 use super::sessions::{ModelCopy, map_constants};
-use crate::console::InfoLevel;
 use crate::engine::exec::{Context, execute};
 use crate::engine::program::Program;
 use crate::protocol::trace::resolve_trace_constant;
@@ -18,8 +17,9 @@ use crate::syntax::{
 	VResult, VerifpalError,
 };
 use crate::term::{Constant, MAX_COPIES, Value, ValueId};
-use crate::util::text::{did_you_mean, quoted_list};
+use crate::util::text::{did_you_mean, plural, quoted_list};
 use crate::util::{IdMap, IdSet};
+use crate::verify::result::peer_description;
 use crate::verify::{Expansion, ScenarioSummary};
 
 pub(crate) fn expand_scenarios(m: &Model, sessions: u8, cancel: &AtomicBool) -> VResult<Expansion> {
@@ -29,7 +29,6 @@ pub(crate) fn expand_scenarios(m: &Model, sessions: u8, cancel: &AtomicBool) -> 
 			model: m.clone(),
 			corrupt_from: None,
 			scenarios: Vec::new(),
-			variants: Vec::new(),
 			siblings: IdMap::default(),
 			interchangeable: IdMap::default(),
 			actors: IdMap::default(),
@@ -38,7 +37,7 @@ pub(crate) fn expand_scenarios(m: &Model, sessions: u8, cancel: &AtomicBool) -> 
 	}
 	sanity_scenarios(m)?;
 	let principals = m.declared_principals();
-	check_scale(count, sessions, principals.len())?;
+	check_scale(&m.scenarios, sessions, principals.len())?;
 
 	let freshen = m.freshened_constants();
 	let copies = scenario_copies(m, &freshen, sessions)?;
@@ -60,7 +59,7 @@ pub(crate) fn expand_scenarios(m: &Model, sessions: u8, cancel: &AtomicBool) -> 
 		}
 	}
 
-	let query_variants = scenario_query_variants(m, &copies, &scenarios);
+	let variants = scenario_query_variants(m, &copies, &scenarios);
 	let summaries: Vec<ScenarioSummary> = scenarios
 		.iter()
 		.map(|&(s, corrupt_from)| ScenarioSummary {
@@ -74,27 +73,15 @@ pub(crate) fn expand_scenarios(m: &Model, sessions: u8, cancel: &AtomicBool) -> 
 		})
 		.collect();
 
-	let corrupt = summaries
-		.iter()
-		.filter(|s| s.corrupt_from.is_some())
-		.count();
-	crate::console::message(
-		&format!(
-			"Analyzing {count} peer scenarios per principal, {corrupt} of them with a \
-			 corrupt peer; per-scenario values and principals are suffixed @2 onward.",
-		),
-		InfoLevel::Info,
-	);
-
 	Ok(Expansion {
 		model: Model {
 			blocks,
 			scenarios: Vec::new(),
+			variants,
 			..m.clone()
 		},
 		corrupt_from: Some(corrupt_from),
 		scenarios: summaries,
-		variants: query_variants,
 		siblings: IdMap::default(),
 		interchangeable: interchangeable_clones(&principals, &scenarios, &copies),
 		actors: principals
@@ -103,6 +90,25 @@ pub(crate) fn expand_scenarios(m: &Model, sessions: u8, cancel: &AtomicBool) -> 
 			.collect(),
 		dependent: binding_dependent(m),
 	})
+}
+
+pub(crate) fn announcement(scenarios: &[ScenarioSummary]) -> Option<String> {
+	match scenarios {
+		[] => None,
+		[only] => Some(format!(
+			"Analyzing 1 peer scenario per principal ({}).",
+			peer_description(only.corrupt_from)
+		)),
+		_ => Some(format!(
+			"Analyzing {} peer scenarios per principal, {} of them with a corrupt peer; \
+			 per-scenario values and principals are suffixed @2 onward.",
+			scenarios.len(),
+			scenarios
+				.iter()
+				.filter(|s| s.corrupt_from.is_some())
+				.count()
+		)),
+	}
 }
 
 fn binding_dependent(m: &Model) -> IdSet<ValueId> {
@@ -148,22 +154,31 @@ fn scenario_copies<'a>(
 		.collect())
 }
 
-fn check_scale(count: usize, sessions: u8, principals: usize) -> VResult<()> {
+fn check_scale(scenarios: &[Scenario], sessions: u8, principals: usize) -> VResult<()> {
+	let count = scenarios.len();
+	let held = MAX_COPIES + 1;
 	let analyzed = count as u32 * sessions as u32;
-	if analyzed > MAX_COPIES + 1 {
-		return Err(VerifpalError::sanity(
+	if analyzed > held {
+		let fit = (held / sessions as u32) as usize;
+		let fewer = format!("declare at most {fit} scenario{}", plural(fit));
+		let e = VerifpalError::sanity(
 			format!(
-				"{count} scenarios at {sessions} sessions would analyze {analyzed} copies \
-				 of every principal, which exceeds the {} the id space holds",
-				MAX_COPIES + 1
+				"{count} scenarios at {sessions} session{} would analyze {analyzed} copies \
+				 of every principal, which exceeds the {held} the id space holds",
+				plural(sessions.into()),
 			)
 			.into(),
 		)
 		.note("scenarios and sessions multiply: each scenario runs every session")
-		.help(format!(
-			"declare fewer scenarios, or analyze with `--sessions {}` or fewer",
-			((MAX_COPIES + 1) / count as u32).max(1)
-		)));
+		.help(match held / count as u32 {
+			0 => fewer,
+			1 => format!("{fewer}, or analyze with `--sessions 1`"),
+			most => format!("{fewer}, or analyze with `--sessions {most}` or fewer"),
+		});
+		return Err(match scenarios.get(fit) {
+			Some(first) => e.marking(first.span, "the first scenario beyond that"),
+			None => e,
+		});
 	}
 	let expanded = principals * count;
 	if expanded > MAX_PRINCIPALS {
@@ -224,14 +239,6 @@ fn rebindings(scenario: &Scenario) -> impl Iterator<Item = &(Constant, Constant)
 		.filter(|(target, value)| target.id != value.id)
 }
 
-pub(crate) fn keeps(m: &Model, principal: PrincipalId, id: ValueId) -> bool {
-	m.scenarios.is_empty()
-		|| m.scenarios.iter().any(|scenario| {
-			scenario.principal != principal
-				|| !rebindings(scenario).any(|(target, _)| target.id == id)
-		})
-}
-
 fn bound<'p>(p: &'p Principal, scenario: &Scenario) -> Cow<'p, Principal> {
 	if scenario.principal != p.id {
 		return Cow::Borrowed(p);
@@ -247,15 +254,16 @@ fn bound<'p>(p: &'p Principal, scenario: &Scenario) -> Cow<'p, Principal> {
 		},
 		None => c.clone(),
 	};
+	let replaced = |c: &Constant| {
+		rebindings(scenario).any(|(target, _)| target.id == c.id)
+			&& !rebindings(scenario).any(|(_, value)| value.id == c.id)
+	};
 	let mut out = p.clone();
 	out.expressions.retain_mut(|expr| {
-		let declared = !expr.constants.is_empty();
 		if expr.kind == Declaration::Knows {
-			expr.constants
-				.retain(|c| !rebindings(scenario).any(|(target, _)| target.id == c.id));
-		}
-		if declared && expr.constants.is_empty() {
-			return false;
+			let declared = !expr.constants.is_empty();
+			expr.constants.retain(|c| !replaced(c));
+			return !declared || !expr.constants.is_empty();
 		}
 		for c in &mut expr.constants {
 			*c = bind(c);
@@ -304,12 +312,16 @@ fn interchangeable_clones(
 #[cfg(test)]
 pub(crate) fn honesty_profile(m: &Model) -> std::collections::BTreeMap<String, i32> {
 	let freshen = m.freshened_constants();
-	let Ok(copies) = scenario_copies(m, &freshen, 1) else {
+	let dated = (!m.scenarios.is_empty())
+		.then(|| scenario_copies(m, &freshen, 1).ok())
+		.flatten()
+		.and_then(|copies| corruption(m, &copies, &AtomicBool::new(false)).ok());
+	let Some(dated) = dated else {
 		return std::collections::BTreeMap::new();
 	};
 	m.scenarios
 		.iter()
-		.zip(corruption(m, &copies, &AtomicBool::new(false)).expect("uncancelled"))
+		.zip(dated)
 		.map(|(s, corrupt_from)| {
 			let bindings: Vec<String> = s
 				.bindings
@@ -519,14 +531,8 @@ fn declared_constants(m: &Model) -> Vec<(ValueId, String)> {
 
 fn corruption(m: &Model, copies: &[ModelCopy], cancel: &AtomicBool) -> VResult<Vec<i32>> {
 	let declared: Vec<(&Scenario, i32)> = m.scenarios.iter().map(|s| (s, i32::MAX)).collect();
-	let model = Model {
-		blocks: scenario_blocks(m, copies, &declared),
-		scenarios: Vec::new(),
-		..m.clone()
-	};
-	let Ok(km) = super::sanity::sanity(&model) else {
-		return Ok(vec![i32::MAX; declared.len()]);
-	};
+	let model = unqueried(m, scenario_blocks(m, copies, &declared));
+	let km = super::sanity::sanity(&model).map_err(|e| blamed(m, e))?;
 	let program = Program::of(&model, &km);
 	let honest = execute(
 		&Context::new(&program, &km).cancellable(cancel),
@@ -563,6 +569,36 @@ fn corruption(m: &Model, copies: &[ModelCopy], cancel: &AtomicBool) -> VResult<V
 				.unwrap_or(i32::MAX)
 		})
 		.collect())
+}
+
+fn unqueried(m: &Model, blocks: Vec<Block>) -> Model {
+	Model {
+		blocks,
+		scenarios: Vec::new(),
+		queries: Vec::new(),
+		..m.clone()
+	}
+}
+
+fn blamed(m: &Model, expanded: VerifpalError) -> VerifpalError {
+	let failure = |blocks: Vec<Block>| super::sanity::sanity(&unqueried(m, blocks)).err();
+	if let Some(written) = failure(m.blocks.clone()) {
+		return written;
+	}
+	let freshen = m.freshened_constants();
+	let original = [ModelCopy::original(&freshen)];
+	m.scenarios
+		.iter()
+		.find_map(|scenario| {
+			let e = failure(scenario_blocks(m, &original, &[(scenario, i32::MAX)]))?;
+			let used = e.span;
+			let e = e.at(scenario.span);
+			Some(match used {
+				Some(used) => e.label(used, "used here under this scenario"),
+				None => e,
+			})
+		})
+		.unwrap_or(expanded)
 }
 
 fn declares_private(m: &Model, principal: PrincipalId, id: ValueId) -> bool {
@@ -719,6 +755,238 @@ mod tests {
 			panic!("must be rejected");
 		};
 		assert!(e.message.contains("over the wire"), "{}", e.message);
+	}
+
+	fn knows(e: &Expansion, principal: &str) -> Vec<String> {
+		e.model
+			.blocks
+			.iter()
+			.filter_map(|b| match b {
+				Block::Principal(p) if p.name == principal => Some(&p.expressions),
+				_ => None,
+			})
+			.flatten()
+			.filter(|expr| expr.kind == Declaration::Knows)
+			.flat_map(|expr| expr.constants.iter().map(|c| c.name.to_string()))
+			.collect()
+	}
+
+	#[test]
+	fn a_target_another_binding_takes_as_its_value_stays_declared() {
+		let src = |bindings: &str| {
+			format!(
+				"attacker[passive]\n\
+				principal Alice[\n\
+				knows private swp_a, swp_b, swp_c\n\
+				generates swp_n\n\
+				swp_x = ENC(swp_a, swp_n)\n\
+				swp_y = ENC(swp_b, swp_n)\n\
+				]\n\
+				scenarios[\n\
+				Alice[{bindings}]\n\
+				]\n\
+				queries[\n\
+				confidentiality? swp_n\n\
+				]\n"
+			)
+		};
+		let assigned = |e: &Expansion| -> Vec<String> {
+			e.model
+				.blocks
+				.iter()
+				.filter_map(|b| match b {
+					Block::Principal(p) => Some(&p.expressions),
+					_ => None,
+				})
+				.flatten()
+				.filter_map(|expr| expr.assigned.as_ref().map(ToString::to_string))
+				.collect()
+		};
+		for (bindings, held, computed) in [
+			(
+				"swp_a = swp_b, swp_b = swp_a",
+				vec!["swp_a", "swp_b", "swp_c"],
+				["ENC(swp_b, swp_n)", "ENC(swp_a, swp_n)"],
+			),
+			(
+				"swp_a = swp_b, swp_b = swp_c",
+				vec!["swp_b", "swp_c"],
+				["ENC(swp_b, swp_n)", "ENC(swp_c, swp_n)"],
+			),
+			(
+				"swp_a = swp_c",
+				vec!["swp_b", "swp_c"],
+				["ENC(swp_c, swp_n)", "ENC(swp_b, swp_n)"],
+			),
+		] {
+			let m = parse_string("swp.vp", &src(bindings)).expect("parses");
+			let e = expand_scenarios(&m, 1, &AtomicBool::new(false)).expect("expands");
+			assert_eq!(knows(&e, "Alice"), held, "{bindings}");
+			assert_eq!(assigned(&e), computed, "{bindings}");
+			crate::protocol::sanity::sanity(&e.model)
+				.unwrap_or_else(|error| panic!("{bindings}: {error}"));
+		}
+	}
+
+	fn rejected(source: &str) -> String {
+		let m = parse_string("blame.vp", source).expect("parses");
+		let Err(e) = expand_scenarios(&m, 1, &AtomicBool::new(false)) else {
+			panic!("must be rejected");
+		};
+		e.located(&m.file_name, &m.source).to_string()
+	}
+
+	#[test]
+	fn a_value_the_bound_principal_does_not_hold_is_reported_on_its_scenario() {
+		let text = rejected(
+			"attacker[active]\n\
+			principal Bob[\n\
+			\tknows private blm_b\n\
+			\tgenerates blm_nb\n\
+			\tblm_gb = PUBKEY(blm_b)\n\
+			]\n\
+			Bob -> Alice: blm_gb\n\
+			principal Alice[\n\
+			\tknows public blm_gpeer\n\
+			\tgenerates blm_n\n\
+			\tblm_e = PKE_ENC(blm_gpeer, blm_n)\n\
+			]\n\
+			scenarios[\n\
+			\tAlice[blm_gpeer = blm_gb]\n\
+			\tAlice[blm_gpeer = blm_nb]\n\
+			]\n\
+			queries[\n\
+			\tconfidentiality? blm_n\n\
+			]\n",
+		);
+		assert!(text.contains("Alice does not know `blm_nb`"), "{text}");
+		assert!(text.contains(" --> blame.vp:15:20\n"), "{text}");
+		assert!(
+			text.contains("11 |     blm_e = PKE_ENC(blm_gpeer, blm_n)\n   |     --------------------------------- used here under this scenario"),
+			"{text}"
+		);
+		assert!(text.contains("`Bob -> Alice: blm_nb`"), "{text}");
+		assert!(!text.contains('@'), "a name the model cannot write: {text}");
+	}
+
+	#[test]
+	fn an_error_the_model_has_as_written_is_reported_as_written() {
+		let text = rejected(
+			"attacker[active]\n\
+			principal Alice[\n\
+			\tknows private blw_a, blw_b\n\
+			\tgenerates blw_a\n\
+			\tblw_x = HASH(blw_a)\n\
+			]\n\
+			scenarios[\n\
+			\tAlice[blw_a = blw_b]\n\
+			]\n\
+			queries[\n\
+			\tconfidentiality? blw_b\n\
+			]\n",
+		);
+		assert!(text.contains("`blw_a` already exists"), "{text}");
+		assert!(text.contains(" --> blame.vp:4:12\n"), "{text}");
+	}
+
+	#[test]
+	fn a_scenario_is_dated_whatever_copy_its_queries_are_sane_in() {
+		let src = SRC
+			.replace(
+				"Alice[scx_gpeer = scx_gb]\nAlice[scx_gpeer = scx_gm]\n",
+				"Alice[scx_gpeer = scx_gm]\nAlice[scx_gpeer = scx_gb]\n",
+			)
+			.replace(
+				"confidentiality? scx_ni\n",
+				"authentication? Bob -> Alice: scx_gb\n",
+			);
+		let m = parse_string("scx.vp", &src).expect("parses");
+		let e = expand_scenarios(&m, 1, &AtomicBool::new(false)).expect("expands");
+		assert_eq!(
+			e.scenarios
+				.iter()
+				.map(|s| (s.bindings[0].1.to_string(), s.corrupt_from))
+				.collect::<Vec<_>>(),
+			[
+				("scx_gb".to_string(), None),
+				("scx_gm".to_string(), Some(0))
+			],
+			"the written query is sane only beside the honest peer, declared second; \
+			 failing it in the first copy once left every scenario undated"
+		);
+		crate::protocol::sanity::sanity(&e.model).expect("the query is sane in the honest copy");
+		let beside_mallory = src.replace("Bob -> Alice: scx_gb\n", "Mallory -> Alice: scx_gm\n");
+		let m = parse_string("scx.vp", &beside_mallory).expect("parses");
+		let e = expand_scenarios(&m, 1, &AtomicBool::new(false)).expect("expands");
+		let error = crate::protocol::sanity::sanity(&e.model)
+			.expect_err("the only copy that uses scx_gm answers no query");
+		assert!(
+			error.message.contains("`scx_gm` but never uses it"),
+			"{error}"
+		);
+	}
+
+	#[test]
+	fn one_scenario_is_announced_in_the_singular() {
+		let summary = |corrupt_from| ScenarioSummary {
+			principal: Arc::from("Alice"),
+			bindings: Vec::new(),
+			corrupt_from,
+		};
+		assert_eq!(announcement(&[]), None);
+		assert_eq!(
+			announcement(&[summary(None)]).as_deref(),
+			Some("Analyzing 1 peer scenario per principal (honest peer).")
+		);
+		assert_eq!(
+			announcement(&[summary(None), summary(Some(0))]).as_deref(),
+			Some(
+				"Analyzing 2 peer scenarios per principal, 1 of them with a corrupt peer; \
+				 per-scenario values and principals are suffixed @2 onward."
+			)
+		);
+	}
+
+	#[test]
+	fn too_many_scenarios_point_at_the_first_one_that_does_not_fit() {
+		let entries = |count: usize| {
+			let mut src =
+				String::from("attacker[passive]\nprincipal Alice[\n\tknows private scl_t");
+			for i in 0..count {
+				src += &format!(", scl_p{i}");
+			}
+			src += "\n\tscl_x = HASH(scl_t)\n]\nscenarios[\n";
+			for i in 0..count {
+				src += &format!("\tAlice[scl_t = scl_p{i}]\n");
+			}
+			src + "]\nqueries[\n\tconfidentiality? scl_x\n]\n"
+		};
+		let rejected = |count: usize, sessions: u8| {
+			let m = parse_string("scale.vp", &entries(count)).expect("parses");
+			let Err(e) = expand_scenarios(&m, sessions, &AtomicBool::new(false)) else {
+				panic!("{count} scenarios at {sessions} sessions must be rejected");
+			};
+			e.located(&m.file_name, &m.source).to_string()
+		};
+		let text = rejected(32, 1);
+		assert!(
+			text.contains("32 scenarios at 1 session would analyze 32 copies"),
+			"{text}"
+		);
+		assert!(text.contains(" --> scale.vp:38:2\n"), "{text}");
+		assert!(
+			text.ends_with("= help: declare at most 31 scenarios"),
+			"{text}"
+		);
+		let text = rejected(16, 2);
+		assert!(text.contains("16 scenarios at 2 sessions"), "{text}");
+		assert!(text.contains(" --> scale.vp:22:2\n"), "{text}");
+		assert!(
+			text.ends_with("= help: declare at most 15 scenarios, or analyze with `--sessions 1`"),
+			"{text}"
+		);
+		let m = parse_string("scale.vp", &entries(31)).expect("parses");
+		assert!(expand_scenarios(&m, 1, &AtomicBool::new(false)).is_ok());
 	}
 
 	#[test]
@@ -1177,7 +1445,7 @@ mod tests {
 			 is one that is honest at phase 0 whenever the model declares any"
 		);
 		assert!(
-			e.variants[0].is_empty(),
+			e.model.variants[0].is_empty(),
 			"the only other scenario is corrupt from phase 0, so it gets no instance \
 			 of the query: its claims are not the protocol's to keep"
 		);

@@ -1,0 +1,38 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a1 at one session and at two.
+//
+// Alice seals m1 and m2 under one key and nonce and leaks m1, so the attacker
+// re-tags a forgery of e2 from the reuse pair and Bob accepts it. e1 is also
+// declared `forgeable`, but only from phase 1, and Bob receives in phase 0 and
+// checks in phase 1. The verdict is reached at phase 1, and the trace once
+// explained the phase-0 replacement by the phase-1 assumption, which was not in
+// force when the attacker had to build the value. An install is explained under
+// the phase in which its receive ran: here the nonce reuse.
+// narrate_install_after_capability_onset.vp is the counterweight.
+attacker[active]
+
+principal Alice[
+	knows private k
+	knows public ad1, ad2
+	generates n, m1, m2
+	e1 = AEAD_ENC[forgeable from phase 1](k, n, m1, ad1)
+	e2 = AEAD_ENC(k, n, m2, ad2)
+	leaks m1
+]
+
+Alice -> Bob: n, e1, e2
+
+phase[1]
+
+principal Bob[
+	knows private k
+	knows public ad1, ad2
+	d1 = AEAD_DEC(k, n, e1, ad1)?
+	d2 = AEAD_DEC(k, n, e2, ad2)?
+]
+
+queries[
+	authentication? Alice -> Bob: e2
+]

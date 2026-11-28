@@ -2,6 +2,7 @@
  * SPDX-License-Identifier: GPL-3.0-only */
 
 use super::*;
+use crate::verify::StepKind;
 use crate::verify::TraceValue;
 
 #[test]
@@ -52,11 +53,11 @@ fn a_report_serializes_to_the_documented_shape() {
 					subtype: None,
 					steps: vec![
 						TraceStep::new(
-							"derive",
+							StepKind::Derive,
 							"Attacker constructs PUBKEY(nil) from nil.".to_string(),
 						),
 						TraceStep {
-							kind: "mutations",
+							kind: StepKind::Mutations,
 							text: "Attacker replaces ga with PUBKEY(nil).".to_string(),
 							sender: Some("Alice".to_string()),
 							recipient: Some("Bob".to_string()),
@@ -97,6 +98,74 @@ fn a_report_serializes_to_the_documented_shape() {
 		r#""preconditions":[],"variants":2}]}}]}"#,
 	);
 	assert_eq!(json, expected);
+}
+
+#[test]
+fn a_step_carries_what_it_acts_on_as_fields_and_not_only_as_prose() {
+	let report = crate::verify::verify_report("examples/test/search_selective_drop.vp", 2)
+		.expect("verifies");
+	let drop = report
+		.results
+		.iter()
+		.flat_map(|r| &r.steps)
+		.find(|s| s.kind == StepKind::Drop)
+		.expect("the attack drops a value");
+	assert_eq!(
+		drop.text,
+		"Attacker drops c (Carol to Bob), and Bob continues without it."
+	);
+	assert_eq!(
+		(drop.sender.as_deref(), drop.recipient.as_deref()),
+		(Some("Carol"), Some("Bob"))
+	);
+	assert_eq!(drop.principal.as_deref(), Some("Bob"));
+	let dropped: Vec<&str> = drop.values.iter().map(|v| v.name.as_str()).collect();
+	assert_eq!(dropped, ["c"]);
+
+	let report =
+		crate::verify::verify_report("examples/test/blind_factor_leaked.vp", 1).expect("verifies");
+	let leak = report
+		.results
+		.iter()
+		.flat_map(|r| &r.steps)
+		.find(|s| s.text.contains("a leaks declaration"))
+		.expect("the attack is handed a leak");
+	assert_eq!(
+		leak.text,
+		"Attacker is handed r_open by a leaks declaration in Alice."
+	);
+	assert_eq!(leak.kind, StepKind::Derive);
+	assert_eq!(leak.principal.as_deref(), Some("Alice"));
+	let handed: Vec<&str> = leak.values.iter().map(|v| v.name.as_str()).collect();
+	assert_eq!(handed, ["r_open"]);
+	let json = serde_json::to_string(leak).expect("serializes");
+	assert_eq!(
+		json,
+		concat!(
+			r#"{"kind":"derive","text":"Attacker is handed r_open by a leaks declaration in Alice.","#,
+			r#""principal":"Alice","values":[{"name":"r_open"}]}"#
+		)
+	);
+}
+
+#[test]
+fn every_step_kind_serializes_to_the_name_it_always_had() {
+	for (kind, name) in [
+		(StepKind::Derive, "derive"),
+		(StepKind::Idle, "idle"),
+		(StepKind::Drop, "drop"),
+		(StepKind::Mutations, "mutations"),
+		(StepKind::Replay, "replay"),
+		(StepKind::Received, "received"),
+		(StepKind::Gate, "gate"),
+		(StepKind::Static, "static"),
+		(StepKind::Resolves, "resolves"),
+	] {
+		assert_eq!(
+			serde_json::to_string(&kind).expect("serializes"),
+			format!("\"{name}\"")
+		);
+	}
 }
 
 #[test]
@@ -356,6 +425,39 @@ fn an_analysis_reports_a_truncated_search_once_for_the_whole_run() {
 		.filter(|n| n.contains("term depth"))
 		.collect();
 	assert_eq!(hits.len(), 1, "notes were {:?}", a.notes);
+}
+
+#[test]
+fn a_search_cut_short_before_it_found_an_attack_qualifies_no_hold() {
+	let mut report = crate::verify::verify_report("examples/test/hmac_ok.vp", 1).expect("verifies");
+	assert_eq!(report.results.len(), 2);
+	for result in &mut report.results {
+		result
+			.envelope
+			.truncations
+			.push(crate::verify::Truncation::TermDepth);
+	}
+	report.results[0].resolved = true;
+	let a = Analysis::of(&report, "");
+	assert!(a.queries[0].cut().is_empty());
+	assert_eq!(a.queries[1].cut(), ["term depth"]);
+	assert!(
+		a.notes.iter().any(|n| n.contains("term depth")),
+		"the query that still holds was not searched exhaustively: {:?}",
+		a.notes
+	);
+	assert!(
+		a.scope()
+			.contains("stopped short even of that (term depth)")
+	);
+	report.results[1].resolved = true;
+	let a = Analysis::of(&report, "");
+	assert!(
+		!a.notes.iter().any(|n| n.contains("term depth")),
+		"no query is reported as holding, so none holds under a truncated search: {:?}",
+		a.notes
+	);
+	assert!(!a.scope().contains("stopped short"), "{}", a.scope());
 }
 
 #[test]

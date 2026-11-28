@@ -349,13 +349,6 @@ pub(crate) fn principal_uses_constant(
 	})
 }
 
-pub(crate) fn constant_used_by_any_principal(trace: &ProtocolTrace, c: &Constant) -> bool {
-	trace
-		.principal_ids
-		.iter()
-		.any(|&principal| principal_uses_constant(trace, principal, c))
-}
-
 #[cfg(test)]
 mod tests {
 	use super::*;

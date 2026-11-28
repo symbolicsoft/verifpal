@@ -23,10 +23,10 @@ type Fallible = Result<(), Box<dyn Error + Sync + Send>>;
 const TICK: std::time::Duration = std::time::Duration::from_millis(100);
 
 pub fn run() -> Fallible {
-	let (connection, io_threads) = Connection::stdio();
+	let (connection, threads) = super::transport::connect(std::io::stdin(), std::io::stdout());
 	let outcome = serve(&connection);
 	drop(connection);
-	io_threads.join()?;
+	threads.join()?;
 	outcome
 }
 
@@ -217,42 +217,50 @@ impl Server {
 	}
 
 	fn main_loop(&mut self, connection: &Connection) -> Fallible {
+		let reports = self.runner.reports().clone();
 		loop {
-			match connection.receiver.recv_timeout(TICK) {
-				Ok(Message::Request(req)) => {
-					if req.method == "shutdown" {
-						self.runner.cancel_all();
-						self.shut_down = true;
-						self.respond(Response::new_ok(req.id, serde_json::Value::Null));
-					} else if self.shut_down {
-						self.respond(Response::new_err(
-							req.id,
-							lsp_server::ErrorCode::InvalidRequest as i32,
-							"the server has been shut down and accepts only `exit`".to_string(),
-						));
-					} else {
-						self.on_request(req);
-					}
-				}
-				Ok(Message::Notification(note)) => {
-					if note.method == "exit" {
-						self.runner.cancel_all();
-						return if self.shut_down {
-							Ok(())
+			crossbeam_channel::select! {
+				recv(connection.receiver) -> message => match message {
+					Ok(Message::Request(req)) => {
+						if req.method == "shutdown" {
+							self.runner.cancel_all();
+							self.shut_down = true;
+							self.respond(Response::new_ok(req.id, serde_json::Value::Null));
+						} else if self.shut_down {
+							self.respond(Response::new_err(
+								req.id,
+								lsp_server::ErrorCode::InvalidRequest as i32,
+								"the server has been shut down and accepts only `exit`".to_string(),
+							));
 						} else {
-							Err("`exit` received before `shutdown`".into())
-						};
+							self.on_request(req);
+						}
 					}
-					if !self.shut_down {
-						self.on_notification(note);
+					Ok(Message::Notification(note)) => {
+						if note.method == "exit" {
+							self.runner.cancel_all();
+							return if self.shut_down {
+								Ok(())
+							} else {
+								Err("`exit` received before `shutdown`".into())
+							};
+						}
+						if !self.shut_down {
+							self.on_notification(note);
+						}
+					}
+					Ok(Message::Response(_)) => {}
+					Err(_) => {
+						self.runner.cancel_all();
+						return Ok(());
+					}
+				},
+				recv(reports) -> report => {
+					if let Ok(report) = report {
+						self.on_report(report);
 					}
 				}
-				Ok(Message::Response(_)) => {}
-				Err(e) if e.is_disconnected() => {
-					self.runner.cancel_all();
-					return Ok(());
-				}
-				Err(_) => {}
+				default(TICK) => {}
 			}
 			self.tick_if_due();
 		}
@@ -448,6 +456,13 @@ impl Server {
 		}
 	}
 
+	fn on_report(&self, report: proto::AnalysisReport) {
+		if report.ok {
+			self.publish(report.uri.as_str());
+		}
+		self.notify("verifpal/analysisReport", report);
+	}
+
 	fn publish(&self, uri: &str) {
 		let Some(doc) = self.docs.get(uri) else {
 			return;
@@ -541,7 +556,6 @@ impl Server {
 			sessions,
 			token: token.clone(),
 			progress: self.progress_supported,
-			passing: self.settings.passing,
 		};
 		if self.progress_supported {
 			self.request(
@@ -794,6 +808,79 @@ mod tests {
 		]\n";
 
 	#[test]
+	fn a_frame_the_server_cannot_read_gets_an_error_and_the_session_goes_on() {
+		use crate::lsp::transport::tests::{Sink, framed};
+		let opened = serde_json::json!({
+			"jsonrpc": "2.0",
+			"method": "textDocument/didOpen",
+			"params": {"textDocument": {
+				"uri": "file:///after.vp",
+				"languageId": "verifpal",
+				"version": 1,
+				"text": VALID,
+			}},
+		});
+		let hover = serde_json::json!({
+			"jsonrpc": "2.0",
+			"id": 5,
+			"method": "textDocument/hover",
+			"params": {
+				"textDocument": {"uri": "file:///after.vp"},
+				"position": {"line": 3, "character": 8},
+			},
+		});
+		let input = [
+			framed(
+				r#"{"jsonrpc":"2.0","id":0,"method":"initialize","params":{"processId":null,"rootUri":null,"capabilities":{}}}"#,
+			),
+			framed(r#"{"jsonrpc":"2.0","method":"initialized","params":{}}"#),
+			framed(
+				r#"{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":"file:///half.vp","languageId":"verifpal","version":1,"text":"// \ud83d\n"}}}"#,
+			),
+			framed(
+				r#"{"jsonrpc":"2.0","id":77,"method":"textDocument/hover","params":{"textDocument":{"uri":"file:///half.vp"},"position":{"line":0,"character":0},"x":"\udc00"}}"#,
+			),
+			framed(opened.to_string()),
+			framed(hover.to_string()),
+			framed(r#"{"jsonrpc":"2.0","id":6,"method":"shutdown"}"#),
+			framed(r#"{"jsonrpc":"2.0","method":"exit"}"#),
+		]
+		.concat();
+		let output = Sink::default();
+		let (connection, threads) =
+			crate::lsp::transport::connect(std::io::Cursor::new(input), output.clone());
+		serve(&connection).expect("the server runs until `exit`");
+		drop(connection);
+		threads.join().expect("the stream stays readable");
+		let messages = output.messages();
+		let rejected: Vec<(&serde_json::Value, &serde_json::Value)> = messages
+			.iter()
+			.filter_map(|m| Some((&m["id"], &m.get("error")?["code"])))
+			.collect();
+		assert_eq!(
+			rejected,
+			[
+				(&serde_json::Value::Null, &serde_json::json!(-32700)),
+				(&serde_json::json!(77), &serde_json::json!(-32700)),
+			],
+			"{messages:?}"
+		);
+		let answered = |id: i32| {
+			messages
+				.iter()
+				.find(|m| m["id"] == id && m.get("result").is_some())
+				.unwrap_or_else(|| panic!("request {id} is answered: {messages:?}"))
+		};
+		assert!(
+			answered(5)["result"]["contents"]["value"]
+				.as_str()
+				.is_some_and(|text| text.contains("HASH")),
+			"{messages:?}"
+		);
+		answered(6);
+	}
+
+	#[test]
 	fn opening_a_broken_model_publishes_a_diagnostic() {
 		let (client, handle, _) = start(ClientCapabilities::default());
 		open(
@@ -1017,18 +1104,133 @@ mod tests {
 		}
 	}
 
-	fn await_report_here(receiver: &crossbeam_channel::Receiver<Message>) -> serde_json::Value {
+	fn await_report_here(
+		server: &Server,
+		receiver: &crossbeam_channel::Receiver<Message>,
+	) -> serde_json::Value {
+		let report = server
+			.runner
+			.reports()
+			.recv_timeout(std::time::Duration::from_secs(60))
+			.expect("the worker reports");
+		server.on_report(report);
 		loop {
-			match receiver
-				.recv_timeout(std::time::Duration::from_secs(60))
-				.expect("the worker reports")
-			{
+			match receiver.recv().expect("the server forwards the report") {
 				Message::Notification(n) if n.method == "verifpal/analysisReport" => {
 					return n.params;
 				}
 				_ => continue,
 			}
 		}
+	}
+
+	fn published(receiver: &crossbeam_channel::Receiver<Message>) -> Vec<Vec<(u64, String)>> {
+		receiver
+			.try_iter()
+			.filter_map(|message| match message {
+				Message::Notification(n) if n.method == "textDocument/publishDiagnostics" => {
+					Some(n.params)
+				}
+				_ => None,
+			})
+			.map(|params| {
+				params["diagnostics"]
+					.as_array()
+					.expect("an array")
+					.iter()
+					.map(|d| {
+						let code = d["code"].as_str().expect("a code").to_string();
+						(d["severity"].as_u64().expect("a severity"), code)
+					})
+					.collect()
+			})
+			.collect()
+	}
+
+	fn crowded(principals: usize) -> String {
+		let mut model = String::from("attacker[passive]\n");
+		for i in 0..principals {
+			model.push_str(&format!("principal Cr{i}[\n\tknows private cr_{i}\n]\n"));
+		}
+		model.push_str("queries[\n\tconfidentiality? cr_0\n]\n");
+		model
+	}
+
+	#[test]
+	fn verdicts_are_published_with_the_live_check_under_the_settings_of_the_moment() {
+		let (sender, receiver) = crossbeam_channel::unbounded();
+		let mut server = Server::new(sender, PositionEncodingKind::UTF8);
+		open_here(&mut server, "file:///both.vp", &crowded(65));
+		server.on_tick();
+		let live = (1, "sanity error".to_string());
+		let verdict = (3, "confidentiality".to_string());
+		assert_eq!(published(&receiver), [vec![live.clone()]]);
+		let accepted = server.command(&analyze_params(
+			serde_json::json!({"uri": "file:///both.vp", "sessions": 1}),
+		));
+		assert_eq!(accepted["accepted"], true, "{accepted}");
+		let report = server
+			.runner
+			.reports()
+			.recv_timeout(std::time::Duration::from_secs(60))
+			.expect("the worker reports");
+		assert!(report.ok);
+		server.on_notification(Notification::new(
+			"workspace/didChangeConfiguration".to_string(),
+			serde_json::json!({"settings": {"verifpal": {"diagnostics": {"passing": false}}}}),
+		));
+		server.on_report(report);
+		assert_eq!(
+			published(&receiver),
+			[vec![live.clone()]],
+			"an analysis that ends after passing verdicts were turned off shows none, and \
+			 keeps the error the document itself has"
+		);
+		server.on_notification(Notification::new(
+			"workspace/didChangeConfiguration".to_string(),
+			serde_json::json!({"settings": {"verifpal": {"diagnostics": {"passing": true}}}}),
+		));
+		server.on_tick();
+		assert_eq!(published(&receiver), [vec![live, verdict]]);
+	}
+
+	#[test]
+	fn the_report_follows_the_diagnostics_it_explains() {
+		let (client, handle, _) = start(ClientCapabilities::default());
+		open(&client, "file:///order.vp", &crowded(65));
+		client
+			.sender
+			.send(Message::Request(Request::new(
+				RequestId::from(1),
+				"workspace/executeCommand".to_string(),
+				serde_json::json!({
+					"command": "verifpal.analyze",
+					"arguments": [{"uri": "file:///order.vp", "sessions": 1}],
+				}),
+			)))
+			.expect("sends the request");
+		let mut last = serde_json::Value::Null;
+		loop {
+			match client
+				.receiver
+				.recv_timeout(std::time::Duration::from_secs(60))
+				.expect("messages keep coming until the report")
+			{
+				Message::Notification(n) if n.method == "textDocument/publishDiagnostics" => {
+					last = n.params;
+				}
+				Message::Notification(n) if n.method == "verifpal/analysisReport" => break,
+				_ => {}
+			}
+		}
+		let codes: Vec<&str> = last["diagnostics"]
+			.as_array()
+			.expect("diagnostics were published before the report")
+			.iter()
+			.filter_map(|d| d["code"].as_str())
+			.collect();
+		assert_eq!(codes, ["sanity error", "confidentiality"], "{last}");
+		stop(client, handle);
 	}
 
 	#[test]
@@ -1040,7 +1242,7 @@ mod tests {
 			serde_json::json!({"uri": "file:///tick.vp", "sessions": 1}),
 		));
 		assert_eq!(accepted["accepted"], true, "{accepted}");
-		let report = await_report_here(&receiver);
+		let report = await_report_here(&server, &receiver);
 		assert_eq!(report["token"], accepted["token"], "{report}");
 		server.on_tick();
 		let Message::Notification(published) = receiver.recv().expect("the tick publishes") else {
@@ -1218,7 +1420,7 @@ mod tests {
 			serde_json::json!({"uri": "file:///frac.vp", "sessions": 1.4}),
 		));
 		assert_eq!(accepted["accepted"], true, "{accepted}");
-		let report = await_report_here(&receiver);
+		let report = await_report_here(&server, &receiver);
 		assert_eq!(report["sessions"], 1, "{report}");
 	}
 

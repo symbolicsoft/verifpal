@@ -1,0 +1,42 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0 at one session and at two.
+//
+// closure_forged_oracle_output.vp with Carol's message guarded. Bob signs
+// Carol's own mc, which the attacker never learns, so his genuine partial
+// cannot be opened, and a partial the attacker mints reveals no share.
+attacker[active]
+
+principal Bob[
+	knows private skb
+	knows public cb
+	generates k, nb
+	gb = PUBKEY(skb)
+	s1, s2 = THRESHOLD_SPLIT[2](k)
+	leaks nb
+]
+
+Bob -> Carol: [gb]
+
+principal Carol[
+	generates mc
+	y = PKE_ENC(gb, mc)
+]
+
+Carol -> Bob: [y]
+
+principal Bob[
+	m = PKE_DEC(skb, y)
+	p = THRESHOLD_SIGN[forgeable](s1, nb, cb, m)
+]
+
+Bob -> Dave: p
+
+principal Dave[
+	_ = HASH(p)
+]
+
+queries[
+	confidentiality? s1
+]

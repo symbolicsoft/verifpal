@@ -1,0 +1,46 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1 at one session and at two.
+//
+// Bob signs whatever message he decrypts, with his share s1 and a nonce he
+// leaks, and the partial is declared `forgeable`. The attacker seals a message
+// of its own to Bob and receives his partial over it. That partial is Bob's own
+// computation over an input the attacker could supply without forging anything,
+// so it is genuine, and with nb, cb and the chosen message it reveals s1. A send
+// computed from an install is a principal's disclosure once the install could
+// be supplied. closure_forged_oracle_output_guarded.vp is the counterweight.
+attacker[active]
+
+principal Bob[
+	knows private skb
+	knows public cb
+	generates k, nb
+	gb = PUBKEY(skb)
+	s1, s2 = THRESHOLD_SPLIT[2](k)
+	leaks nb
+]
+
+Bob -> Carol: [gb]
+
+principal Carol[
+	generates mc
+	y = PKE_ENC(gb, mc)
+]
+
+Carol -> Bob: y
+
+principal Bob[
+	m = PKE_DEC(skb, y)
+	p = THRESHOLD_SIGN[forgeable](s1, nb, cb, m)
+]
+
+Bob -> Dave: p
+
+principal Dave[
+	_ = HASH(p)
+]
+
+queries[
+	confidentiality? s1
+]

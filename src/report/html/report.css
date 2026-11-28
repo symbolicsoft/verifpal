@@ -648,7 +648,7 @@ section.model[hidden] {
 
 .traceStep .kind.mutations,
 .traceStep .kind.replay,
-.traceStep .kind.bypass {
+.traceStep .kind.drop {
 	color: var(--breach);
 }
 
@@ -909,8 +909,19 @@ section.model[hidden] {
 	stroke-dasharray: 6 4;
 }
 
+.diagram .wireDropped {
+	stroke: var(--breach);
+	stroke-width: 1.2;
+}
+
 .diagram .arrowheadB {
 	fill: var(--breach);
+}
+
+.diagram .crossTip {
+	fill: none;
+	stroke: var(--breach);
+	stroke-width: 1.6;
 }
 
 .diagram .msg.forged {
@@ -923,22 +934,12 @@ section.model[hidden] {
 	stroke-width: 1.5;
 }
 
-.diagram .bypassMark {
-	fill: var(--surface);
-	stroke: var(--breach);
-	stroke-width: 1.5;
-}
-
 .diagram .nodeLabel {
 	font: 10px var(--mono);
 	fill: var(--sienna);
 	paint-order: stroke;
 	stroke: var(--surface);
 	stroke-width: 4px;
-}
-
-.diagram .nodeLabel.breach {
-	fill: var(--breach);
 }
 
 .diagram .runBox {

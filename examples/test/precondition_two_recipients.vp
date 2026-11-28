@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
 // SPDX-License-Identifier: GPL-3.0-only
 //
-// Expected: a1a1a0
+// Expected: a1a1a0 at two sessions, a0a0a0 at one.
 //
 // Alice forwards m2 twice, to Carol before her second check and to Dave
 // after it. A precondition names one message, sender and recipient

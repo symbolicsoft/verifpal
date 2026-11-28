@@ -340,27 +340,47 @@ pub(crate) fn escape_html(out: &mut String, text: &str) {
 
 pub(crate) fn escape_tex(out: &mut String, text: &str) {
 	for c in text.chars() {
-		match c {
-			'\\' => out.push_str("\\textbackslash{}"),
-			'{' => out.push_str("\\{"),
-			'}' => out.push_str("\\}"),
-			'$' => out.push_str("\\$"),
-			'&' => out.push_str("\\&"),
-			'%' => out.push_str("\\%"),
-			'#' => out.push_str("\\#"),
-			'_' => out.push_str("\\_"),
-			'~' => out.push_str("\\textasciitilde{}"),
-			'^' => out.push_str("\\textasciicircum{}"),
-			'<' => out.push_str("\\textless{}"),
-			'>' => out.push_str("\\textgreater{}"),
-			'|' => out.push_str("\\textbar{}"),
-			'"' => out.push_str("\\textquotedbl{}"),
-			c if c.is_ascii() => out.push(c),
-			c => match tex_spelling(c) {
-				Some(spelling) => out.push_str(spelling),
-				None => out.push(c),
-			},
+		match tex_spelling(c) {
+			Some(spelling) => out.push_str(spelling),
+			None => tex_char(out, c),
 		}
+	}
+}
+
+pub(crate) fn escape_tex_verbatim(out: &mut String, text: &str) {
+	let mut spaced = false;
+	for c in text.chars() {
+		if c == ' ' && spaced {
+			out.push_str("\\ ");
+		} else {
+			tex_char(out, c);
+		}
+		spaced = c == ' ';
+	}
+}
+
+fn tex_char(out: &mut String, c: char) {
+	match c {
+		'\\' => out.push_str("\\textbackslash{}"),
+		'{' => out.push_str("\\{"),
+		'}' => out.push_str("\\}"),
+		'$' => out.push_str("\\$"),
+		'&' => out.push_str("\\&"),
+		'%' => out.push_str("\\%"),
+		'#' => out.push_str("\\#"),
+		'_' => out.push_str("\\_"),
+		'~' => out.push_str("\\textasciitilde{}"),
+		'^' => out.push_str("\\textasciicircum{}"),
+		'<' => out.push_str("\\textless{}"),
+		'>' => out.push_str("\\textgreater{}"),
+		'|' => out.push_str("\\textbar{}"),
+		'"' => out.push_str("\\textquotedbl{}"),
+		'\t' | '\n' => out.push(c),
+		c if c.is_ascii_control() => {
+			tex_char(out, '^');
+			tex_char(out, char::from(c as u8 ^ 0x40));
+		}
+		c => out.push(c),
 	}
 }
 
@@ -396,24 +416,24 @@ pub(crate) fn tex_spelling(c: char) -> Option<&'static str> {
 }
 
 macro_rules! templates {
-	($dialect:path, $($konst:ident $short:literal = $file:literal),* $(,)?) => {
-		$(
+	($($dialect:path { $($konst:ident $short:literal = $file:literal),* $(,)? })+) => {
+		$($(
 			pub(crate) static $konst: std::sync::LazyLock<crate::report::template::Template> =
 				std::sync::LazyLock::new(|| {
 					crate::report::template::Template::parse($short, include_str!($file), &$dialect)
 				});
-		)*
+		)*)+
 
 		pub(crate) fn partial(name: &str) -> Option<&'static crate::report::template::Template> {
 			match name {
-				$($short => Some(&*$konst),)*
+				$($($short => Some(&*$konst),)*)+
 				_ => None,
 			}
 		}
 
 		#[cfg(test)]
 		pub(crate) fn every_template() -> Vec<&'static crate::report::template::Template> {
-			vec![$(&*$konst),*]
+			vec![$($(&*$konst,)*)+]
 		}
 	};
 }
@@ -490,6 +510,45 @@ mod tests {
 	fn a_value_carrying_template_syntax_is_never_rescanned() {
 		let tpl = Template::parse("t", "{{a}}", &HTML);
 		assert_eq!(render(&tpl, &Ctx::new().text("a", "{{b}}")), "{{b}}");
+	}
+
+	#[test]
+	fn a_control_character_reaches_tex_in_caret_notation() {
+		assert_eq!(
+			escaped_tex("a\u{1b}[31mFAIL\u{1b}[0m"),
+			"a\\textasciicircum{}[[31mFAIL\\textasciicircum{}[[0m",
+			"XeTeX refuses a line that holds a raw escape character"
+		);
+		assert_eq!(
+			escaped_tex("\u{0}\u{7}\u{b}\u{c}\r\u{7f}"),
+			"\\textasciicircum{}@\\textasciicircum{}G\\textasciicircum{}K\
+			 \\textasciicircum{}L\\textasciicircum{}M\\textasciicircum{}?"
+		);
+		assert_eq!(
+			escaped_tex("\u{1c}\u{1e}\u{1f}"),
+			"\\textasciicircum{}\\textbackslash{}\\textasciicircum{}\\textasciicircum{}\
+			 \\textasciicircum{}\\_",
+			"the letter a control character is spelled with is escaped in turn"
+		);
+		assert_eq!(escaped_tex("a\tb\nc"), "a\tb\nc");
+	}
+
+	#[test]
+	fn verbatim_tex_keeps_every_space_and_spells_no_character_differently() {
+		let mut out = String::new();
+		escape_tex_verbatim(
+			&mut out,
+			"a   b \u{2014} \u{2018}c\u{2019} caf\u{e9} 50% \u{1b}",
+		);
+		assert_eq!(
+			out,
+			"a \\ \\ b \u{2014} \u{2018}c\u{2019} caf\u{e9} 50\\% \\textasciicircum{}["
+		);
+		assert_eq!(
+			escaped_tex("\u{2014} \u{2018}c\u{2019}"),
+			"--- `c'",
+			"prose is spelled for the roman font, whose ligatures a typewriter font lacks"
+		);
 	}
 
 	#[test]

@@ -6,6 +6,7 @@ use crate::report::msc::{Lanes, Route, Row, Value};
 use crate::report::{
 	Assumption, Binding, DiagramRow, DiagramValue, EnvelopeReport, ScenarioReport, SourceRange,
 };
+use crate::verify::StepKind;
 use crate::verify::TraceValue;
 
 fn envelope(truncations: Vec<String>) -> EnvelopeReport {
@@ -49,12 +50,12 @@ fn query(kind: &str, text: &str, resolved: bool) -> QueryReport {
 }
 
 fn derive(text: &str) -> TraceStep {
-	TraceStep::new("derive", text.to_string())
+	TraceStep::new(StepKind::Derive, text.to_string())
 }
 
 fn mutation() -> TraceStep {
 	TraceStep {
-		kind: "mutations",
+		kind: StepKind::Mutations,
 		text: "Attacker replaces ga with PUBKEY(nil).".to_string(),
 		sender: Some("Alice".to_string()),
 		recipient: Some("Bob".to_string()),
@@ -70,7 +71,7 @@ fn mutation() -> TraceStep {
 
 fn gate() -> TraceStep {
 	TraceStep {
-		kind: "gate",
+		kind: StepKind::Gate,
 		text: "Bob's AEAD_DEC(k, n, e, ad)? passes.".to_string(),
 		sender: None,
 		recipient: None,
@@ -219,6 +220,18 @@ fn a_hold_reached_under_a_truncated_search_says_so_on_its_own_row() {
 }
 
 #[test]
+fn an_attack_found_after_the_search_was_cut_short_carries_no_truncation_badge() {
+	let mut q = query("confidentiality", "c? m", true);
+	q.envelope = envelope(vec!["term depth".to_string()]);
+	let html = one(analysis("active", "c1", vec![q]));
+	assert!(
+		!html.contains("class=\"cut\""),
+		"an attack is a witness, whatever the search left unexplored"
+	);
+	assert!(!html.contains("stopped short"));
+}
+
+#[test]
 fn an_exhausted_hold_carries_no_truncation_badge() {
 	let html = one(analysis(
 		"active",
@@ -285,6 +298,207 @@ fn columns_are_sized_to_the_widest_thing_they_have_to_hold() {
 	assert!(
 		of("a_very_long_constant_name_indeed_much_longer") > of("x"),
 		"a long label must widen its column"
+	);
+}
+
+fn figure(rows: Vec<Row>) -> String {
+	let chart = Chart {
+		lanes: Lanes::of(&rows),
+		rows,
+	};
+	let ctx = diagram::draw(
+		diagram::Figure {
+			id: "d".to_string(),
+			caption: String::new(),
+		},
+		&chart,
+	);
+	render(&DIAGRAM, &ctx)
+}
+
+fn attribute(tag: &str, name: &str) -> usize {
+	format!(" {tag}")
+		.split(&format!(" {name}=\""))
+		.nth(1)
+		.and_then(|rest| rest.split('"').next())
+		.and_then(|value| value.parse().ok())
+		.unwrap_or_else(|| panic!("no {name} in {tag}"))
+}
+
+fn plain(markup: &str) -> String {
+	let mut out = String::new();
+	let mut inside = false;
+	for c in markup.chars() {
+		match c {
+			'<' => inside = true,
+			'>' => inside = false,
+			c if !inside => out.push(c),
+			_ => {}
+		}
+	}
+	out.replace("&middot;", "\u{b7}")
+}
+
+fn clipped(svg: &str) -> Vec<String> {
+	let width = attribute(svg, "width") as f32;
+	let mut out = Vec::new();
+	for rect in svg.split("<rect ").skip(1) {
+		let tag = rect.split("/>").next().unwrap_or("");
+		let (x, w) = (attribute(tag, "x"), attribute(tag, "width"));
+		if (x + w) as f32 > width {
+			out.push(format!("box {x}+{w} past {width}"));
+		}
+		let body = rect.split("</g>").next().unwrap_or("");
+		for line in body.split("<text ").skip(1) {
+			let text = plain(line.split("</text>").next().unwrap_or(""));
+			let text = text.split_once('>').map_or("", |(_, text)| text);
+			let right = attribute(line, "x") as f32 + text.chars().count() as f32 * 6.6;
+			if right > (x + w) as f32 {
+				out.push(format!("`{text}` past its box"));
+			}
+		}
+	}
+	for label in svg.split("<text ").skip(1) {
+		let tag = label.split('>').next().unwrap_or("");
+		if !tag.contains("class=\"msg ") {
+			continue;
+		}
+		let text = plain(label.split("</text>").next().unwrap_or(""));
+		let text = text.split_once('>').map_or("", |(_, text)| text);
+		let (x, half) = (
+			attribute(tag, "x") as f32,
+			text.chars().count() as f32 * 3.3,
+		);
+		if x - half < 0.0 || x + half > width {
+			out.push(format!("`{text}` centred at {x} leaves the canvas"));
+		}
+	}
+	out
+}
+
+fn named(names: &[String]) -> Vec<Value> {
+	names
+		.iter()
+		.map(|name| Value {
+			name: name.clone(),
+			guarded: false,
+			queries: vec![],
+		})
+		.collect()
+}
+
+fn message(hop: usize, step: Option<usize>, route: Route, values: Vec<Value>) -> Row {
+	Row::Wire {
+		hop: Some(hop),
+		step,
+		from: "Alice".to_string(),
+		to: "Bob".to_string(),
+		route,
+		values,
+	}
+}
+
+#[test]
+fn a_label_too_long_for_its_arrow_wraps_onto_lines_that_stay_on_the_canvas() {
+	let names: Vec<String> = (0..24)
+		.map(|i| format!("password_encrypted_seed_{i}"))
+		.collect();
+	for (route, step) in [
+		(Route::Direct, None),
+		(Route::Forged, Some(7)),
+		(Route::Replayed, Some(7)),
+		(Route::Dropped, Some(7)),
+	] {
+		let svg = figure(vec![message(1, step, route, named(&names))]);
+		let lines = svg.matches("class=\"msg ").count();
+		assert!(lines > 3, "the label stayed on {lines} line(s)");
+		assert_eq!(clipped(&svg), Vec::<String>::new());
+		for name in &names {
+			assert_eq!(svg.matches(&format!(">{name}<")).count(), 1, "{name}");
+		}
+		assert_eq!(
+			svg.matches("<tspan class=\"msgSep\">,</tspan></text>")
+				.count(),
+			lines - 1,
+			"every line but the last ends in the comma that continues it"
+		);
+	}
+	let short = figure(vec![message(
+		1,
+		None,
+		Route::Direct,
+		named(&["ga".to_string()]),
+	)]);
+	let long = figure(vec![message(1, None, Route::Direct, named(&names))]);
+	assert!(
+		attribute(&long, "height") > attribute(&short, "height"),
+		"a wrapped label takes the rows it needs"
+	);
+	assert_eq!(short.matches("class=\"msg ").count(), 1);
+}
+
+#[test]
+fn a_single_value_wider_than_the_canvas_widens_it() {
+	let svg = figure(vec![message(
+		1,
+		None,
+		Route::Direct,
+		named(&["k".repeat(400)]),
+	)]);
+	assert_eq!(clipped(&svg), Vec::<String>::new());
+	assert!(attribute(&svg, "width") > 2 * 460);
+}
+
+#[test]
+fn a_leak_of_many_values_wraps_inside_a_box_that_stays_on_the_canvas() {
+	let values: Vec<String> = (0..12).map(|i| format!("session_key_number_{i}")).collect();
+	let svg = figure(vec![
+		message(1, None, Route::Direct, named(&["e".to_string()])),
+		Row::Leak {
+			principal: "Bob".to_string(),
+			values: values.clone(),
+		},
+		Row::Activity {
+			principal: "Bob".to_string(),
+			generates: vec![],
+			computes: vec![crate::report::Computation {
+				names: vec![],
+				primitive: None,
+				expression: Some(format!("ASSERT(HASH({}), e)?", values.join(", "))),
+				checked: true,
+			}],
+		},
+	]);
+	assert_eq!(clipped(&svg), Vec::<String>::new());
+	assert!(
+		svg.matches("class=\"noteLine\"").count() > 6,
+		"neither the leak nor the unnamed check is wrapped: {svg}"
+	);
+}
+
+#[test]
+fn a_box_whose_line_cannot_wrap_takes_its_own_width_and_no_other_box_does() {
+	let svg = figure(vec![
+		message(1, None, Route::Direct, named(&["e".to_string()])),
+		Row::Leak {
+			principal: "Alice".to_string(),
+			values: vec!["a".to_string()],
+		},
+		Row::Leak {
+			principal: "Bob".to_string(),
+			values: vec!["k".repeat(120)],
+		},
+	]);
+	assert_eq!(clipped(&svg), Vec::<String>::new());
+	let widths: Vec<usize> = svg
+		.split("<rect ")
+		.skip(1)
+		.map(|rect| attribute(rect, "width"))
+		.collect();
+	assert_eq!(widths.len(), 2);
+	assert!(
+		widths[0] < 460 && widths[1] > 460,
+		"the short leak took the width of the one that cannot wrap: {widths:?}"
 	);
 }
 
@@ -383,10 +597,24 @@ fn an_attack_diagram_marks_the_phase_its_traffic_belongs_to() {
 	);
 }
 
-#[test]
-fn an_attack_diagram_shows_a_leak_the_attacker_actually_used() {
+fn leak(principal: &str, name: &str) -> TraceStep {
+	TraceStep {
+		principal: Some(principal.to_string()),
+		values: vec![TraceValue {
+			name: name.to_string(),
+			installed: None,
+			was: None,
+			guarded: false,
+		}],
+		..derive(&format!(
+			"Attacker is handed {name} by a leaks declaration in {principal}."
+		))
+	}
+}
+
+fn attack_figure(steps: Vec<TraceStep>) -> String {
 	let mut q = query("confidentiality", "c? m", true);
-	q.steps = vec![derive("Attacker learns sk, leaked by Bob."), mutation()];
+	q.steps = steps;
 	let mut m = model(Some(analysis("active", "c1", vec![q])));
 	m.diagram = vec![
 		wire(1, "Alice", "Bob", &[("ga", false)]),
@@ -399,13 +627,100 @@ fn an_attack_diagram_shows_a_leak_the_attacker_actually_used() {
 		},
 	];
 	let html = page(vec![m]);
-	let attack = html
+	let trace = html
 		.split("class=\"panelSection trace\"")
 		.nth(1)
 		.unwrap_or("");
+	trace.split("</svg>").next().unwrap_or("").to_string()
+}
+
+#[test]
+fn an_attack_diagram_shows_a_leak_the_attacker_actually_used() {
+	let attack = attack_figure(vec![leak("Bob", "sk"), mutation()]);
 	assert!(
-		attack.contains("Bob leaks sk"),
-		"a leak the trace leans on belongs in the attack diagram"
+		attack.contains(">Bob leaks sk</tspan>"),
+		"a leak the trace leans on belongs in the attack diagram: {attack}"
+	);
+}
+
+#[test]
+fn an_attack_diagram_leaves_out_a_leak_the_trace_only_mentions() {
+	let attack = attack_figure(vec![
+		mutation(),
+		TraceStep::new(
+			StepKind::Resolves,
+			"In this state k resolves to HASH(sk).".to_string(),
+		),
+	]);
+	assert!(
+		!attack.contains("leaks"),
+		"Bob leaks sk in the model, but no step of this trace hands it to the attacker: {attack}"
+	);
+}
+
+#[test]
+fn a_replacement_step_says_what_the_narrator_said_about_it() {
+	let mut step = mutation();
+	step.text = "Attacker replaces h (sent by Bob to Alice) with HASH(c, sid). (Bob does not \
+		send this message in this execution)"
+		.to_string();
+	let mut q = query("authentication", "a? B -> A: h", true);
+	q.steps = vec![step];
+	let html = one(analysis("active", "a1", vec![q]));
+	assert!(
+		html.contains("(Bob does not send this message in this execution)"),
+		"the page drops what the narrator established about the sender"
+	);
+	assert!(
+		!html.contains("intercepts the message"),
+		"nothing is intercepted from a sender that never sent"
+	);
+	assert!(
+		html.contains("<span class=\"tvNew\">PUBKEY(nil)</span>"),
+		"the installed values still follow the sentence"
+	);
+}
+
+#[test]
+fn a_dropped_value_and_an_unstarted_run_are_listed_and_drawn_as_themselves() {
+	let idle = TraceStep {
+		principal: Some("Bob".to_string()),
+		..TraceStep::new(
+			StepKind::Idle,
+			"Bob never starts a session in this execution.".to_string(),
+		)
+	};
+	let drop = TraceStep {
+		sender: Some("Alice".to_string()),
+		recipient: Some("Bob".to_string()),
+		principal: Some("Bob".to_string()),
+		values: vec![TraceValue {
+			name: "ga".to_string(),
+			installed: None,
+			was: None,
+			guarded: false,
+		}],
+		..TraceStep::new(
+			StepKind::Drop,
+			"Attacker drops ga (Alice to Bob), and Bob continues without it.".to_string(),
+		)
+	};
+	let mut q = query("authentication", "a? A -> B: ga", true);
+	q.steps = vec![idle, derive("one"), derive("two"), drop];
+	let html = one(analysis("active", "a1", vec![q]));
+	assert!(
+		html.contains("<details class=\"traceGroup\" data-step=\"2-3\">"),
+		"only the two derivations fold"
+	);
+	assert!(html.contains("2 derivation steps"));
+	assert!(html.contains("computes (steps 2\u{2013}3)"));
+	assert!(!html.contains("computes (steps 1"), "{html}");
+	assert!(html.contains("class=\"nodeLabel\">never starts</text>"));
+	assert!(html.contains("class=\"wireDropped\" marker-end=\"url(#m0t0-x)\""));
+	assert!(html.contains("<tspan class=\"msgSep\"> (dropped)</tspan>"));
+	assert!(
+		!html.contains("ga\u{2020}"),
+		"a dropped value is not a substituted one"
 	);
 }
 
@@ -787,26 +1102,19 @@ fn golden_run() -> Run {
 		mutation(),
 		gate(),
 		TraceStep {
-			kind: "bypass",
-			text: "Alice's SIGNVERIF check is defeated, accepting PUBKEY(nil).".to_string(),
-			sender: None,
-			recipient: None,
-			principal: Some("Alice".to_string()),
-			values: vec![],
-		},
-		TraceStep {
-			kind: "replay",
-			text: "Attacker replays e1 from another session.".to_string(),
+			kind: StepKind::Replay,
+			text: "Attacker replays gb from another session.".to_string(),
 			sender: Some("Bob".to_string()),
 			recipient: Some("Alice".to_string()),
 			principal: None,
 			values: vec![TraceValue {
-				name: "e1".to_string(),
-				installed: Some("AEAD_ENC(k, n, m, ad)".to_string()),
+				name: "gb".to_string(),
+				installed: Some("PUBKEY(b)".to_string()),
 				was: None,
 				guarded: false,
 			}],
 		},
+		leak("Bob", "m"),
 	];
 
 	let mut holds = query("authentication", "authentication? Alice -> Bob: ga", false);

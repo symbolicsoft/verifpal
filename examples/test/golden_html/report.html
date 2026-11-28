@@ -652,7 +652,7 @@ section.model[hidden] {
 
 .traceStep .kind.mutations,
 .traceStep .kind.replay,
-.traceStep .kind.bypass {
+.traceStep .kind.drop {
 	color: var(--breach);
 }
 
@@ -913,8 +913,19 @@ section.model[hidden] {
 	stroke-dasharray: 6 4;
 }
 
+.diagram .wireDropped {
+	stroke: var(--breach);
+	stroke-width: 1.2;
+}
+
 .diagram .arrowheadB {
 	fill: var(--breach);
+}
+
+.diagram .crossTip {
+	fill: none;
+	stroke: var(--breach);
+	stroke-width: 1.6;
 }
 
 .diagram .msg.forged {
@@ -927,22 +938,12 @@ section.model[hidden] {
 	stroke-width: 1.5;
 }
 
-.diagram .bypassMark {
-	fill: var(--surface);
-	stroke: var(--breach);
-	stroke-width: 1.5;
-}
-
 .diagram .nodeLabel {
 	font: 10px var(--mono);
 	fill: var(--sienna);
 	paint-order: stroke;
 	stroke: var(--surface);
 	stroke-width: 4px;
-}
-
-.diagram .nodeLabel.breach {
-	fill: var(--breach);
 }
 
 .diagram .runBox {
@@ -1069,16 +1070,16 @@ section.model[hidden] {
 <div class="panelSection"><span class="eyebrow">Protocol</span><figure class="figure">
 <div class="scroll">
 <svg class="diagram" width="910" height="250" viewBox="0 0 910 250" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="m0p-title">
-<title id="m0p-title">Protocol sequence. Guarded values are written in brackets; a dagger marks every value some attack below substitutes or replays.</title><defs><marker id="m0p-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" class="arrowhead"/></marker><marker id="m0p-b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" class="arrowheadB"/></marker></defs>
+<title id="m0p-title">Protocol sequence. Guarded values are written in brackets; a dagger marks every value some attack below substitutes or replays.</title><defs><marker id="m0p-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" class="arrowhead"/></marker><marker id="m0p-b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" class="arrowheadB"/></marker><marker id="m0p-x" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="9" markerHeight="9"><path d="M 1 1 L 9 9 M 9 1 L 1 9" class="crossTip"/></marker></defs>
 <text x="227" y="22" class="actor">Alice</text><line x1="227" y1="34" x2="227" y2="242" class="lifeline"/>
 <text x="682" y="22" class="actor">Bob</text><line x1="682" y1="34" x2="682" y2="242" class="lifeline"/>
-<g class="row"><text x="22" y="49" class="hopNum">1</text><line x1="227" y1="56" x2="682" y2="56" class="wire" marker-end="url(#m0p-a)"/><text x="454" y="49" class="msg "><tspan class="msgVal hit" data-q="0">ga†</tspan><tspan class="msgSep">, </tspan><tspan class="msgVal hit" data-q="0">[e1]†</tspan></text></g>
+<g class="row"><text x="22" y="49" class="hopNum">1</text><line x1="227" y1="56" x2="682" y2="56" class="wire" marker-end="url(#m0p-a)"/><text x="454" y="49" class="msg "><tspan class="msgVal hit" data-q="0">ga†</tspan><tspan class="msgSep">, </tspan><tspan class="msgVal guarded">[e1]</tspan></text></g>
 <line x1="0" y1="98" x2="910" y2="98" class="phase"/><text x="2" y="91" class="phaselabel">PHASE 1</text>
-<g class="row"><text x="22" y="133" class="hopNum">2</text><line x1="682" y1="140" x2="227" y2="140" class="wire" marker-end="url(#m0p-a)"/><text x="454" y="133" class="msg "><tspan class="msgVal ">gb</tspan></text></g>
+<g class="row"><text x="22" y="133" class="hopNum">2</text><line x1="682" y1="140" x2="227" y2="140" class="wire" marker-end="url(#m0p-a)"/><text x="454" y="133" class="msg "><tspan class="msgVal hit" data-q="0">gb†</tspan></text></g>
 <g class="row"><rect x="637" y="182" width="91" height="34" rx="4" class="noteRect leakRect"/><text x="646" y="202" class="noteLine"><tspan class="leakText">Bob leaks m</tspan></text></g>
 </svg>
 </div>
-<ol class="offscreen"><li>Hop 1: Alice to Bob: ga†, [e1]†</li><li>Phase 1 begins.</li><li>Hop 2: Bob to Alice: gb</li><li>Bob leaks m</li></ol>
+<ol class="offscreen"><li>Hop 1: Alice to Bob: ga†, [e1]</li><li>Phase 1 begins.</li><li>Hop 2: Bob to Alice: gb†</li><li>Bob leaks m</li></ol>
 <figcaption class="figNote">Protocol sequence. Guarded values are written in brackets; a dagger marks every value some attack below substitutes or replays.</figcaption>
 </figure></div>
 <div class="panelSection">
@@ -1116,16 +1117,17 @@ section.model[hidden] {
 <span class="eyebrow">Attack trace &middot; <a class="q" href="#src-m0-q0">confidentiality? m</a></span>
 <figure class="figure">
 <div class="scroll">
-<svg class="diagram" width="909" height="282" viewBox="0 0 909 282" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
-<defs><marker id="m0t0-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" class="arrowhead"/></marker><marker id="m0t0-b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" class="arrowheadB"/></marker></defs>
-<text x="151" y="22" class="actor">Alice</text><line x1="151" y1="34" x2="151" y2="274" class="lifeline"/>
-<text x="454" y="22" class="actor attacker">Attacker</text><line x1="454" y1="34" x2="454" y2="274" class="lifeline attacker"/>
-<text x="757" y="22" class="actor">Bob</text><line x1="757" y1="34" x2="757" y2="274" class="lifeline"/>
+<svg class="diagram" width="909" height="334" viewBox="0 0 909 334" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
+<defs><marker id="m0t0-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" class="arrowhead"/></marker><marker id="m0t0-b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" class="arrowheadB"/></marker><marker id="m0t0-x" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="9" markerHeight="9"><path d="M 1 1 L 9 9 M 9 1 L 1 9" class="crossTip"/></marker></defs>
+<text x="151" y="22" class="actor">Alice</text><line x1="151" y1="34" x2="151" y2="326" class="lifeline"/>
+<text x="454" y="22" class="actor attacker">Attacker</text><line x1="454" y1="34" x2="454" y2="326" class="lifeline attacker"/>
+<text x="757" y="22" class="actor">Bob</text><line x1="757" y1="34" x2="757" y2="326" class="lifeline"/>
 <g class="row" data-step="1-2"><rect x="370" y="43" width="168" height="22" rx="3" class="runBox"/><text x="454" y="58" class="runLabel">computes (steps 1–2)</text></g>
 <g class="row" data-step="3"><text x="22" y="91" class="hopNum">3</text><line x1="151" y1="98" x2="454" y2="98" class="wireMuted" marker-end="url(#m0t0-a)"/><line x1="454" y1="98" x2="757" y2="98" class="wireForged" marker-end="url(#m0t0-b)"/><text x="605" y="91" class="msg forged"><tspan class="msgHop">hop 1 &middot; </tspan><tspan class="msgVal ">ga</tspan></text></g>
-<g class="row" data-step="4"><text x="22" y="144" class="hopNum">4</text><circle cx="757" cy="140" r="5" class="gateMark"/><text x="769" y="144" class="nodeLabel ">check passes</text></g>
-<g class="row" data-step="5"><text x="22" y="186" class="hopNum">5</text><circle cx="151" cy="182" r="5" class="bypassMark"/><text x="163" y="186" class="nodeLabel breach">check defeated</text></g>
-<g class="row" data-step="6"><text x="22" y="217" class="hopNum">6</text><line x1="757" y1="224" x2="454" y2="224" class="wireMuted" marker-end="url(#m0t0-a)"/><line x1="454" y1="224" x2="151" y2="224" class="wireReplay" marker-end="url(#m0t0-b)"/><text x="302" y="217" class="msg forged"><tspan class="msgVal ">e1</tspan><tspan class="msgSep"> (replayed)</tspan></text></g>
+<g class="row" data-step="4"><text x="22" y="144" class="hopNum">4</text><circle cx="757" cy="140" r="5" class="gateMark"/><text x="769" y="144" class="nodeLabel">check passes</text></g>
+<g class="row" data-step="5"><text x="22" y="175" class="hopNum">5</text><line x1="757" y1="182" x2="454" y2="182" class="wireMuted" marker-end="url(#m0t0-a)"/><line x1="454" y1="182" x2="151" y2="182" class="wireReplay" marker-end="url(#m0t0-b)"/><text x="302" y="175" class="msg forged"><tspan class="msgHop">hop 2 &middot; </tspan><tspan class="msgVal ">gb</tspan><tspan class="msgSep"> (replayed)</tspan></text></g>
+<g class="row"><rect x="712" y="224" width="91" height="34" rx="4" class="noteRect leakRect"/><text x="721" y="244" class="noteLine"><tspan class="leakText">Bob leaks m</tspan></text></g>
+<g class="row" data-step="6"><rect x="370" y="263" width="168" height="22" rx="3" class="runBox"/><text x="454" y="278" class="runLabel">computes (step 6)</text></g>
 </svg>
 </div>
 </figure>
@@ -1135,10 +1137,10 @@ section.model[hidden] {
 <button type="button" class="traceStep" data-step="2" aria-pressed="false"><span class="n">2</span><span class="line"><span class="kind derive">derive</span>Attacker observes ga on the wire.</span></button>
 
 </details>
-<button type="button" class="traceStep" data-step="3" aria-pressed="false"><span class="n">3</span><span class="line"><span class="kind mutations">mutations</span>Attacker intercepts the message from Alice to Bob and delivers:<span class="traceVal"><span class="tvName">ga</span> <span class="tvArrow">&#8656;</span> <span class="tvNew">PUBKEY(nil)</span><span class="tvWas">honest value: PUBKEY(a)</span></span></span></button>
+<button type="button" class="traceStep" data-step="3" aria-pressed="false"><span class="n">3</span><span class="line"><span class="kind mutations">mutations</span>Attacker replaces ga with PUBKEY(nil).<span class="traceVal"><span class="tvName">ga</span> <span class="tvArrow">&#8656;</span> <span class="tvNew">PUBKEY(nil)</span><span class="tvWas">honest value: PUBKEY(a)</span></span></span></button>
 <button type="button" class="traceStep" data-step="4" aria-pressed="false"><span class="n">4</span><span class="line"><span class="kind gate">gate</span>Bob&#39;s AEAD_DEC(k, n, e, ad)? passes.</span></button>
-<button type="button" class="traceStep" data-step="5" aria-pressed="false"><span class="n">5</span><span class="line"><span class="kind bypass">bypass</span>Alice&#39;s SIGNVERIF check is defeated, accepting PUBKEY(nil).</span></button>
-<button type="button" class="traceStep" data-step="6" aria-pressed="false"><span class="n">6</span><span class="line"><span class="kind replay">replay</span>Attacker replays e1 from another session.</span></button>
+<button type="button" class="traceStep" data-step="5" aria-pressed="false"><span class="n">5</span><span class="line"><span class="kind replay">replay</span>Attacker replays gb from another session.</span></button>
+<button type="button" class="traceStep" data-step="6" aria-pressed="false"><span class="n">6</span><span class="line"><span class="kind derive">derive</span>Attacker is handed m by a leaks declaration in Bob.</span></button>
 
 </div>
 </div>

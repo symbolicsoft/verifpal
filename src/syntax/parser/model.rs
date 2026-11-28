@@ -32,7 +32,9 @@ impl<'a> Parser<'a> {
 			.help("pick a different name"));
 		}
 		self.record(span, TokenKind::PrincipalName);
-		Ok(title_case(&name))
+		let name = title_case(&name);
+		self.principals.intern(&name).map_err(|e| e.at(span))?;
+		Ok(name)
 	}
 
 	fn principal_id(&mut self, name: &str) -> VResult<(PrincipalId, Arc<str>)> {
@@ -92,7 +94,6 @@ impl<'a> Parser<'a> {
 			self.pos = '\u{FEFF}'.len_utf8();
 		}
 		self.consume_trivia();
-		self.check_unterminated_block()?;
 		let (attacker, attacker_comments) = self.parse_attacker()?;
 		let mut blocks = Vec::new();
 		loop {
@@ -106,7 +107,6 @@ impl<'a> Parser<'a> {
 			}
 			blocks.push(self.parse_block()?);
 		}
-		self.check_unterminated_block()?;
 		if blocks.is_empty() {
 			return Err(VerifpalError::parse(
 				"model declares no principals and no messages".into(),
@@ -134,7 +134,6 @@ impl<'a> Parser<'a> {
 		let (queries_comments, queries) = self.parse_queries(!scenarios.is_empty())?;
 		self.consume_trivia();
 		let tail_comments = self.take_leading();
-		self.check_unterminated_block()?;
 		if !self.at_end() {
 			let trailing = if starts_with_keyword(self.remaining(), "scenarios") {
 				"the `scenarios` block must come directly before `queries`"
@@ -159,6 +158,7 @@ impl<'a> Parser<'a> {
 			scenarios,
 			scenarios_comments,
 			queries,
+			variants: Vec::new(),
 			queries_comments,
 			tail_comments,
 		})
@@ -412,11 +412,17 @@ impl<'a> Parser<'a> {
 		self.consume_trivia();
 		self.expect("[")?;
 		self.consume_trivia();
+		const USAGE: &str = "a phase is written `phase[1]`, `phase[2]`, and so on";
 		let digits = self.digits();
 		self.record(digits, TokenKind::PhaseNumber);
+		if digits.start == digits.end {
+			return Err(self.unexpected("expected a phase number").note(USAGE));
+		}
 		let number = self.text(digits).parse().map_err(|_| {
-			self.unexpected("expected a phase number")
-				.note("a phase is written `phase[1]`, `phase[2]`, and so on")
+			VerifpalError::parse(format!("`{}` is not a phase number", self.text(digits)).into())
+				.at(digits)
+				.labelled("too large to number a phase")
+				.note(USAGE)
 		})?;
 		self.consume_trivia();
 		self.expect("]")?;

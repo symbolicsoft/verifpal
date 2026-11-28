@@ -12,6 +12,8 @@ pub(crate) mod proto;
 #[cfg(feature = "lsp")]
 pub(crate) mod server;
 pub(crate) mod state;
+#[cfg(feature = "lsp")]
+pub(crate) mod transport;
 
 #[cfg(feature = "lsp")]
 pub use server::run;

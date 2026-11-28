@@ -14,7 +14,7 @@ use crate::verify::VerifyResult;
 
 const SESSIONS: u8 = 1;
 
-const COSTLY_MODELS: [&str; 10] = [
+const COSTLY_MODELS: [&str; 9] = [
 	"concat_split_replay.vp",
 	"junglegym_deep_ratchet.vp",
 	"junglegym_hybrid_pq.vp",
@@ -24,7 +24,6 @@ const COSTLY_MODELS: [&str; 10] = [
 	"scuttlebutt.vp",
 	"signal.vp",
 	"tls13-0rtt.vp",
-	"tls13.vp",
 ];
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -47,6 +46,7 @@ enum Outcome {
 	Code(String),
 	Rejected,
 	Panicked,
+	Unprintable(String),
 }
 
 fn analysed(model: &Model, sessions: u8) -> Outcome {
@@ -62,7 +62,6 @@ fn analysed(model: &Model, sessions: u8) -> Outcome {
 	let attempt = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
 		let _quiet = InfoQuiet::new();
 		crate::verify::analyze_sessions(model, sessions)
-			.ok()
 			.map(|ctx| VerifyResult::results_code(&ctx.results_get()))
 	}));
 	if progress {
@@ -73,17 +72,27 @@ fn analysed(model: &Model, sessions: u8) -> Outcome {
 		);
 	}
 	match attempt {
-		Ok(Some(code)) => Outcome::Code(code),
-		Ok(None) => Outcome::Rejected,
+		Ok(Ok(code)) => Outcome::Code(code),
+		Ok(Err(why)) => {
+			if progress {
+				eprintln!("[metamorphic] rejected {}: {why}", model.file_name);
+			}
+			Outcome::Rejected
+		}
 		Err(_) => Outcome::Panicked,
 	}
 }
 
-fn code_of(model: &Model, sessions: u8) -> Outcome {
+fn reparsed(model: &Model) -> Result<Model, String> {
 	let rendered = crate::syntax::pretty::pretty_model(model);
-	match crate::syntax::parser::parse_string(&model.file_name, &rendered) {
+	crate::syntax::parser::parse_string(&model.file_name, &rendered)
+		.map_err(|e| e.located(&model.file_name, &rendered).to_string())
+}
+
+fn code_of(model: &Model, sessions: u8) -> Outcome {
+	match reparsed(model) {
 		Ok(reparsed) => analysed(&reparsed, sessions),
-		Err(_) => Outcome::Rejected,
+		Err(why) => Outcome::Unprintable(why),
 	}
 }
 
@@ -117,19 +126,34 @@ fn corpus() -> Vec<(String, Model)> {
 	models
 		.into_iter()
 		.filter_map(|(name, path)| {
-			let source = std::fs::read_to_string(&path).ok()?;
+			let source = std::fs::read_to_string(&path)
+				.unwrap_or_else(|e| panic!("the corpus lists {path}, which cannot be read: {e}"));
 			let model = crate::syntax::parser::parse_string(&name, &source).ok()?;
 			Some((name, model))
 		})
 		.collect()
 }
 
-fn asks_the_same_question(model: &Model, variant: &Model) -> bool {
-	let before = crate::protocol::scenario::honesty_profile(model);
-	let after = crate::protocol::scenario::honesty_profile(variant);
-	before
+fn corrupt_from(model: &Model) -> Vec<Option<i32>> {
+	let profile = crate::protocol::scenario::honesty_profile(model);
+	model
+		.scenarios
 		.iter()
-		.all(|(scenario, corrupt_from)| after.get(scenario) == Some(corrupt_from))
+		.map(|scenario| {
+			let bindings: Vec<String> = scenario
+				.bindings
+				.iter()
+				.map(|(target, value)| format!("{} = {}", target.name, value.name))
+				.collect();
+			profile
+				.get(&format!(
+					"{}[{}]",
+					scenario.principal_name,
+					bindings.join(", ")
+				))
+				.copied()
+		})
+		.collect()
 }
 
 fn lost_attacks(before: &str, after: &str) -> Vec<usize> {
@@ -457,17 +481,35 @@ fn variants_rethresholded(model: &Model, delta: i64) -> Vec<Model> {
 #[derive(Default)]
 struct Report {
 	compared: usize,
+	rejected_models: usize,
+	rejected: usize,
+	incomparable: usize,
 	violations: Vec<String>,
 	panicked: Vec<String>,
+	unprintable: Vec<String>,
 	ran: Vec<String>,
 }
 
 impl Report {
 	fn absorb(&mut self, other: Report) {
 		self.compared += other.compared;
+		self.rejected_models += other.rejected_models;
+		self.rejected += other.rejected;
+		self.incomparable += other.incomparable;
 		self.violations.extend(other.violations);
 		self.panicked.extend(other.panicked);
+		self.unprintable.extend(other.unprintable);
 		self.ran.extend(other.ran);
+	}
+
+	fn baseline(&mut self, name: &str, outcome: Outcome) -> Option<String> {
+		match outcome {
+			Outcome::Code(before) => return Some(before),
+			Outcome::Rejected => self.rejected_models += 1,
+			Outcome::Panicked => self.panicked.push(name.to_string()),
+			Outcome::Unprintable(why) => self.unprintable.push(format!("{name}: {why}")),
+		}
+		None
 	}
 
 	fn tally(
@@ -479,7 +521,14 @@ impl Report {
 		let mut ran = false;
 		for outcome in outcomes {
 			match outcome {
-				Outcome::Rejected => continue,
+				Outcome::Rejected => {
+					self.rejected += 1;
+					continue;
+				}
+				Outcome::Unprintable(why) => {
+					self.unprintable.push(format!("{name}: {why}"));
+					continue;
+				}
 				Outcome::Panicked => self.panicked.push(name.to_string()),
 				Outcome::Code(after) => {
 					self.compared += 1;
@@ -733,7 +782,9 @@ fn variants_restricted(model: &Model) -> Vec<Model> {
 		return Vec::new();
 	};
 	let mut variant = model.clone();
-	for query in &mut variant.queries {
+	let mut restricted = false;
+	for query in variant.queries.iter_mut().filter(|q| q.options.is_empty()) {
+		restricted = true;
 		query.options.push(QueryOption {
 			kind: QueryOptionKind::Precondition,
 			message: Message {
@@ -741,13 +792,16 @@ fn variants_restricted(model: &Model) -> Vec<Model> {
 				sender_name: message.sender_name.clone(),
 				recipient: message.recipient,
 				recipient_name: message.recipient_name.clone(),
-				constants: vec![constant.clone()],
+				constants: vec![Constant {
+					guard: false,
+					..constant.clone()
+				}],
 				..Message::default()
 			},
 			comments: LineComments::default(),
 		});
 	}
-	vec![variant]
+	restricted.then_some(variant).into_iter().collect()
 }
 
 fn variants_permuted(model: &Model) -> Vec<Model> {
@@ -1011,14 +1065,12 @@ fn check(
 	}) {
 		report.absorb(part);
 	}
-	report.panicked.sort();
-	report.panicked.dedup();
-	settle(property, report, floor, sweep);
+	settle(property, report, floor);
 }
 
 fn check_sessions(property: &str, floor: usize, sweep: Sweep) {
 	check(property, floor, sweep, |name, model, report| {
-		let Outcome::Code(one) = code_of(model, 1) else {
+		let Some(one) = report.baseline(name, code_of(model, 1)) else {
 			return;
 		};
 		report.tally(name, [code_of(model, 2)], |two| {
@@ -1038,30 +1090,43 @@ fn check_variants<V: IntoIterator<Item = Model>>(
 	sweep: Sweep,
 ) {
 	let models = corpus();
-	let originals = spread(&models, |(name, model)| {
-		if sweep.skips(name) {
-			return None;
-		}
-		let Outcome::Code(before) = code_of(model, SESSIONS) else {
-			return None;
-		};
-		(!matches!(change, Change::Stronger | Change::StrongerOn(_)) || before.contains('1'))
-			.then_some(before)
-	});
+	let invariant = matches!(change, Change::Invariant(_));
+	let mut report = Report::default();
+	let originals: Vec<Option<String>> = models
+		.iter()
+		.zip(spread(&models, |(name, model)| {
+			(!sweep.skips(name)).then(|| code_of(model, SESSIONS))
+		}))
+		.map(|((name, _), outcome)| {
+			report.baseline(name, outcome?).filter(|before| {
+				!matches!(change, Change::Stronger | Change::StrongerOn(_)) || before.contains('1')
+			})
+		})
+		.collect();
 	let mut jobs: Vec<(usize, Model)> = Vec::new();
-	for (at, ((_, model), before)) in models.iter().zip(&originals).enumerate() {
+	for (at, ((name, model), before)) in models.iter().zip(&originals).enumerate() {
 		if before.is_none() {
 			continue;
 		}
-		jobs.extend(
-			variants(model)
-				.into_iter()
-				.filter(|variant| asks_the_same_question(model, variant))
-				.map(|variant| (at, variant)),
-		);
+		let honest = corrupt_from(model);
+		for variant in variants(model) {
+			match reparsed(&variant) {
+				Err(why) => report.unprintable.push(format!("{name}: {why}")),
+				Ok(variant) if corrupt_from(&variant).starts_with(&honest) => {
+					jobs.push((at, variant));
+				}
+				Ok(_) => {
+					report.incomparable += 1;
+					if invariant {
+						report.violations.push(format!(
+							"{name}: the variant dates the corruption of a scenario differently"
+						));
+					}
+				}
+			}
+		}
 	}
-	let mut outcomes = spread(&jobs, |(_, variant)| code_of(variant, SESSIONS)).into_iter();
-	let mut report = Report::default();
+	let mut outcomes = spread(&jobs, |(_, variant)| analysed(variant, SESSIONS)).into_iter();
 	let mut next = 0;
 	for (at, ((name, _), before)) in models.iter().zip(&originals).enumerate() {
 		let mine: Vec<Outcome> = std::iter::from_fn(|| {
@@ -1074,6 +1139,11 @@ fn check_variants<V: IntoIterator<Item = Model>>(
 		let Some(before) = before else {
 			continue;
 		};
+		if invariant && mine.iter().any(|o| matches!(o, Outcome::Rejected)) {
+			report.violations.push(format!(
+				"{name}: original={before}, but the analysis rejects the variant"
+			));
+		}
 		report.tally(name, mine, |after| {
 			let lost = match change {
 				Change::Stronger => lost_attacks(before, after),
@@ -1096,15 +1166,27 @@ fn check_variants<V: IntoIterator<Item = Model>>(
 				.collect()
 		});
 	}
-	report.panicked.sort();
-	report.panicked.dedup();
-	settle(property, report, floor, sweep);
+	settle(property, report, floor);
 }
 
-fn settle(property: &str, report: Report, floor: usize, sweep: Sweep) {
+fn settle(property: &str, mut report: Report, floor: usize) {
+	report.panicked.sort();
+	report.panicked.dedup();
 	eprintln!(
-		"the `{property}` property compared {} pairs",
-		report.compared
+		"the `{property}` property compared {} pairs over {} models; the analysis rejected {} \
+		 models and {} variants, and {} variants date the corruption of a scenario differently",
+		report.compared,
+		report.ran.len(),
+		report.rejected_models,
+		report.rejected,
+		report.incomparable
+	);
+	assert!(
+		report.unprintable.is_empty(),
+		"the `{property}` property wrote a model the parser refuses, so it was never analysed. \
+		 A transformed model is still a legal model, so text that does not parse is a bug in \
+		 the transformation or in the printer:\n  {}",
+		report.unprintable.join("\n  ")
 	);
 	assert!(
 		report.compared >= floor || external_corpus().is_some(),
@@ -1113,9 +1195,7 @@ fn settle(property: &str, report: Report, floor: usize, sweep: Sweep) {
 		report.compared
 	);
 
-	if sweep == Sweep::Exhaustive {
-		settle_traces(property, &report);
-	}
+	settle_traces(property, &report);
 
 	let expected = excused(
 		KNOWN_MISSED_ATTACKS
@@ -1190,19 +1270,145 @@ mod tests {
 	}
 
 	#[test]
+	fn a_precondition_on_a_guarded_send_is_written_without_its_guard() {
+		let source = "attacker[active]\n\
+			principal Alice[\n\
+			generates rgs_m\n\
+			]\n\
+			Alice -> Bob: [rgs_m]\n\
+			principal Bob[\n\
+			_ = HASH(rgs_m)\n\
+			]\n\
+			queries[\n\
+			confidentiality? rgs_m\n\
+			]\n";
+		let model = crate::syntax::parser::parse_string("rgs.vp", source).expect("parses");
+		let variants = variants_restricted(&model);
+		assert_eq!(variants.len(), 1);
+		let restricted = reparsed(&variants[0]).expect("a precondition names its value bare");
+		assert!(restricted.queries.iter().all(|q| q.options.len() == 1));
+	}
+
+	#[test]
+	#[should_panic(expected = "wrote a model the parser refuses")]
+	fn a_variant_that_does_not_parse_fails_its_property() {
+		let mut report = Report::default();
+		report.tally(
+			"m.vp",
+			[Outcome::Unprintable("parse error".to_string())],
+			|_| Vec::new(),
+		);
+		settle("restrict", report, 0);
+	}
+
+	#[test]
+	#[should_panic(expected = "invariant checks fire")]
+	fn a_panicking_baseline_fails_its_property_in_every_sweep() {
+		let mut report = Report::default();
+		assert!(report.baseline("m.vp", Outcome::Panicked).is_none());
+		settle("permute", report, 0);
+	}
+
+	#[test]
+	fn every_costly_model_is_one_the_sweeps_reach() {
+		let swept = crate::testing::model_tests::swept_models();
+		for costly in COSTLY_MODELS {
+			assert!(
+				swept.iter().any(|(name, _)| name == costly),
+				"COSTLY_MODELS lists {costly}, which no sweep reaches, so the entry exempts \
+				 nothing"
+			);
+		}
+	}
+
+	#[test]
+	fn every_fast_sweep_has_an_exhaustive_twin() {
+		let (_, tests) = include_str!("metamorphic.rs")
+			.split_once("mod tests {")
+			.expect("this module");
+		let declared = |line: &str| {
+			let (name, _) = line.trim().strip_prefix("fn ")?.split_once("()")?;
+			Some(name.to_string())
+		};
+		let names: Vec<String> = tests.lines().filter_map(declared).collect();
+		let mut current = String::new();
+		for line in tests.lines() {
+			if let Some(name) = declared(line) {
+				current = name;
+			} else if line.contains(concat!("Sweep::", "Fast")) {
+				assert!(
+					names.contains(&format!("{current}_exhaustively")),
+					"{current} skips the costly models and has no `_exhaustively` twin, so \
+					 nothing ever compares them under this property"
+				);
+			}
+		}
+	}
+
+	#[test]
+	fn renaming_keeps_each_scenario_corrupt_from_the_same_phase() {
+		let source = "attacker[active]\n\
+			principal Bob[\n\
+			knows private rsc_b\n\
+			rsc_gb = PUBKEY(rsc_b)\n\
+			]\n\
+			principal Mallory[\n\
+			knows private rsc_mk\n\
+			rsc_gm = PUBKEY(rsc_mk)\n\
+			leaks rsc_mk\n\
+			]\n\
+			Bob -> Alice: [rsc_gb]\n\
+			Mallory -> Alice: [rsc_gm]\n\
+			principal Alice[\n\
+			knows private rsc_a\n\
+			knows public rsc_gpeer\n\
+			generates rsc_m\n\
+			rsc_e = PKE_ENC(rsc_gpeer, rsc_m)\n\
+			]\n\
+			Alice -> Bob: rsc_e\n\
+			principal Bob[\n\
+			_ = HASH(rsc_e)\n\
+			]\n\
+			phase[1]\n\
+			principal Bob[\n\
+			leaks rsc_b\n\
+			]\n\
+			scenarios[\n\
+			Alice[rsc_gpeer = rsc_gb]\n\
+			Alice[rsc_gpeer = rsc_gm]\n\
+			]\n\
+			queries[\n\
+			confidentiality? rsc_m\n\
+			]\n";
+		let model = crate::syntax::parser::parse_string("rsc.vp", source).expect("parses");
+		let honest = corrupt_from(&model);
+		assert_eq!(honest, [Some(1), Some(0)]);
+		let renamed = reparsed(&variant_renamed(&model)).expect("a renamed model parses");
+		assert_eq!(renamed.scenarios[0].principal_name.as_ref(), "Aliceqq");
+		assert_eq!(corrupt_from(&renamed), honest);
+	}
+
+	#[test]
 	fn rendering_and_reparsing_a_model_preserves_every_verdict() {
 		let models = corpus();
 		let parts = spread(&models, |(name, model)| {
-			let Outcome::Code(direct) = analysed(model, SESSIONS) else {
-				return (0usize, None);
+			let direct = match analysed(model, SESSIONS) {
+				Outcome::Code(direct) => direct,
+				Outcome::Panicked => {
+					return (0usize, Some(format!("{name}: the analysis panicked")));
+				}
+				Outcome::Rejected | Outcome::Unprintable(_) => return (0usize, None),
 			};
 			let drift = match code_of(model, SESSIONS) {
 				Outcome::Code(round_tripped) if round_tripped == direct => None,
 				Outcome::Code(other) => {
 					Some(format!("{name}: direct={direct} round-tripped={other}"))
 				}
+				Outcome::Unprintable(why) => Some(format!(
+					"{name}: direct={direct} but the render did not parse: {why}"
+				)),
 				Outcome::Rejected => Some(format!(
-					"{name}: direct={direct} but the render did not parse"
+					"{name}: direct={direct} but the render was rejected"
 				)),
 				Outcome::Panicked => {
 					Some(format!("{name}: direct={direct} but the render panicked"))
@@ -1232,14 +1438,14 @@ mod tests {
 			"dephase",
 			variants_dephased,
 			Change::Stronger,
-			15,
+			45,
 			Sweep::Exhaustive,
 		);
 	}
 
 	#[test]
 	fn adding_a_session_never_loses_an_attack() {
-		check_sessions("sessions", 250, Sweep::Exhaustive);
+		check_sessions("sessions", 1035, Sweep::Exhaustive);
 	}
 
 	#[test]
@@ -1248,7 +1454,7 @@ mod tests {
 			"pad",
 			variant_padded,
 			Change::Invariant(str::to_string),
-			300,
+			1035,
 			Sweep::Exhaustive,
 		);
 	}
@@ -1276,7 +1482,7 @@ mod tests {
 			"rename",
 			|model| Some(variant_renamed(model)),
 			Change::Invariant(str::to_string),
-			300,
+			1035,
 			Sweep::Exhaustive,
 		);
 	}
@@ -1294,7 +1500,7 @@ mod tests {
 			"scenario",
 			|model| identity_scenarios(model, 1),
 			Change::Invariant(str::to_string),
-			300,
+			879,
 			Sweep::Exhaustive,
 		);
 	}
@@ -1305,7 +1511,7 @@ mod tests {
 			"scenarios",
 			|model| identity_scenarios(model, 2),
 			Change::Stronger,
-			200,
+			527,
 			Sweep::Exhaustive,
 		);
 	}
@@ -1316,7 +1522,7 @@ mod tests {
 			"rotate",
 			variant_query_rotation,
 			Change::Invariant(|before| rotate_code(before, 1)),
-			150,
+			401,
 			Sweep::Exhaustive,
 		);
 	}
@@ -1324,14 +1530,28 @@ mod tests {
 	#[test]
 	fn a_weakening_annotation_survives_the_round_trip() {
 		let mut annotated = 0usize;
-		for (_, model) in corpus() {
+		let mut lost: Vec<String> = Vec::new();
+		for (name, model) in corpus() {
+			let original = crate::syntax::pretty::pretty_model(&model);
 			for variant in variants_weakened(&model) {
 				let rendered = crate::syntax::pretty::pretty_model(&variant);
-				if rendered.contains("[weak]") || rendered.contains("[forgeable]") {
-					annotated += 1;
+				let survives = rendered != original
+					&& reparsed(&variant).is_ok_and(|reparsed| {
+						crate::syntax::pretty::pretty_model(&reparsed) == rendered
+					});
+				match survives {
+					true => annotated += 1,
+					false => lost.push(name.clone()),
 				}
 			}
 		}
+		lost.dedup();
+		assert!(
+			lost.is_empty(),
+			"a weakened variant renders as its original, or its rendering does not parse back \
+			 to the same text, so the capability property would be comparing a model against \
+			 something other than its weakening: {lost:?}"
+		);
 		assert!(
 			annotated > 100,
 			"only {annotated} weakened variants rendered their annotation, so the \
@@ -1346,14 +1566,20 @@ mod tests {
 			"leaks",
 			variants_leaked,
 			Change::Stronger,
-			250,
+			3374,
 			Sweep::Exhaustive,
 		);
 	}
 
 	#[test]
 	fn leaking_a_secret_never_loses_an_attack() {
-		check_variants("leaks", variants_leaked, Change::Stronger, 800, Sweep::Fast);
+		check_variants(
+			"leaks",
+			variants_leaked,
+			Change::Stronger,
+			3374,
+			Sweep::Fast,
+		);
 	}
 
 	#[test]
@@ -1363,7 +1589,7 @@ mod tests {
 			"weaken",
 			variants_weakened,
 			Change::Stronger,
-			250,
+			4467,
 			Sweep::Exhaustive,
 		);
 	}
@@ -1374,7 +1600,7 @@ mod tests {
 			"weaken",
 			variants_weakened,
 			Change::Stronger,
-			1200,
+			4467,
 			Sweep::Fast,
 		);
 	}
@@ -1386,7 +1612,7 @@ mod tests {
 			"unguard",
 			|model| variants_guard(model, false),
 			Change::Stronger,
-			250,
+			812,
 			Sweep::Exhaustive,
 		);
 	}
@@ -1397,7 +1623,7 @@ mod tests {
 			"unguard",
 			|model| variants_guard(model, false),
 			Change::Stronger,
-			180,
+			812,
 			Sweep::Fast,
 		);
 	}
@@ -1409,7 +1635,7 @@ mod tests {
 			"guard",
 			|model| variants_guard(model, true),
 			Change::Weaker,
-			1800,
+			4101,
 			Sweep::Exhaustive,
 		);
 	}
@@ -1420,7 +1646,7 @@ mod tests {
 			"guard",
 			|model| variants_guard(model, true),
 			Change::Weaker,
-			1700,
+			4101,
 			Sweep::Fast,
 		);
 	}
@@ -1442,7 +1668,7 @@ mod tests {
 			"raise",
 			|model| variants_rethresholded(model, 1),
 			Change::Weaker,
-			10,
+			19,
 			Sweep::Exhaustive,
 		);
 	}
@@ -1453,7 +1679,7 @@ mod tests {
 			"promote",
 			|model| variants_attacker(model, AttackerKind::Active),
 			Change::Stronger,
-			60,
+			143,
 			Sweep::Exhaustive,
 		);
 	}
@@ -1464,7 +1690,19 @@ mod tests {
 			"demote",
 			|model| variants_attacker(model, AttackerKind::Passive),
 			Change::Weaker,
-			200,
+			810,
+			Sweep::Exhaustive,
+		);
+	}
+
+	#[test]
+	#[ignore = "exhaustive sweep; run with cargo test --release -- --include-ignored"]
+	fn reordering_a_list_changes_no_verdict_exhaustively() {
+		check_variants(
+			"permute",
+			variants_permuted,
+			Change::Invariant(str::to_string),
+			1639,
 			Sweep::Exhaustive,
 		);
 	}
@@ -1475,8 +1713,20 @@ mod tests {
 			"permute",
 			variants_permuted,
 			Change::Invariant(str::to_string),
-			1100,
+			1639,
 			Sweep::Fast,
+		);
+	}
+
+	#[test]
+	#[ignore = "exhaustive sweep; run with cargo test --release -- --include-ignored"]
+	fn splitting_a_passive_message_or_leak_changes_no_verdict_exhaustively() {
+		check_variants(
+			"split_passive",
+			|model| under(model, AttackerKind::Passive, variant_split),
+			Change::Invariant(str::to_string),
+			169,
+			Sweep::Exhaustive,
 		);
 	}
 
@@ -1486,8 +1736,20 @@ mod tests {
 			"split_passive",
 			|model| under(model, AttackerKind::Passive, variant_split),
 			Change::Invariant(str::to_string),
-			120,
+			169,
 			Sweep::Fast,
+		);
+	}
+
+	#[test]
+	#[ignore = "exhaustive sweep; run with cargo test --release -- --include-ignored"]
+	fn splitting_an_active_message_or_leak_never_loses_an_attack_exhaustively() {
+		check_variants(
+			"split_active",
+			|model| under(model, AttackerKind::Active, variant_split),
+			Change::Stronger,
+			370,
+			Sweep::Exhaustive,
 		);
 	}
 
@@ -1497,8 +1759,20 @@ mod tests {
 			"split_active",
 			|model| under(model, AttackerKind::Active, variant_split),
 			Change::Stronger,
-			280,
+			370,
 			Sweep::Fast,
+		);
+	}
+
+	#[test]
+	#[ignore = "exhaustive sweep; run with cargo test --release -- --include-ignored"]
+	fn swapping_adjacent_principal_blocks_changes_no_verdict_exhaustively() {
+		check_variants(
+			"swap",
+			variant_swapped,
+			Change::Invariant(str::to_string),
+			461,
+			Sweep::Exhaustive,
 		);
 	}
 
@@ -1508,8 +1782,20 @@ mod tests {
 			"swap",
 			variant_swapped,
 			Change::Invariant(str::to_string),
-			340,
+			461,
 			Sweep::Fast,
+		);
+	}
+
+	#[test]
+	#[ignore = "exhaustive sweep; run with cargo test --release -- --include-ignored"]
+	fn delaying_a_passive_leak_within_its_phase_changes_no_verdict_exhaustively() {
+		check_variants(
+			"delay_passive",
+			|model| under(model, AttackerKind::Passive, variant_delayed),
+			Change::Invariant(str::to_string),
+			123,
+			Sweep::Exhaustive,
 		);
 	}
 
@@ -1519,8 +1805,20 @@ mod tests {
 			"delay_passive",
 			|model| under(model, AttackerKind::Passive, variant_delayed),
 			Change::Invariant(str::to_string),
-			90,
+			123,
 			Sweep::Fast,
+		);
+	}
+
+	#[test]
+	#[ignore = "exhaustive sweep; run with cargo test --release -- --include-ignored"]
+	fn delaying_an_active_leak_within_its_phase_never_adds_an_attack_exhaustively() {
+		check_variants(
+			"delay_active",
+			|model| under(model, AttackerKind::Active, variant_delayed),
+			Change::Weaker,
+			282,
+			Sweep::Exhaustive,
 		);
 	}
 
@@ -1530,8 +1828,20 @@ mod tests {
 			"delay_active",
 			|model| under(model, AttackerKind::Active, variant_delayed),
 			Change::Weaker,
-			180,
+			282,
 			Sweep::Fast,
+		);
+	}
+
+	#[test]
+	#[ignore = "exhaustive sweep; run with cargo test --release -- --include-ignored"]
+	fn hoisting_a_passive_leak_within_its_phase_changes_no_verdict_exhaustively() {
+		check_variants(
+			"hoist_passive",
+			|model| under(model, AttackerKind::Passive, variant_hoisted),
+			Change::Invariant(str::to_string),
+			100,
+			Sweep::Exhaustive,
 		);
 	}
 
@@ -1541,8 +1851,20 @@ mod tests {
 			"hoist_passive",
 			|model| under(model, AttackerKind::Passive, variant_hoisted),
 			Change::Invariant(str::to_string),
-			65,
+			100,
 			Sweep::Fast,
+		);
+	}
+
+	#[test]
+	#[ignore = "exhaustive sweep; run with cargo test --release -- --include-ignored"]
+	fn hoisting_an_active_leak_within_its_phase_never_loses_an_attack_exhaustively() {
+		check_variants(
+			"hoist_active",
+			|model| under(model, AttackerKind::Active, variant_hoisted),
+			Change::Stronger,
+			95,
+			Sweep::Exhaustive,
 		);
 	}
 
@@ -1552,8 +1874,20 @@ mod tests {
 			"hoist_active",
 			|model| under(model, AttackerKind::Active, variant_hoisted),
 			Change::Stronger,
-			65,
+			95,
 			Sweep::Fast,
+		);
+	}
+
+	#[test]
+	#[ignore = "exhaustive sweep; run with cargo test --release -- --include-ignored"]
+	fn removing_a_check_never_loses_an_attack_exhaustively() {
+		check_variants(
+			"uncheck",
+			|model| variants_checked(model, false),
+			Change::StrongerOn(DISCLOSURE_QUERIES),
+			781,
+			Sweep::Exhaustive,
 		);
 	}
 
@@ -1563,8 +1897,20 @@ mod tests {
 			"uncheck",
 			|model| variants_checked(model, false),
 			Change::StrongerOn(DISCLOSURE_QUERIES),
-			680,
+			781,
 			Sweep::Fast,
+		);
+	}
+
+	#[test]
+	#[ignore = "exhaustive sweep; run with cargo test --release -- --include-ignored"]
+	fn adding_a_check_never_adds_an_attack_exhaustively() {
+		check_variants(
+			"check",
+			|model| variants_checked(model, true),
+			Change::WeakerOn(DISCLOSURE_QUERIES),
+			169,
+			Sweep::Exhaustive,
 		);
 	}
 
@@ -1574,8 +1920,20 @@ mod tests {
 			"check",
 			|model| variants_checked(model, true),
 			Change::WeakerOn(DISCLOSURE_QUERIES),
-			120,
+			169,
 			Sweep::Fast,
+		);
+	}
+
+	#[test]
+	#[ignore = "exhaustive sweep; run with cargo test --release -- --include-ignored"]
+	fn a_generated_value_made_long_term_never_loses_an_attack_exhaustively() {
+		check_variants(
+			"ungenerate",
+			variants_ungenerated,
+			Change::StrongerOn(DISCLOSURE_QUERIES),
+			1613,
+			Sweep::Exhaustive,
 		);
 	}
 
@@ -1585,8 +1943,20 @@ mod tests {
 			"ungenerate",
 			variants_ungenerated,
 			Change::StrongerOn(DISCLOSURE_QUERIES),
-			1250,
+			1613,
 			Sweep::Fast,
+		);
+	}
+
+	#[test]
+	#[ignore = "exhaustive sweep; run with cargo test --release -- --include-ignored"]
+	fn a_private_value_made_public_never_loses_an_attack_exhaustively() {
+		check_variants(
+			"publicize",
+			variants_publicized,
+			Change::StrongerOn(ORDINARY_QUERIES),
+			1116,
+			Sweep::Exhaustive,
 		);
 	}
 
@@ -1596,7 +1966,7 @@ mod tests {
 			"publicize",
 			variants_publicized,
 			Change::StrongerOn(ORDINARY_QUERIES),
-			860,
+			1116,
 			Sweep::Fast,
 		);
 	}
@@ -1607,7 +1977,7 @@ mod tests {
 			"restrict",
 			variants_restricted,
 			Change::Weaker,
-			250,
+			1002,
 			Sweep::Exhaustive,
 		);
 	}

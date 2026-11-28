@@ -6,6 +6,7 @@ use crate::report::{
 	Assumption, Binding, Computation, DiagramRow, DiagramValue, EnvelopeReport, ScenarioReport,
 	SourceRange,
 };
+use crate::verify::StepKind;
 use crate::verify::TraceValue;
 
 const GOLDEN_SOURCE: &str = concat!(
@@ -27,8 +28,8 @@ fn envelope(summary: &str, truncations: Vec<String>) -> EnvelopeReport {
 	}
 }
 
-fn step(kind: &'static str, text: &str) -> TraceStep {
-	TraceStep::new(kind, text.to_string())
+fn step(text: &str) -> TraceStep {
+	TraceStep::new(StepKind::Derive, text.to_string())
 }
 
 fn golden_run() -> Run {
@@ -52,11 +53,20 @@ fn golden_run() -> Run {
 		variants: 1,
 	};
 	broken.steps = vec![
-		step("derive", "Attacker constructs PUBKEY(nil) from nil."),
-		step("derive", "Attacker is handed b by a leaks declaration."),
-		step("derive", "Attacker obtains ga on the wire."),
+		step("Attacker constructs PUBKEY(nil) from nil."),
 		TraceStep {
-			kind: "mutations",
+			principal: Some("Bob".to_string()),
+			values: vec![TraceValue {
+				name: "b".to_string(),
+				installed: None,
+				was: None,
+				guarded: false,
+			}],
+			..step("Attacker is handed b by a leaks declaration in Bob.")
+		},
+		step("Attacker obtains ga on the wire."),
+		TraceStep {
+			kind: StepKind::Mutations,
 			text: "Attacker replaces ga with PUBKEY(nil).".to_string(),
 			sender: Some("Alice".to_string()),
 			recipient: Some("Bob".to_string()),
@@ -77,7 +87,7 @@ fn golden_run() -> Run {
 			],
 		},
 		TraceStep {
-			kind: "gate",
+			kind: StepKind::Gate,
 			text: "Bob's AEAD_DEC(k, n, e, ad)? check passes on an attacker-controlled key."
 				.to_string(),
 			sender: None,
@@ -85,19 +95,8 @@ fn golden_run() -> Run {
 			principal: Some("Bob".to_string()),
 			values: vec![],
 		},
-		TraceStep {
-			kind: "bypass",
-			text: "Alice's SIGNVERIF check is defeated, accepting PUBKEY(nil).".to_string(),
-			sender: None,
-			recipient: None,
-			principal: Some("Alice".to_string()),
-			values: vec![],
-		},
-		step(
-			"derive",
-			"Attacker computes DH_KEX(PUBKEY(a), nil), obtaining k.",
-		),
-		step("derive", "Attacker decrypts e, obtaining m."),
+		step("Attacker computes DH_KEX(PUBKEY(a), nil), obtaining k."),
+		step("Attacker decrypts e, obtaining m."),
 	];
 	let holding = QueryReport {
 		query: "authentication? Alice -> Bob: e".to_string(),
@@ -313,6 +312,84 @@ fn a_chart_taller_than_a_page_is_one_column_for_the_preamble_to_break() {
 	}
 }
 
+fn dropped_run() -> Run {
+	let mut run = golden_run();
+	let analysis = run.models[0].analysis.as_mut().expect("analysed");
+	analysis.queries[0].steps = vec![
+		TraceStep {
+			principal: Some("Bob".to_string()),
+			..TraceStep::new(
+				StepKind::Idle,
+				"Bob never starts a session in this execution.".to_string(),
+			)
+		},
+		TraceStep {
+			sender: Some("Alice".to_string()),
+			recipient: Some("Bob".to_string()),
+			principal: Some("Bob".to_string()),
+			values: vec![TraceValue {
+				name: "e".to_string(),
+				installed: None,
+				was: None,
+				guarded: false,
+			}],
+			..TraceStep::new(
+				StepKind::Drop,
+				"Attacker drops e (Alice to Bob), and Bob continues without it.".to_string(),
+			)
+		},
+		TraceStep {
+			sender: Some("Alice".to_string()),
+			recipient: Some("Bob".to_string()),
+			values: vec![TraceValue {
+				name: "e".to_string(),
+				installed: Some("e".to_string()),
+				was: None,
+				guarded: false,
+			}],
+			..TraceStep::new(
+				StepKind::Replay,
+				"Attacker replays e (Alice to Bob) from another session, where it is e."
+					.to_string(),
+			)
+		},
+	];
+	run
+}
+
+#[test]
+fn a_dropped_value_ends_at_the_attacker_and_an_unstarted_run_is_marked_on_its_lane() {
+	let tex = tex_report(&dropped_run());
+	let chart = figure(&tex, "golden-vp-0-attack-0");
+	assert!(
+		chart.contains("\\vpmark{0}{vpnote}{vpnumadv}{1}{never starts}"),
+		"{chart}"
+	);
+	assert!(
+		chart.contains(
+			"\\vphopforged{1}{-1}{2}{vpdropped}{vpnumadv}{2}\
+			 {\\vpterm{\\vpconst{e}} \\vpwirenote{dropped}}"
+		),
+		"the arrow runs from Alice to the attacker and no further: {chart}"
+	);
+	assert!(
+		chart.contains(
+			"\\vphopforged{1}{2}{0}{vpreplay}{vpnumadv}{3}\
+			 {\\vpdagger{\\vpterm{\\vpconst{e}}} \\vpwirenote{replayed}}"
+		),
+		"{chart}"
+	);
+	assert!(
+		!chart.contains("\\vprun"),
+		"nothing here is computed: {chart}"
+	);
+	assert!(PREAMBLE.contains("vpdropped/.style="));
+	assert!(
+		tex.contains("and \\vpactor{Bob} continues without it.\\vpon{Alice}{Bob}"),
+		"the step names the message it acts on: {tex}"
+	);
+}
+
 #[test]
 fn preconditions_are_split_from_the_query_they_restrict() {
 	assert_eq!(
@@ -362,9 +439,14 @@ fn every_model_in_the_corpus_renders_a_sound_document() {
 			"{path} has an unbalanced diagram"
 		);
 		assert_eq!(
-			tex.matches("\\begin{lstlisting}").count(),
-			tex.matches("\\end{lstlisting}").count(),
+			tex.matches("\\begin{vplisting}").count(),
+			tex.matches("\\end{vplisting}").count(),
 			"{path} has an unbalanced listing"
+		);
+		assert!(
+			tex.chars()
+				.all(|c| !c.is_ascii_control() || c == '\n' || c == '\t'),
+			"{path} writes a control character XeTeX refuses"
 		);
 		let present = labels(&tex);
 		let mut seen = present.clone();
@@ -399,71 +481,176 @@ fn a_whole_run_renders_one_document_with_a_summary_table() {
 	assert!(braces_balance(&tex));
 }
 
-#[test]
-fn the_source_appendix_cannot_be_closed_from_inside_a_model() {
-	let terminator = super::listing_terminator();
-	let hostile = format!(
-		"attacker[passive]\n// {terminator}\n// \\typeout{{pwned}}\n// begin again\n\
-		 principal Alice[\n\tknows private m\n\th = HASH(m)\n]\n\
-		Alice -> Bob: h\nprincipal Bob[\n\t_ = HASH(h)\n]\n\
-		queries[\n\tconfidentiality? m\n]\n"
-	);
-	let safe = super::listing_safe(&hostile);
-	assert!(
-		!safe.contains(&terminator),
-		"a model carrying the listing terminator must not be able to close the \
-		 listing it is set in, or the rest of its source becomes live LaTeX:\n{safe}"
-	);
-	assert!(
-		safe.contains("knows private m"),
-		"only the offending line is withheld; the rest of the source stays verbatim"
-	);
-	assert!(
-		safe.lines().count() == hostile.lines().count(),
-		"withholding replaces a line rather than dropping it"
-	);
+fn unanalysed(source: &str, error: &str) -> Run {
+	Run::of(
+		"0.0.0",
+		&[("hostile.vp".to_string(), Err(error.to_string()))],
+		&[source.to_string()],
+	)
 }
 
+fn listing(tex: &str) -> Vec<&str> {
+	let from = tex.find("\\begin{vplisting}").expect("a listing begins");
+	let to = tex.find("\\end{vplisting}").expect("a listing ends");
+	tex[from..to].lines().skip(1).collect()
+}
+
+fn error_block(tex: &str) -> Vec<&str> {
+	let from = tex.find("Verifpal reported:").expect("an error block");
+	let to = tex[from..].find("\n}}\n").expect("the block ends") + from + 1;
+	tex[from..to]
+		.lines()
+		.filter(|line| line.contains("\\vpline{"))
+		.map(|line| &line[line.find("\\vpline{").unwrap_or(0)..])
+		.collect()
+}
+
+const HOSTILE: &str = concat!(
+	"attacker[passive]\n",
+	"// \\end{vplisting}\n",
+	"// \\typeout{pwned} } { % $x$ #1 ^^M ~ & _\n",
+	"principal Alice[\n\tknows private m\n\th = HASH(m)\n]\n",
+	"Alice -> Bob: h\nprincipal Bob[\n\t_ = HASH(h)\n]\n",
+	"queries[\n\tconfidentiality? m\n]\n"
+);
+
 #[test]
-fn box_drawing_in_the_source_appendix_keeps_its_shape() {
-	let safe = super::listing_safe(
-		"// \u{250c}\u{2500}\u{2510} A \u{25ba} B\n// \u{2502}x\u{2502} caf\u{e9}",
+fn a_model_cannot_write_tex_into_the_listing_it_is_set_in() {
+	let tex = tex_report(&unanalysed(HOSTILE, "no"));
+	assert_eq!(tex.matches("\\end{vplisting}").count(), 1, "{tex}");
+	assert!(!tex.contains("\\typeout"), "{tex}");
+	assert!(braces_balance(&tex));
+	let lines = listing(&tex);
+	assert_eq!(
+		lines.len(),
+		HOSTILE.lines().count(),
+		"every line of the source is set, none withheld"
 	);
 	assert_eq!(
-		safe, "// +-+ A > B\n// |x| caf\u{e9}",
-		"the listing font has no box-drawing glyphs, which would otherwise vanish"
+		lines[1],
+		"\\vpline{0}{\\vpsrccomment{// \\textbackslash{}end\\{vplisting\\}}}"
 	);
-}
-
-#[test]
-fn a_split_or_spaced_terminator_is_still_caught() {
-	let terminator = super::listing_terminator();
-	for line in [
-		format!("// {terminator}"),
-		format!("//\t{terminator}"),
-		["// \\", "end ", "{ ", super::LISTING, " }"].concat(),
-	] {
-		let safe = super::listing_safe(&line);
+	assert_eq!(
+		lines[2],
+		"\\vpline{0}{\\vpsrccomment{// \\textbackslash{}typeout\\{pwned\\} \\} \\{ \\% \\$x\\$ \\#1 \\textasciicircum{}\\textasciicircum{}M \\textasciitilde{} \\& \\_}}"
+	);
+	for line in lines {
 		assert!(
-			!safe
-				.chars()
-				.filter(|c| !c.is_whitespace())
-				.collect::<String>()
-				.contains(&terminator),
-			"`{line}` still closes the listing"
+			line.starts_with("\\vpline{") && line.ends_with('}'),
+			"{line}"
 		);
 	}
 }
 
 #[test]
-fn the_source_template_sets_the_environment_the_guard_watches() {
-	let template = std::fs::read_to_string("src/report/tex/tpl/source.tex").expect("reads");
-	assert!(
-		template.contains(&super::listing_terminator()),
-		"the source appendix is set in an environment other than `{}`, so the \
-		 guard that keeps a model from closing it is watching the wrong name",
-		super::LISTING
+fn the_listing_keeps_every_character_of_the_source_in_its_place() {
+	let comment = "// Alice\u{2019}s key\u{2014}Bob\u{2019}s \u{201c}nonce\u{201d} is na\u{ef}ve; \
+		caf\u{e9}, Dvo\u{159}\u{e1}k, 100\u{20ac}, x\u{2260}y, k\u{2081}, a\u{2192}b, \u{3b1}\u{416}\u{4e2d}";
+	let source = format!("{comment}\nattacker[passive]\n");
+	let tex = tex_report(&unanalysed(&source, "no"));
+	assert_eq!(
+		listing(&tex)[0],
+		format!("\\vpline{{0}}{{\\vpsrccomment{{{comment}}}}}"),
+		"a character is neither moved, dropped nor respelled on its way into the listing"
 	);
+}
+
+#[test]
+fn the_listing_keeps_indentation_runs_of_spaces_and_line_ends() {
+	let source = "attacker[active]\r\nprincipal Alice[\r\n\tknows private m\r\n    \
+		x  =   HASH(m)\t// a\tb\r\n\r\n]\r\nqueries[\r\n\tconfidentiality? m\r\n]\r\n";
+	let tex = tex_report(&unanalysed(source, "no"));
+	assert_eq!(
+		listing(&tex)[..6],
+		[
+			"\\vpline{0}{\\vpsrckeyword{attacker}[\\vpsrckeyword{active}]}",
+			"\\vpline{0}{\\vpsrckeyword{principal} Alice[}",
+			"\\vpline{4}{\\vpsrckeyword{knows} \\vpsrckeyword{private} m}",
+			"\\vpline{4}{x \\ = \\ \\ \\vpsrcprimitive{HASH}(m) \\ \\vpsrccomment{// a \\ \\ \\ b}}",
+			"\\vpline{0}{}",
+			"\\vpline{0}{]}",
+		],
+		"a tab is a stop of four columns, leading whitespace is the line's indentation, \
+		 and a carriage return before a line feed is part of the line end"
+	);
+	assert_eq!(listing(&tex).len(), 9);
+}
+
+#[test]
+fn a_comment_that_spans_lines_is_tinted_on_each_of_them() {
+	let source = "attacker[active] /* one\n\t   two */\n";
+	let tex = tex_report(&unanalysed(source, "no"));
+	assert_eq!(
+		listing(&tex),
+		[
+			"\\vpline{0}{\\vpsrckeyword{attacker}[\\vpsrckeyword{active}] \\vpsrccomment{/* one}}",
+			"\\vpline{7}{\\vpsrccomment{two */}}",
+		]
+	);
+}
+
+#[test]
+fn a_control_character_in_the_source_or_the_error_never_reaches_the_document_raw() {
+	let source = "// copied from a terminal: \u{1b}[31mFAIL\u{1b}[0m \u{7}\u{b}\u{c}\u{0}\u{7f} a\rb\n\
+		attacker[passive]\n";
+	let tex = tex_report(&unanalysed(source, "bad \u{1b}[1m byte\u{0}"));
+	assert!(
+		tex.chars()
+			.all(|c| !c.is_ascii_control() || c == '\n' || c == '\t'),
+		"XeTeX stops at a line that holds one: {tex}"
+	);
+	assert_eq!(
+		listing(&tex)[0],
+		"\\vpline{0}{\\vpsrccomment{// copied from a terminal: \\textasciicircum{}[[31mFAIL\\textasciicircum{}[[0m \
+		 \\textasciicircum{}G\\textasciicircum{}K\\textasciicircum{}L\\textasciicircum{}@\\textasciicircum{}? \
+		 a\\textasciicircum{}Mb}}"
+	);
+	assert_eq!(
+		error_block(&tex),
+		["\\vpline{0}{bad \\textasciicircum{}[[1m byte\\textasciicircum{}@}"]
+	);
+}
+
+#[test]
+fn box_drawing_in_the_source_appendix_keeps_its_shape() {
+	let source = "// \u{250c}\u{2500}\u{2510} A \u{25ba} B\n// \u{2502}x\u{2502} caf\u{e9}";
+	let tex = tex_report(&unanalysed(source, "no"));
+	assert_eq!(
+		listing(&tex),
+		[
+			"\\vpline{0}{\\vpsrccomment{// +-+ A \\textgreater{} B}}",
+			"\\vpline{0}{\\vpsrccomment{// \\textbar{}x\\textbar{} caf\u{e9}}}",
+		],
+		"the listing font has no box-drawing glyphs, which would otherwise vanish"
+	);
+}
+
+#[test]
+fn a_file_name_may_break_at_its_underscores() {
+	let run = Run::of(
+		"0.0.0",
+		&[
+			(
+				"cap_aead_weak_forgeable_matrix.vp".to_string(),
+				Err("no".to_string()),
+			),
+			("b.vp".to_string(), Err("no".to_string())),
+		],
+		&[String::new(), String::new()],
+	);
+	let tex = tex_report(&run);
+	assert!(
+		tex.contains(
+			"\\hyperref[sec:cap-aead-weak-forgeable-matrix-vp-0]\
+			 {\\vpfile{cap\\_aead\\_weak\\_forgeable\\_matrix.vp}}"
+		),
+		"{tex}"
+	);
+	assert!(
+		PREAMBLE.contains("\\def\\_{\\vpfileus\\allowbreak}"),
+		"inside a file name an underscore is a place the line may break"
+	);
+	assert!(!tex.contains("\\texttt{cap"), "{tex}");
 }
 
 #[test]
@@ -593,12 +780,37 @@ fn a_failed_model_is_reported_inside_the_document() {
 		&[String::new()],
 	);
 	let tex = tex_report(&run);
-	assert!(
-		tex.contains("\\mbox{}parse~error:~100\\%~bad\\\\\n\\mbox{}~~\\textbar{}~~~\\textasciicircum{}\\textasciicircum{}~here"),
+	assert_eq!(
+		error_block(&tex),
+		[
+			"\\vpline{0}{parse error: 100\\% bad}",
+			"\\vpline{2}{\\textbar{} \\ \\ \\textasciicircum{}\\textasciicircum{} here}",
+		],
 		"a diagnostic keeps its lines and the spaces that put its caret under the \
 		 source: {tex}"
 	);
 	assert!(braces_balance(&tex));
+}
+
+#[test]
+fn a_long_diagnostic_line_may_wrap_and_only_its_indentation_is_fixed() {
+	let error = "sanity error: unknown constant `n`\n  |\n5 |     c = AEAD_ENC(long_term_key, \
+		nonce_never_declared, message_one, HASH(long_term_key, message_one))\n  \
+		= note: a constant must be introduced by `knows`, `generates`, or an assignment before \
+		anything can refer to it";
+	let tex = tex_report(&unanalysed("", error));
+	let block = error_block(&tex);
+	assert_eq!(block.len(), 4);
+	assert!(
+		block.iter().all(|line| !line.contains('~')),
+		"a line whose every space is unbreakable runs off the page: {block:?}"
+	);
+	assert_eq!(
+		block[2],
+		"\\vpline{0}{5 \\textbar{} \\ \\ \\ \\ c = AEAD\\_ENC(long\\_term\\_key, \
+		 nonce\\_never\\_declared, message\\_one, HASH(long\\_term\\_key, message\\_one))}"
+	);
+	assert!(block[3].starts_with("\\vpline{2}{= note: a constant"));
 }
 
 #[test]
@@ -623,6 +835,21 @@ fn the_golden_document_compiles_under_tectonic() {
 	] {
 		documents.push((path.replace(['/', '.'], "_"), tex_report(&run_of(path))));
 	}
+	let every_ascii: String = (0u8..128).map(char::from).collect();
+	let hostile = format!(
+		"{HOSTILE}// {every_ascii}\n// na\u{ef}ve \u{2014} \u{201c}x\u{201d} \u{2192} \u{3b1}\n\
+		 /* a comment\n\t  over {} lines */\n",
+		"long ".repeat(60)
+	);
+	let error = format!(
+		"sanity error: {every_ascii}\n  |\n5 |     {}\n  |     ^^^ here",
+		"AEAD_ENC(long_term_key, nonce), ".repeat(12)
+	);
+	documents.push((
+		"hostile".to_string(),
+		tex_report(&unanalysed(&hostile, &error)),
+	));
+	documents.push(("dropped".to_string(), tex_report(&dropped_run())));
 	for (name, tex) in documents {
 		let file = dir.join(format!("{name}.tex"));
 		std::fs::write(&file, &tex).expect("writes the document");

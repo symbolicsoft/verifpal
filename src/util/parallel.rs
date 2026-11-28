@@ -5,8 +5,8 @@
 mod pool {
 	use std::sync::LazyLock;
 
-	pub(super) static POOL: LazyLock<rayon::ThreadPool> =
-		LazyLock::new(|| build(configured_threads()));
+	pub(super) static POOL: LazyLock<Option<rayon::ThreadPool>> =
+		LazyLock::new(|| build(configured_threads()).ok());
 
 	fn configured_threads() -> usize {
 		std::env::var("VERIFPAL_THREADS")
@@ -20,13 +20,12 @@ mod pool {
 			})
 	}
 
-	pub(super) fn build(threads: usize) -> rayon::ThreadPool {
+	pub(super) fn build(threads: usize) -> Result<rayon::ThreadPool, rayon::ThreadPoolBuildError> {
 		rayon::ThreadPoolBuilder::new()
 			.num_threads(threads)
 			.thread_name(|index| format!("verifpal-worker-{index}"))
 			.start_handler(|_| crate::console::set_verbosity(crate::console::Verbosity::Silent))
 			.build()
-			.expect("a thread pool builds")
 	}
 }
 
@@ -35,7 +34,9 @@ fn threads() -> usize {
 	if rayon::current_thread_index().is_some() {
 		rayon::current_num_threads()
 	} else {
-		pool::POOL.current_num_threads()
+		pool::POOL
+			.as_ref()
+			.map_or(1, rayon::ThreadPool::current_num_threads)
 	}
 }
 
@@ -56,19 +57,23 @@ pub(crate) fn map_ordered<T: Send, R: Send>(
 	if rayon::current_thread_index().is_some() {
 		return items.into_par_iter().map(run).collect();
 	}
-	if crate::util::generation::live_generations() > 1 {
-		return items.into_iter().map(f).collect();
+	match pool::POOL.as_ref() {
+		Some(pool) if crate::util::generation::live_generations() <= 1 => {
+			pool.install(|| items.into_par_iter().map(run).collect())
+		}
+		_ => items.into_iter().map(f).collect(),
 	}
-	pool::POOL.install(|| items.into_par_iter().map(run).collect())
 }
 
 #[cfg(all(feature = "cli", test))]
 pub(crate) fn with_threads<R: Send>(threads: usize, f: impl FnOnce() -> R + Send) -> R {
 	let generation = crate::util::generation::current_generation();
-	pool::build(threads.max(1)).install(move || {
-		crate::util::generation::enter_generation(generation);
-		f()
-	})
+	pool::build(threads.max(1))
+		.expect("a test thread pool builds")
+		.install(move || {
+			crate::util::generation::enter_generation(generation);
+			f()
+		})
 }
 
 #[cfg(not(feature = "cli"))]

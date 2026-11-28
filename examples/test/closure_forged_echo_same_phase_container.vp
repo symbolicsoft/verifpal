@@ -1,0 +1,58 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1 at one session and at two.
+//
+// closure_forged_echo_late_container.vp without the phase boundary. Alice's e
+// is on the wire in the phase in which Bob receives, and nothing Alice does
+// before sending it depends on Bob, so the attacker can hand Bob the genuine e
+// and get Alice's own x back from him: with na, ca and m it reveals s1. The
+// verdict does not depend on Bob's block being declared before Alice's send.
+attacker[active]
+
+principal Bob[
+	knows private skb
+	gb = PUBKEY(skb)
+]
+
+Bob -> Alice: [gb]
+
+principal Alice[
+	generates k, na, m
+	s1, s2 = THRESHOLD_SPLIT[2](k)
+	ca = PUBKEY(na)
+	x = THRESHOLD_SIGN[forgeable](s1, na, ca, m)
+	e = PKE_ENC(gb, x)
+	leaks na
+]
+
+Alice -> Bob: ca, m
+
+Bob -> Carol: [gb]
+
+principal Carol[
+	generates mc
+	y = PKE_ENC(gb, mc)
+]
+
+Carol -> Bob: y
+
+principal Bob[
+	d = PKE_DEC(skb, y)
+]
+
+Bob -> Dave: d
+
+principal Dave[
+	_ = HASH(d)
+]
+
+Alice -> Dave: e
+
+principal Dave[
+	_ = HASH(e)
+]
+
+queries[
+	confidentiality? s1
+]

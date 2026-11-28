@@ -7,7 +7,7 @@ use super::{is_core, name, spec};
 use crate::protocol::TraceSlot;
 use crate::syntax::{Block, Model};
 use crate::term::{Primitive, PrimitiveId, Value};
-use crate::util::IdMap;
+use crate::util::{IdMap, IdSet};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum Capability {
@@ -230,11 +230,15 @@ impl CapabilityIndex {
 	}
 
 	pub(crate) fn insert(&mut self, v: &Value) {
+		self.insert_unseen(v, &mut IdSet::default());
+	}
+
+	pub(crate) fn insert_unseen(&mut self, v: &Value, seen: &mut IdSet<usize>) {
 		for term in crate::term::subterms(v) {
 			let Value::Primitive(p) = term else {
 				continue;
 			};
-			if p.capabilities.is_empty() {
+			if p.capabilities.is_empty() || !seen.insert(Arc::as_ptr(p) as usize) {
 				continue;
 			}
 			let normalized = p

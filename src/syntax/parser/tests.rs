@@ -500,6 +500,136 @@ fn an_unterminated_block_comment_is_named_rather_than_its_consequence() {
 }
 
 #[test]
+fn an_unterminated_block_comment_is_named_wherever_it_opens() {
+	for (source, at) in [
+		(
+			"attacker[active]\nprincipal Alice[\n\tknows private ub_a\n\t/* never closed\n]\nqueries[\n\tconfidentiality? ub_a\n]\n",
+			"4:2",
+		),
+		(
+			"attacker[active]\nprincipal Alice[\n\tknows private ub_a\n]\nqueries[\n\t/* never closed\n\tconfidentiality? ub_a\n]\n",
+			"6:2",
+		),
+		(
+			"attacker[ /* never closed\nactive]\nprincipal Alice[\n\tknows private ub_a\n]\nqueries[\n\tconfidentiality? ub_a\n]\n",
+			"1:11",
+		),
+		(
+			"attacker[active]\nprincipal Alice[\n\tknows private ub_a\n\tub_x = HASH(ub_a, /* never closed\n\t)\n]\nqueries[\n\tconfidentiality? ub_a\n]\n",
+			"4:20",
+		),
+		(
+			"attacker[active]\nprincipal Alice[\n\tknows private ub_a\n]\nqueries[\n\tconfidentiality? ub_a\n]\n/* never closed\n",
+			"8:1",
+		),
+	] {
+		let text = model_error(source);
+		assert!(
+			text.starts_with("parse error: unterminated block comment\n"),
+			"{text}"
+		);
+		assert!(text.contains(&format!(" --> diag.vp:{at}\n")), "{text}");
+		assert!(text.contains("this `/*` is never closed"), "{text}");
+	}
+	let closed = "attacker[active]\nprincipal Alice[\n\tknows private ub_a /* fine */\n\tub_x = HASHH(ub_a)\n]\nqueries[\n\tconfidentiality? ub_a\n]\n";
+	assert!(
+		model_error(closed).contains("unknown primitive `HASHH`"),
+		"a closed comment hides no other error"
+	);
+}
+
+#[test]
+fn an_unknown_query_option_is_marked_at_its_name() {
+	let text = model_error(
+		"attacker[active]\nprincipal Alice[\n\tknows private qo_a\n\tqo_x = HASH(qo_a)\n]\nAlice -> Bob: qo_x\nprincipal Bob[\n\tqo_y = HASH(qo_x)\n]\nqueries[\n\tconfidentiality? qo_a [\n\t\tpostcondition[Alice -> Bob: qo_x]\n\t]\n]\n",
+	);
+	assert!(
+		text.contains("unknown query option `postcondition`"),
+		"{text}"
+	);
+	assert!(text.contains(" --> diag.vp:12:3\n"), "{text}");
+	assert!(text.contains("        ^^^^^^^^^^^^^\n"), "{text}");
+	assert!(text.contains("did you mean `precondition`?"), "{text}");
+}
+
+#[test]
+fn a_phase_number_too_large_to_read_is_marked_as_written() {
+	let model = |phase: &str| {
+		format!(
+			"attacker[active]\nprincipal Alice[\n\tknows private pn_a\n]\nphase[{phase}]\nqueries[\n\tconfidentiality? pn_a\n]\n"
+		)
+	};
+	let text = model_error(&model("99999999999999999999"));
+	assert!(
+		text.contains("`99999999999999999999` is not a phase number"),
+		"{text}"
+	);
+	assert!(text.contains(" --> diag.vp:5:7\n"), "{text}");
+	assert!(
+		text.contains("      ^^^^^^^^^^^^^^^^^^^^ too large to number a phase"),
+		"{text}"
+	);
+	let text = model_error(&model("x"));
+	assert!(text.contains("expected a phase number"), "{text}");
+	assert!(text.contains(" --> diag.vp:5:7\n"), "{text}");
+	assert!(text.contains("found `x`"), "{text}");
+}
+
+#[test]
+fn the_principal_name_that_exhausts_the_ids_is_the_one_marked() {
+	let mut source = String::from("attacker[active]\n");
+	for i in 1..=257 {
+		source += &format!("principal P{i}[\n\tknows private s{i}\n]\n");
+	}
+	source += "queries[\n\tconfidentiality? s1\n]\n";
+	let text = model_error(&source);
+	assert!(
+		text.contains("more than 255 distinct principal names"),
+		"{text}"
+	);
+	assert!(text.contains(" --> diag.vp:767:11\n"), "{text}");
+	assert!(text.contains("principal P256[\n"), "{text}");
+	let mut source =
+		String::from("attacker[active]\nprincipal Alice[\n\tknows private s\n\tx = HASH(s)\n]\n");
+	for i in 1..=127 {
+		source += &format!("Alice -> A{i}: x\nAlice -> B{i}: x\n");
+	}
+	source += "Alice -> Last: x\nqueries[\n\tconfidentiality? s\n]\n";
+	let text = model_error(&source);
+	assert!(
+		text.contains("more than 255 distinct principal names"),
+		"{text}"
+	);
+	assert!(text.contains(" --> diag.vp:260:10\n"), "{text}");
+}
+
+#[test]
+fn a_file_name_error_shows_its_note_and_help() {
+	let error = parse_file("some/where/notvp.txt").expect_err("not a model file name");
+	assert_eq!(
+		error.to_string(),
+		"parse error: `notvp.txt` is not a Verifpal model file name\n  \
+		 = note: Verifpal models are named with a `.vp` extension\n  \
+		 = help: rename it to `notvp.txt.vp`"
+	);
+	let long = format!("{}.vp", "n".repeat(62));
+	let error = parse_file(&long).expect_err("too long");
+	assert!(
+		error
+			.to_string()
+			.ends_with("\n  = help: rename the file to something shorter"),
+		"{error}"
+	);
+	let error = parse_file("..").expect_err("names no file");
+	assert!(
+		error
+			.to_string()
+			.ends_with("\n  = note: each path must name one model file, whose name ends in `.vp`"),
+		"{error}"
+	);
+}
+
+#[test]
 fn a_message_a_principal_sends_to_itself_names_that_rule() {
 	let text = model_error(
 		"attacker[active]\nprincipal Alice[\n\tknows private sm_m\n]\nAlice -> Alice: sm_m\nqueries[\n\tconfidentiality? sm_m\n]\n",

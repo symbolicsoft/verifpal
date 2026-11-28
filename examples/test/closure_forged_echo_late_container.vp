@@ -1,0 +1,64 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0 at one session and at two.
+//
+// Bob decrypts whatever he is sent and passes the plaintext on, in phase 0.
+// Alice's partial x is declared `forgeable` and leaves her only in phase 1,
+// sealed to Bob as e. The attacker forges x, seals its forgery to Bob itself,
+// and gets it back from him as d. With x held unforgeable the attacker can build
+// that install only from Alice's e, which does not exist until phase 1, after
+// Bob has finished: a ciphertext it cannot open, sent later, is no reason to
+// take Bob's earlier echo for Alice's copy. A send computed from an install
+// counts only where the install could be supplied at its own receive.
+// closure_forged_echo_same_phase_container.vp is the counterweight.
+attacker[active]
+
+principal Bob[
+	knows private skb
+	gb = PUBKEY(skb)
+]
+
+Bob -> Alice: [gb]
+
+principal Alice[
+	generates k, na, m
+	s1, s2 = THRESHOLD_SPLIT[2](k)
+	ca = PUBKEY(na)
+	x = THRESHOLD_SIGN[forgeable](s1, na, ca, m)
+	e = PKE_ENC(gb, x)
+	leaks na
+]
+
+Alice -> Bob: ca, m
+
+Bob -> Carol: [gb]
+
+principal Carol[
+	generates mc
+	y = PKE_ENC(gb, mc)
+]
+
+Carol -> Bob: y
+
+principal Bob[
+	d = PKE_DEC(skb, y)
+]
+
+Bob -> Dave: d
+
+principal Dave[
+	_ = HASH(d)
+]
+
+phase[1]
+
+Alice -> Dave: e
+
+principal Dave[
+	_ = HASH(e)
+]
+
+queries[
+	confidentiality? s1
+]

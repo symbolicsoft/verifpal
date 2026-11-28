@@ -1,0 +1,48 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1 at one session and at two.
+//
+// closure_forged_echo_container.vp with Alice leaking her own x in phase 1.
+// That copy is genuine whatever Bob echoed before it, and a genuine partial
+// with its nonce, commitment and message reveals the share s1.
+attacker[active]
+
+principal Alice[
+	generates k, na, m
+	s1, s2 = THRESHOLD_SPLIT[2](k)
+	ca = PUBKEY(na)
+	x = THRESHOLD_SIGN[forgeable](s1, na, ca, m)
+	leaks na
+]
+
+Alice -> Bob: ca, m
+
+principal Carol[
+	generates kc, nc, mc
+	c1, c2 = THRESHOLD_SPLIT[2](kc)
+	cc = PUBKEY(nc)
+	y = THRESHOLD_SIGN(c1, nc, cc, mc)
+]
+
+Carol -> Bob: y
+
+principal Bob[
+	w = CONCAT(y, nil)
+]
+
+Bob -> Dave: w
+
+principal Dave[
+	_ = HASH(w)
+]
+
+phase[1]
+
+principal Alice[
+	leaks x
+]
+
+queries[
+	confidentiality? s1
+]

@@ -324,7 +324,7 @@ pub(crate) fn mermaid_of(m: &Model) -> String {
 	for (at, name) in principals.iter().enumerate() {
 		out.push_str(&format!("    participant p{at} as {name}\n"));
 	}
-	for line in diagram_body(m, &id).lines() {
+	for line in diagram_body(m, &id, "->>").lines() {
 		out.push_str("    ");
 		out.push_str(line);
 		out.push('\n');
@@ -334,10 +334,10 @@ pub(crate) fn mermaid_of(m: &Model) -> String {
 
 #[cfg_attr(not(feature = "lsp"), allow(dead_code))]
 pub(crate) fn pretty_diagram(m: &Model) -> String {
-	diagram_body(m, &|name: &str| name.to_string())
+	diagram_body(m, &|name: &str| name.to_string(), "->")
 }
 
-fn diagram_body(m: &Model, id: &dyn Fn(&str) -> String) -> String {
+fn diagram_body(m: &Model, id: &dyn Fn(&str) -> String, arrow: &str) -> String {
 	let anchor = m.blocks.iter().find_map(|block| match block {
 		Block::Principal(p) => Some(p.name.as_str()),
 		Block::Message(msg) => Some(&*msg.sender_name),
@@ -353,8 +353,9 @@ fn diagram_body(m: &Model, id: &dyn Fn(&str) -> String) -> String {
 			}
 			Block::Message(msg) => {
 				output.push_str(&format!(
-					"{}->{}:{}\n",
+					"{}{}{}:{}\n",
 					id(&msg.sender_name),
+					arrow,
 					id(&msg.recipient_name),
 					pretty_constants(&msg.constants),
 				));

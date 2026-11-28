@@ -3,7 +3,21 @@
 
 const ATTACK_IS_REPORTED_WITHOUT_A_TRACE: [(&str, usize); 0] = [];
 
-const SWEPT_MODELS_OUTSIDE_EXAMPLES_TEST: [&str; 27] = [
+const HEADER_OMITS_THE_ONE_SESSION_RESULT: [&str; 0] = [];
+
+const MODELS_WITHOUT_A_STATED_RESULT: usize = 101;
+
+const SWEPT_MODELS_OUTSIDE_EXAMPLES_TEST: [&str; 37] = [
+	"examples/epassport/bac.vp",
+	"examples/epassport/eac_bac.vp",
+	"examples/epassport/eac_bac_unbound.vp",
+	"examples/epassport/inspect_aa.vp",
+	"examples/epassport/inspect_ca.vp",
+	"examples/epassport/inspect_pa.vp",
+	"examples/epassport/pace.vp",
+	"examples/epassport/track_bac.vp",
+	"examples/epassport/track_bac_unknown_mrz.vp",
+	"examples/epassport/track_pace.vp",
 	"examples/epassport/remote_aa.vp",
 	"examples/epassport/remote_aa_bound.vp",
 	"examples/epassport/remote_aa_private_nfc.vp",
@@ -167,51 +181,60 @@ struct Swept {
 	traceless: Vec<(String, usize)>,
 	incoherent: Vec<String>,
 	header_problems: Vec<String>,
+	unstated: Vec<String>,
 	documented: usize,
 	undocumented: usize,
 }
 
 fn sweep_model(model: &str, path: &str) -> Swept {
 	let mut swept = Swept::default();
-	let one = crate::verify::verify_with_sessions(path, 1);
-	let Ok((results, _)) = crate::verify::verify(path) else {
+	let source = std::fs::read_to_string(path)
+		.unwrap_or_else(|e| panic!("the sweep lists {path}, which cannot be read: {e}"));
+	let Ok((two, two_code)) = crate::verify::verify(path) else {
 		return swept;
 	};
-	let source = std::fs::read_to_string(path).expect("read model");
+	let (one, one_code) = crate::verify::verify_with_sessions(path, 1)
+		.unwrap_or_else(|e| panic!("{model} analyses at two sessions but not at one: {e}"));
 	let legs = message_legs(&source);
 	let stated = stated_result_codes(&source);
 	if stated.is_empty() {
 		swept.undocumented += 1;
 	} else {
 		swept.documented += 1;
-		let code = crate::verify::VerifyResult::results_code(&results);
-		let mut produced = vec![code.clone()];
-		if source.contains("session")
-			&& let Ok((one, _)) = &one
-		{
-			produced.push(crate::verify::VerifyResult::results_code(one));
-		}
-		if !stated.contains(&code) {
+		if !stated.contains(&two_code) {
 			swept.header_problems.push(format!(
 				"{}: the header says the model produces {}, but at the shipped default it \
 				 produces {}",
 				model,
 				stated.join(" / "),
-				code
+				two_code
 			));
 		}
+		if !stated.contains(&one_code) {
+			swept.unstated.push(model.to_string());
+		}
 		for claim in &stated {
-			if !produced.contains(claim) {
+			if *claim != one_code && *claim != two_code {
 				swept.header_problems.push(format!(
 					"{}: the header claims a result of {}, which the model does not produce \
-					 at one session or at two (it produces {})",
-					model,
-					claim,
-					produced.join(" / ")
+					 at one session or at two (it produces {} and {})",
+					model, claim, one_code, two_code
 				));
 			}
 		}
 	}
+	sweep_traces(model, "one session", &one, &legs, &mut swept);
+	sweep_traces(model, "two sessions", &two, &legs, &mut swept);
+	swept
+}
+
+fn sweep_traces(
+	model: &str,
+	sessions: &str,
+	results: &[crate::verify::VerifyResult],
+	legs: &[(String, String, String, bool)],
+	swept: &mut Swept,
+) {
 	for result in results.iter().filter(|r| r.resolved) {
 		let summary = result.summary.as_str();
 		let key = (model.to_string(), result.query_index);
@@ -245,28 +268,22 @@ fn sweep_model(model: &str, path: &str) -> Swept {
 					.collect();
 				if to_recipient.is_empty() {
 					swept.incoherent.push(format!(
-						"{} query {}: trace says the attacker replaces `{}` on a message to \
-						 {}, but no message in the model carries `{}` to {}",
-						model, result.query_index, name, recipient, name, recipient
+						"{} query {} at {}: trace says the attacker replaces `{}` on a message \
+						 to {}, but no message in the model carries `{}` to {}",
+						model, result.query_index, sessions, name, recipient, name, recipient
 					));
 					continue;
 				}
-				if to_recipient.iter().all(|(_, _, _, g)| *g)
-					&& !line.contains("upstream of the guard")
-					&& !legs.iter().any(|(_, _, n, g)| *n == name && !*g)
-				{
+				if to_recipient.iter().all(|(_, _, _, g)| *g) {
 					swept.incoherent.push(format!(
-						"{} query {}: trace says the attacker replaces `{}` on a message to \
-						 {}, but every message carrying `{}` guards it and the step claims no \
-						 guard bypass",
-						model, result.query_index, name, recipient, name
+						"{} query {} at {}: trace says the attacker replaces `{}` on a message \
+						 to {}, but every message carrying `{}` to {} guards it",
+						model, result.query_index, sessions, name, recipient, name, recipient
 					));
 				}
 			}
 		}
 	}
-
-	swept
 }
 
 #[test]
@@ -274,6 +291,7 @@ fn attack_traces_keep_their_shape_and_name_only_wires_that_exist() {
 	let mut traceless: Vec<(String, usize)> = Vec::new();
 	let mut incoherent: Vec<String> = Vec::new();
 	let mut header_problems: Vec<String> = Vec::new();
+	let mut unstated: Vec<String> = Vec::new();
 	let mut documented = 0usize;
 	let mut undocumented = 0usize;
 
@@ -284,6 +302,7 @@ fn attack_traces_keep_their_shape_and_name_only_wires_that_exist() {
 		traceless.extend(swept.traceless);
 		incoherent.extend(swept.incoherent);
 		header_problems.extend(swept.header_problems);
+		unstated.extend(swept.unstated);
 		documented += swept.documented;
 		undocumented += swept.undocumented;
 	}
@@ -313,12 +332,20 @@ fn attack_traces_keep_their_shape_and_name_only_wires_that_exist() {
 		 stale claim or a verdict nobody has re-justified:\n  {}",
 		header_problems.join("\n  ")
 	);
-	assert!(
-		undocumented <= 126,
-		"{} swept models state no expected result code in their header, up from 126. A new \
-		 model must say what it expects and why, so that its verdict can be checked against \
-		 an intent rather than against itself",
-		undocumented
+	unstated.sort();
+	assert_eq!(
+		unstated, HEADER_OMITS_THE_ONE_SESSION_RESULT,
+		"the set of headers that state a result but not the one their model produces at one \
+		 session has moved. A header argues the verdict at both session counts, so a new entry \
+		 is a one-session verdict nobody has justified, and an entry that no longer appears \
+		 is to be deleted from the list"
+	);
+	assert_eq!(
+		undocumented, MODELS_WITHOUT_A_STATED_RESULT,
+		"the number of swept models that state no expected result code in their header has \
+		 moved. A new model must say what it expects and why, so that its verdict can be \
+		 checked against an intent rather than against itself; when an old model gains its \
+		 header, lower the count with it"
 	);
 	assert!(
 		incoherent.is_empty(),
@@ -545,9 +572,14 @@ fn the_closure_does_not_combine_reads_from_incompatible_executions() {
 		})
 		.expect("the payload query");
 	assert!(
-		!payload.summary.contains("not a minimized witness"),
+		payload
+			.summary
+			.contains("breaks alice_ephpk under the declared `weak` assumption")
+			&& !payload.summary.contains("Attacker replaces")
+			&& !payload.summary.contains("Attacker replays"),
 		"with the incoherent route gone the phase-3 route is what remains, and it needs \
-		 no substitution at all, so its witness minimizes: {}",
+		 no substitution at all, so its witness is the weak key broken and nothing \
+		 installed: {}",
 		payload.summary
 	);
 }
@@ -1290,6 +1322,7 @@ fn test_spore_otway_rees() {
 #[test]
 fn test_spore_wmf() {
 	run_model("spore_wmf.vp", "c1a1f1");
+	run_model_sessions("spore_wmf.vp", 1, "c1a0f0");
 }
 
 #[test]
@@ -1602,6 +1635,7 @@ fn test_cap_multi_annotation() {
 #[test]
 fn test_cap_noop_annotated() {
 	run_model("cap_noop_annotated.vp", "c0a1");
+	run_model_sessions("cap_noop_annotated.vp", 1, "c0a0");
 }
 #[test]
 fn test_epassport_remote_aa_nfc_visibility() {
@@ -1618,7 +1652,7 @@ fn test_epassport_remote_aa_nfc_visibility() {
 			assert_code(model, Some(sessions), &results, &code, expected);
 			let derives = |prefix: &str, detail: &str| {
 				results[0].steps.iter().any(|step| {
-					step.kind == "derive"
+					step.kind == crate::verify::StepKind::Derive
 						&& step.text.starts_with(prefix)
 						&& step.text.contains(detail)
 				})
@@ -1633,6 +1667,26 @@ fn test_epassport_remote_aa_nfc_visibility() {
 			}
 		}
 	}
+}
+
+#[test]
+fn test_epassport_inspect_ta() {
+	let swept = sweep_model("inspect_ta.vp", "examples/epassport/inspect_ta.vp");
+	assert!(
+		swept.documented == 1
+			&& swept.header_problems.is_empty()
+			&& swept.unstated.is_empty()
+			&& swept.incoherent.is_empty()
+			&& swept.traceless.is_empty(),
+		"inspect_ta.vp is swept on its own, because its variants with termCert unguarded, \
+		 caSkT leaked or caPkT weak do not finish in minutes at one session and so cannot \
+		 be in the corpus the metamorphic properties transform; its header or its traces \
+		 no longer hold: {:?} {:?} {:?} {:?}",
+		swept.header_problems,
+		swept.unstated,
+		swept.incoherent,
+		swept.traceless
+	);
 }
 
 #[test]
@@ -2261,6 +2315,7 @@ fn test_signal_small_unguarded_bob() {
 #[test]
 fn test_signal_small_leaks() {
 	run_model("signal_small_leaks.vp", "c1a1");
+	run_model_sessions("signal_small_leaks.vp", 1, "c0a1");
 }
 #[test]
 fn test_signal_small_leaks_alice() {
@@ -2269,6 +2324,7 @@ fn test_signal_small_leaks_alice() {
 #[test]
 fn test_signal_small_leaks_bob() {
 	run_model("signal_small_leaks_bob.vp", "c1a1");
+	run_model_sessions("signal_small_leaks_bob.vp", 1, "c0a1");
 }
 #[test]
 fn test_auth_with_signing() {
@@ -2627,6 +2683,7 @@ fn test_needham_schroeder_symmetric() {
 #[test]
 fn test_replay_pump_reflection() {
 	run_model("replay_pump_reflection.vp", "c0a1");
+	run_model_sessions("replay_pump_reflection.vp", 1, "c0a0");
 }
 #[test]
 fn test_fullresolution() {
@@ -2919,11 +2976,6 @@ fn the_lowe_witness_replays_through_bob_before_it_learns_the_nonce() {
 		.find(|r| r.resolved && r.query.subject().is_ok_and(|c| &*c.name == "nr"))
 		.expect("the confidentiality query on nr fails");
 	let trace = nr.summary.as_str();
-	assert!(
-		!trace.contains("not a causally ordered execution"),
-		"Lowe's attack has a causally ordered witness: reseal Alice@2's request to Bob, \
-		 relay Bob's reply to Alice@2, then open m3@2. Narrated: {trace}"
-	);
 	let replays_to_bob = trace
 		.lines()
 		.position(|line| line.contains("replaces m1 ") && line.contains(" to Bob"));
@@ -2991,11 +3043,18 @@ fn a_replay_witness_is_minimized_rather_than_disclosed_as_unconfirmed() {
 		.iter()
 		.find(|r| r.resolved && r.query.message.constant().is_ok_and(|c| &*c.name == "e1"))
 		.expect("the e1 authentication query fails");
+	let actions: Vec<&str> = auth
+		.summary
+		.lines()
+		.filter_map(|line| line.split_once("Attacker "))
+		.map(|(_, action)| action)
+		.collect();
 	assert!(
-		!auth.summary.contains("not a minimized witness"),
-		"a replay needs one install to reproduce, so falling back to the unconfirmed \
-		 witness here means the minimizer has no candidate family that can express \
-		 one. Narrated: {}",
+		matches!(actions[..], [nonce, message]
+			if nonce.starts_with("replays n_e1 ") && message.starts_with("replays e1 ")),
+		"replaying the one message that carries e1 reproduces the duplicate acceptance, so \
+		 the minimized witness is that message's two values and no install on a later \
+		 flight. Narrated: {}",
 		auth.summary
 	);
 }
@@ -4286,6 +4345,53 @@ fn test_scenario_binding_is_not_a_forgery() {
 	run_model_sessions("scenario_binding_is_not_a_forgery.vp", 1, "a0");
 }
 #[test]
+fn a_query_is_read_in_the_scenario_copy_that_makes_it_sane() {
+	for sessions in [1, 2] {
+		run_model_sessions("scenario_query_each_entry.vp", sessions, "a0a1");
+		run_model_sessions("scenario_query_each_entry_reversed.vp", sessions, "a0a1");
+		for expected in [
+			"Alice receives `gd` but never uses it",
+			" --> scenario_query_no_entry.vp:51:33\n",
+		] {
+			run_model_sessions_err("scenario_query_no_entry.vp", sessions, expected);
+		}
+	}
+}
+#[test]
+fn auto_queries_ask_the_same_of_a_model_whatever_the_order_of_its_scenarios() {
+	for sessions in [1, 2] {
+		let asked = |model: &str| {
+			let (results, code) =
+				crate::verify::verify_auto_queries(&format!("examples/test/{model}"), sessions)
+					.unwrap_or_else(|e| panic!("{model} at {sessions}: {e}"));
+			let queries: Vec<String> = results.iter().map(|r| r.query.to_string()).collect();
+			(queries, code)
+		};
+		let (queries, code) = asked("scenario_query_each_entry.vp");
+		assert_eq!(
+			queries[3..5],
+			[
+				"authentication? Bob -> Alice: gb",
+				"authentication? Carol -> Alice: gc"
+			],
+			"each key is used under one scenario only, and both are asked about"
+		);
+		assert_eq!(code, "c0c0c1a0a1a1f1f1f1", "at {sessions}");
+		assert_eq!(
+			asked("scenario_query_each_entry_reversed.vp"),
+			(queries, code),
+			"at {sessions}"
+		);
+	}
+}
+#[test]
+fn a_scenario_entry_binds_its_targets_at_once() {
+	for sessions in [1, 2] {
+		run_model_sessions("scenario_binding_swap.vp", sessions, "c1c0");
+		run_model_sessions("scenario_binding_chain.vp", sessions, "c0c1");
+	}
+}
+#[test]
 fn test_scenario_identity_binding_keeps_the_error() {
 	run_model_err(
 		"scenario_identity_binding_keeps_the_error.vp",
@@ -4458,26 +4564,7 @@ fn test_causal_oracle_cycle() {
 		("causal_oracle_cycle_early.vp", 1, "c1c1c1"),
 		("causal_oracle_cycle_early.vp", 2, "c1c1c1"),
 	] {
-		let path = format!("examples/test/{model}");
-		let (results, code) = crate::verify::verify_with_sessions(&path, sessions).unwrap();
-		assert_code(model, Some(sessions), &results, &code, expected);
-		for result in results {
-			assert!(
-				!result.summary.contains("not a minimized witness"),
-				"{}",
-				result.summary
-			);
-			assert!(
-				!result.summary.contains("not a causally ordered execution"),
-				"{}",
-				result.summary
-			);
-			assert!(
-				!result.summary.contains("only computes later"),
-				"{}",
-				result.summary
-			);
-		}
+		run_model_sessions(model, sessions, expected);
 	}
 }
 
@@ -4487,26 +4574,7 @@ fn test_nested_nonce_reuse_disclosures() {
 		"solver_dh_nested_reuse_opens_key.vp",
 		"solver_dh_nested_reuse_opens_nonce.vp",
 	] {
-		let path = format!("examples/test/{model}");
-		let (results, code) = crate::verify::verify(&path).unwrap();
-		assert_code(model, Some(2), &results, &code, "c1");
-		for result in results {
-			assert!(
-				!result.summary.contains("not a minimized witness"),
-				"{}",
-				result.summary
-			);
-			assert!(
-				!result.summary.contains("not a causally ordered execution"),
-				"{}",
-				result.summary
-			);
-			assert!(
-				!result.summary.contains("only computes later"),
-				"{}",
-				result.summary
-			);
-		}
+		run_model(model, "c1");
 		run_model_sessions(model, 1, "c1");
 	}
 }
@@ -5319,9 +5387,12 @@ fn test_remote_aa_bound_disclosed_signature() {
 		let (results, code) = crate::verify::verify_with_sessions(&path, 2).unwrap();
 		assert_code(model, Some(2), &results, &code, "a1");
 		assert!(
-			results[0].steps.iter().any(|step| step.kind == "derive"
-				&& step.text.starts_with("Attacker forges ")
-				&& step.text.contains("under the key and nonce")),
+			results[0]
+				.steps
+				.iter()
+				.any(|step| step.kind == crate::verify::StepKind::Derive
+					&& step.text.starts_with("Attacker forges ")
+					&& step.text.contains("under the key and nonce")),
 			"{model}: expected the documented nonce-reuse forgery under the disclosed challenge: {}",
 			results[0].summary
 		);
@@ -5424,6 +5495,39 @@ fn a_trace_narrates_a_disclosure_only_once_it_has_happened() {
 				&& !derived.contains("is handed k"),
 			"Alice leaks k only after Bob accepted the forged tag, so the tag was built from \
 			 k as opened out of w. Narrated: {derived}"
+		);
+	}
+}
+
+#[test]
+fn a_trace_explains_an_install_under_the_phase_of_its_receive() {
+	let trace = |model: &str, sessions: u8| {
+		let (results, code) =
+			crate::verify::verify_with_sessions(&format!("examples/test/{model}"), sessions)
+				.expect("verify");
+		assert_eq!(code, "a1", "{model} at {sessions}");
+		results[0].summary.clone()
+	};
+	let assumed = "Under the declared `forgeable` assumption";
+	for sessions in [1, 2] {
+		let before = trace("narrate_install_before_capability_onset.vp", sessions);
+		assert!(
+			before.contains("under the key and nonce shared by e1 and e2")
+				&& !before.contains(assumed),
+			"Bob receives in phase 0, where the phase-1 assumption is not in force. \
+			 Narrated: {before}"
+		);
+		let after = trace("narrate_install_after_capability_onset.vp", sessions);
+		assert!(after.contains(assumed), "Narrated: {after}");
+		let genuine = trace(
+			"narrate_install_before_capability_onset_genuine.vp",
+			sessions,
+		);
+		assert!(
+			genuine.contains("Attacker opens c1 with kleak, obtaining x.")
+				&& !genuine.contains("`weak` assumption"),
+			"x reaches the attacker in phase 0 through c1; c2 is weak only from phase 1. \
+			 Narrated: {genuine}"
 		);
 	}
 }
@@ -5708,6 +5812,48 @@ fn test_unlink_relay_echo_not_observed() {
 	for sessions in [1, 2] {
 		run_model_sessions("unlink_relay_echo_not_observed.vp", sessions, "u0");
 		run_model_sessions("unlink_relay_echo_sent.vp", sessions, "u1");
+	}
+}
+#[test]
+fn test_a_send_computed_from_an_install_is_no_genuine_disclosure() {
+	for sessions in [1, 2] {
+		run_model_sessions("closure_forged_echo_container.vp", sessions, "c0");
+		run_model_sessions("closure_forged_echo_container_leaked.vp", sessions, "c1");
+		run_model_sessions("closure_forged_echo_identity.vp", sessions, "c0");
+		run_model_sessions("closure_forged_echo_identity_leaked.vp", sessions, "c1");
+		run_model_sessions("cap_forgeable_echoed_reuse_member.vp", sessions, "c0");
+		run_model_sessions("unlink_container_echo_not_observed.vp", sessions, "u0");
+		run_model_sessions("unlink_container_echo_sent.vp", sessions, "u1");
+		run_model_sessions("unlink_opened_fresh_content_echoed.vp", sessions, "u0");
+		run_model_sessions("unlink_opened_fresh_content_echoed_sent.vp", sessions, "u1");
+	}
+}
+#[test]
+fn test_an_install_is_supplied_at_its_own_receive_or_not_at_all() {
+	for sessions in [1, 2] {
+		run_model_sessions("closure_forged_echo_late_container.vp", sessions, "c0");
+		run_model_sessions(
+			"closure_forged_echo_same_phase_container.vp",
+			sessions,
+			"c1",
+		);
+		run_model_sessions("cap_forgeable_echoed_reuse_member_late.vp", sessions, "c0");
+		run_model_sessions("unlink_opened_fresh_content_echoed_late.vp", sessions, "u0");
+		run_model_sessions("unlink_container_echo_laundered.vp", sessions, "u0");
+		run_model_sessions("unlink_container_echo_laundered_sent.vp", sessions, "u1");
+		run_model_sessions("closure_forged_oracle_output.vp", sessions, "c1");
+		run_model_sessions("closure_forged_oracle_output_guarded.vp", sessions, "c0");
+		run_model_sessions("closure_forged_oracle_nested_proof.vp", sessions, "c1c1");
+	}
+	run_model_sessions("closure_forged_echo_causal_container.vp", 1, "c0");
+	run_model("closure_forged_echo_causal_container.vp", "c1");
+}
+#[test]
+fn test_a_receiver_variable_is_never_bound_to_itself() {
+	for sessions in [1, 2] {
+		run_model_sessions("solver_receiver_alias_echo.vp", sessions, "c0");
+		run_model_sessions("solver_receiver_alias_sealed_echo.vp", sessions, "c1");
+		run_model_sessions("solver_receiver_alias_key_confirmation.vp", sessions, "c0");
 	}
 }
 
@@ -6280,8 +6426,11 @@ fn a_trace_shows_the_later_phase_actions_its_verdict_needs() {
 		};
 		assert!(disclosed < built && built < replaced && replaced < passed);
 		assert!(
-			needed.steps.iter().any(|step| step.kind == "mutations"
-				&& step.values.iter().any(|value| value.name == "sig")),
+			needed
+				.steps
+				.iter()
+				.any(|step| step.kind == crate::verify::StepKind::Mutations
+					&& step.values.iter().any(|value| value.name == "sig")),
 			"the structured steps carry the phase 1 replacement"
 		);
 		assert_eq!(needed.options.len(), 1);

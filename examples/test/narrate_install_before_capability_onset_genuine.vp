@@ -1,0 +1,45 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a1 at one session and at two.
+//
+// narrate_install_before_capability_onset.vp for a value whose explanation
+// opens a genuine term. Dave receives in phase 0 and checks in phase 1. x
+// reaches the attacker in phase 0 through c1, under the leaked kleak; c2 is
+// `weak` only from phase 1. The trace once explained the phase-0 replacement by
+// breaking c2 under the phase-1 assumption, because the world that proves x
+// genuine was closed at the verdict's phase and not at the receive's.
+attacker[active]
+
+principal Alice[
+	knows private kleak, k2, kad
+	generates k, na, m, m2
+	s1, s2 = THRESHOLD_SPLIT[2](k)
+	ca = PUBKEY(na)
+	x = THRESHOLD_SIGN[forgeable](s1, na, ca, m)
+	c2 = ENC[weak from phase 1](k2, x)
+	c1 = ENC(kleak, x)
+	es = ENC(kad, s1)
+	tag = MAC(s1, m2)
+	leaks na, kleak
+]
+
+Alice -> Bob: ca, m, c2, c1
+
+principal Bob[
+	_ = HASH(ca, m, c2, c1)
+]
+
+Alice -> Dave: [es], m2, tag
+
+phase[1]
+
+principal Dave[
+	knows private kad
+	sd = DEC(kad, es)
+	_ = ASSERT(MAC(sd, m2), tag)?
+]
+
+queries[
+	authentication? Alice -> Dave: m2
+]

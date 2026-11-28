@@ -1,0 +1,46 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: u1 at one session and at two.
+//
+// unlink_opened_fresh_content_echoed.vp with Alice sending t herself. The
+// nonces now reach the attacker without either ciphertext, so it rebuilds c1
+// and c2 from k and their contents and k links them, as in
+// unlink_opened_content_leaked_after.vp.
+attacker[active]
+
+principal Alice[
+	knows private k
+	generates n1, n2
+	c1 = ENC(k, n1)
+	c2 = ENC(k, n2)
+	t = CONCAT(n1, n2)
+	leaks k
+]
+
+Alice -> Bob: c1, c2, t
+
+principal Bob[
+	_ = HASH(c1, c2)
+]
+
+principal Carol[
+	generates ya, yb
+	y = CONCAT(ya, yb)
+]
+
+Carol -> Echo: y
+
+principal Echo[
+	w = CONCAT(y, nil)
+]
+
+Echo -> Dave: w
+
+principal Dave[
+	_ = HASH(w)
+]
+
+queries[
+	unlinkability? c1, c2
+]

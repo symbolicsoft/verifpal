@@ -1,0 +1,35 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0c1 at one session and at two.
+//
+// scenario_binding_swap.vp with a chain in place of the swap. `t1` stands
+// for `t2` and `t2` for `t3`, each read as the model wrote it: `x` is sealed
+// under `t2`, which stays secret, and `y` under `t3`, which Bob leaks. Were
+// the bindings applied one after the other, `x` too would end up under `t3`.
+// Alice keeps `t2`, the value of the first binding, and gives up only `t1`.
+
+attacker[passive]
+
+principal Alice[
+	knows private t1, t2, t3
+	generates n1, n2
+	x = ENC(t1, n1)
+	y = ENC(t2, n2)
+]
+
+Alice -> Bob: x, y
+
+principal Bob[
+	knows private t3
+	leaks t3
+]
+
+scenarios[
+	Alice[t1 = t2, t2 = t3]
+]
+
+queries[
+	confidentiality? n1
+	confidentiality? n2
+]

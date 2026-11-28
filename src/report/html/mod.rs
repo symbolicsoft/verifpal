@@ -7,9 +7,9 @@ mod tests;
 
 use super::msc::{Chart, Group, staged};
 use super::template::{Ctx, Dialect, escape_html, render, strip_header, templates};
-use super::{Analysis, DISCLAIMER, ModelReport, QueryReport, Run};
-use crate::syntax::tokens::{Token, TokenKind};
+use super::{Analysis, DISCLAIMER, ModelReport, QueryReport, Run, Tint};
 use crate::util::text::plural;
+use crate::verify::StepKind;
 use crate::verify::TraceStep;
 
 static HTML: Dialect = Dialect {
@@ -19,7 +19,7 @@ static HTML: Dialect = Dialect {
 	partial,
 };
 
-templates! { HTML,
+templates! { HTML {
 	PAGE "page" = "tpl/page.html",
 	RUN_INDEX "run_index" = "tpl/run_index.html",
 	MODEL "model" = "tpl/model.html",
@@ -35,7 +35,7 @@ templates! { HTML,
 	SOURCE_CHUNK "source_chunk" = "tpl/source_chunk.html",
 	DIAGRAM "diagram" = "tpl/diagram.html",
 	DIAGRAM_ROW "diagram_row" = "tpl/diagram_row.html",
-}
+} }
 
 const CSS: &str = include_str!("report.css");
 const JS: &str = include_str!("report.js");
@@ -245,8 +245,8 @@ fn verdict_ctx(q: &QueryReport, model_index: usize, query_index: usize, marked: 
 			},
 		)
 		.text("variants", variants)
-		.flag("truncated", !q.envelope.truncations.is_empty())
-		.text("truncations", q.envelope.truncations.join(", "))
+		.flag("truncated", !q.cut().is_empty())
+		.text("truncations", q.cut().join(", "))
 		.text("ruling", ruling)
 		.text(
 			"because",
@@ -382,19 +382,17 @@ fn trace_steps(q: &QueryReport) -> Vec<Ctx> {
 }
 
 fn step_ctx(step: &str, s: &TraceStep) -> Ctx {
-	let wire = s.kind == "mutations"
-		&& !s.values.is_empty()
-		&& s.sender.is_some()
-		&& s.recipient.is_some();
+	let installs = if s.kind == StepKind::Mutations {
+		trace_values(s)
+	} else {
+		Vec::new()
+	};
 	Ctx::new()
 		.flag("folded", false)
 		.text("step", step)
-		.text("kind", s.kind)
-		.flag("wire", wire)
-		.text("sender", s.sender.clone().unwrap_or_default())
-		.text("recipient", s.recipient.clone().unwrap_or_default())
-		.text("text", if wire { String::new() } else { s.text.clone() })
-		.list("values", if wire { trace_values(s) } else { Vec::new() })
+		.text("kind", s.kind.name())
+		.text("text", s.text.as_str())
+		.list("values", installs)
 }
 
 fn trace_values(s: &TraceStep) -> Vec<Ctx> {
@@ -416,24 +414,20 @@ fn trace_values(s: &TraceStep) -> Vec<Ctx> {
 }
 
 fn protocol_diagram(model: &ModelReport, index: usize) -> Vec<Ctx> {
-	let hits = model
-		.analysis
-		.as_ref()
-		.map(Analysis::attacked_values)
-		.unwrap_or_default();
-	let caption = if hits.is_empty() {
-		"Protocol sequence. Guarded values are written in brackets.".to_string()
-	} else {
-		"Protocol sequence. Guarded values are written in brackets; a dagger marks every value \
-		 some attack below substitutes or replays."
-			.to_string()
-	};
-	let figure = diagram::Figure {
-		id: format!("m{index}p"),
-		caption,
-	};
-	Chart::protocol(model, &hits)
-		.map(|chart| diagram::draw(figure, &chart))
+	Chart::protocol(model)
+		.map(|chart| {
+			let caption = if chart.marked() {
+				"Protocol sequence. Guarded values are written in brackets; a dagger marks \
+				 every value some attack below substitutes or replays."
+			} else {
+				"Protocol sequence. Guarded values are written in brackets."
+			};
+			let figure = diagram::Figure {
+				id: format!("m{index}p"),
+				caption: caption.to_string(),
+			};
+			diagram::draw(figure, &chart)
+		})
 		.into_iter()
 		.collect()
 }
@@ -484,7 +478,7 @@ fn source_pane(model: &ModelReport, index: usize) -> (Vec<Ctx>, Vec<usize>) {
 			continue;
 		}
 		marked.push(i);
-		highlight(source, at, start, &model.tokens, &mut chunks);
+		highlight(model, at, start, &mut chunks);
 		chunks.push(
 			chunk("mark")
 				.num("model", index)
@@ -494,7 +488,7 @@ fn source_pane(model: &ModelReport, index: usize) -> (Vec<Ctx>, Vec<usize>) {
 		);
 		at = end;
 	}
-	highlight(source, at, source.len(), &model.tokens, &mut chunks);
+	highlight(model, at, source.len(), &mut chunks);
 	(vec![Ctx::new().list("chunks", chunks)], marked)
 }
 
@@ -502,49 +496,22 @@ fn chunk(kind: &str) -> Ctx {
 	Ctx::new().one_of(&["mark", "token", "plain"], kind)
 }
 
-fn highlight(source: &str, from: usize, to: usize, tokens: &[Token], out: &mut Vec<Ctx>) {
-	let mut at = from;
-	for t in tokens {
-		if t.span.start < at
-			|| t.span.end > to
-			|| t.span.start >= t.span.end
-			|| !source.is_char_boundary(t.span.start)
-			|| !source.is_char_boundary(t.span.end)
-		{
-			continue;
-		}
-		let Some(class) = token_class(t.kind) else {
-			continue;
-		};
-		if at < t.span.start {
-			out.push(chunk("plain").text("text", &source[at..t.span.start]));
-		}
-		out.push(
-			chunk("token")
-				.text("class", class)
-				.text("text", &source[t.span.start..t.span.end]),
-		);
-		at = t.span.end;
-	}
-	if at < to {
-		out.push(chunk("plain").text("text", &source[at..to]));
+fn highlight(model: &ModelReport, from: usize, to: usize, out: &mut Vec<Ctx>) {
+	for (tint, text) in model.chunks(from, to) {
+		out.push(match tint {
+			Some(tint) => chunk("token").text("class", class(tint)).text("text", text),
+			None => chunk("plain").text("text", text),
+		});
 	}
 }
 
-fn token_class(kind: TokenKind) -> Option<&'static str> {
-	match kind {
-		TokenKind::Keyword | TokenKind::Qualifier => Some("k"),
-		TokenKind::AttackerMode | TokenKind::Capability => Some("a"),
-		TokenKind::PrincipalName => Some("p"),
-		TokenKind::PrimitiveName => Some("f"),
-		TokenKind::QueryKind => Some("q"),
-		TokenKind::Comment => Some("c"),
-		TokenKind::ConstantName
-		| TokenKind::PhaseNumber
-		| TokenKind::Threshold
-		| TokenKind::Arrow
-		| TokenKind::Assign
-		| TokenKind::Check
-		| TokenKind::Anonymous => None,
+fn class(tint: Tint) -> &'static str {
+	match tint {
+		Tint::Keyword => "k",
+		Tint::Attacker => "a",
+		Tint::Principal => "p",
+		Tint::Primitive => "f",
+		Tint::Query => "q",
+		Tint::Comment => "c",
 	}
 }

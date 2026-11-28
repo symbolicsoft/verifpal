@@ -1,0 +1,52 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: u0 at one session and at two.
+//
+// unlink_opened_fresh_content.vp beside an unrelated Echo that wraps whatever
+// it receives in a tuple and sends it on. The attacker opens c1 and c2 with the
+// leaked k and finds two fresh nonces, which tie the ciphertexts to nothing.
+// It can then install CONCAT(n1, n2) as Echo's y and read the nonces back from
+// Echo's send. The engine once took that send for a route to n1 that does not
+// pass through c1, rebuilt c1 from k and n1, and linked the ciphertexts through
+// k. Echo's send rests on an install the attacker could build only by opening
+// c1, so with c1 withheld it does not exist. Alice's unsent t only gives the
+// search the tuple to propose. unlink_opened_fresh_content_echoed_sent.vp is
+// the counterweight.
+attacker[active]
+
+principal Alice[
+	knows private k
+	generates n1, n2
+	c1 = ENC(k, n1)
+	c2 = ENC(k, n2)
+	t = CONCAT(n1, n2)
+	leaks k
+]
+
+Alice -> Bob: c1, c2
+
+principal Bob[
+	_ = HASH(c1, c2)
+]
+
+principal Carol[
+	generates ya, yb
+	y = CONCAT(ya, yb)
+]
+
+Carol -> Echo: y
+
+principal Echo[
+	w = CONCAT(y, nil)
+]
+
+Echo -> Dave: w
+
+principal Dave[
+	_ = HASH(w)
+]
+
+queries[
+	unlinkability? c1, c2
+]

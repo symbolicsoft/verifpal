@@ -1,0 +1,80 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c1c1 at one session and at two.
+//
+// Two signing oracles in a chain. Carol signs a chosen message with her share
+// t1, which reveals t1; Bob opens his own input under HASH(t1) before he signs
+// with s1. Bob's partial is genuine only if the attacker could supply his input
+// without forging it, which takes t1, which takes Carol's partial being genuine
+// in turn: one proof inside another, each with the install it rests on
+// supplied. Both shares are revealed.
+attacker[active]
+
+principal Carol[
+	knows private skc, kcb
+	knows public cc
+	generates kc, nc
+	gc = PUBKEY(skc)
+	t1, t2 = THRESHOLD_SPLIT[2](kc)
+	et = ENC(kcb, t1)
+	leaks nc
+]
+
+Carol -> Bob: [et]
+
+Carol -> Erin: [gc]
+
+principal Erin[
+	generates r0
+	yr = PKE_ENC(gc, r0)
+]
+
+Erin -> Carol: yr
+
+principal Carol[
+	z = PKE_DEC(skc, yr)
+	q = THRESHOLD_SIGN[forgeable](t1, nc, cc, z)
+]
+
+Carol -> Frank: q
+
+principal Frank[
+	_ = HASH(q)
+]
+
+principal Bob[
+	knows private skb, kcb
+	knows public cb
+	generates k, nb
+	gb = PUBKEY(skb)
+	s1, s2 = THRESHOLD_SPLIT[2](k)
+	t1b = DEC(kcb, et)
+	leaks nb
+]
+
+Bob -> Gina: [gb]
+
+principal Gina[
+	generates g0
+	yy = PKE_ENC(gb, g0)
+]
+
+Gina -> Bob: yy
+
+principal Bob[
+	y2 = PKE_DEC(skb, yy)
+	m = DEC(HASH(t1b), y2)
+	p = THRESHOLD_SIGN[forgeable](s1, nb, cb, m)
+]
+
+Bob -> Dave: p
+
+principal Dave[
+	_ = HASH(p)
+]
+
+queries[
+	confidentiality? s1
+	confidentiality? t1
+]

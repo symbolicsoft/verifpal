@@ -26,7 +26,7 @@ impl<'a> Parser<'a> {
 		}
 		let keyword = Span::new(self.pos, self.pos + "queries".len());
 		if !self.eat_token("queries", TokenKind::Keyword) {
-			if after_scenarios {
+			if after_scenarios && !self.at_end() {
 				return Err(self
 					.unexpected("the `scenarios` block must come directly before `queries`")
 					.note(
@@ -181,6 +181,17 @@ impl<'a> Parser<'a> {
 		let start = self.pos;
 		let name = self.parse_identifier()?;
 		self.record(self.last_ident, TokenKind::Keyword);
+		let kind = match name.as_str() {
+			"precondition" => QueryOptionKind::Precondition,
+			_ => {
+				return Err(VerifpalError::parse(
+					format!("unknown query option `{}`", name).into(),
+				)
+				.at(self.last_ident)
+				.note("the only query option is `precondition`")
+				.suggest(did_you_mean(&name, ["precondition"])));
+			}
+		};
 		self.consume_trivia();
 		self.expect("[")?;
 		self.consume_trivia();
@@ -195,18 +206,6 @@ impl<'a> Parser<'a> {
 		self.expect("]")?;
 		let comments = self.line_comments(leading);
 		self.consume_trivia();
-		let kind = match name.as_str() {
-			"precondition" => QueryOptionKind::Precondition,
-			_ => {
-				return Err(VerifpalError::parse(
-					format!("unknown query option `{}`", name).into(),
-				)
-				.at(self.last_ident)
-				.narrow(name.clone())
-				.note("the only query option is `precondition`")
-				.suggest(did_you_mean(&name, ["precondition"])));
-			}
-		};
 		let message = self.message(
 			Span::new(start, self.pos),
 			&sender,

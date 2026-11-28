@@ -7,7 +7,7 @@ use lsp_types::{
 
 use super::line::LineIndex;
 use super::state::Document;
-use crate::syntax::VerifpalError;
+use crate::syntax::{Span, VerifpalError};
 
 pub(crate) fn for_document(doc: &Document) -> Vec<Diagnostic> {
 	doc.error.iter().map(|e| of_error(doc, e)).collect()
@@ -15,12 +15,9 @@ pub(crate) fn for_document(doc: &Document) -> Vec<Diagnostic> {
 
 fn of_error(doc: &Document, e: &VerifpalError) -> Diagnostic {
 	let line = &doc.line;
-	let range = match e.narrowed_span(doc.text()) {
+	let range = match e.anchored_span(doc.text()) {
 		Some(span) if span.end > span.start => line.range(span),
-		Some(span) => {
-			let start = line.position(span.start);
-			lsp_types::Range::new(start, lsp_types::Position::new(start.line, u32::MAX))
-		}
+		Some(span) => line.range(Span::new(span.start, line.line_end(span.start))),
 		None => lsp_types::Range::new(lsp_types::Position::new(0, 0), line.end()),
 	};
 	let mut message = e.message.to_string();
@@ -79,7 +76,7 @@ pub(crate) fn of_verdicts(analysis: &crate::report::Analysis, line: &LineIndex) 
 				message.push_str(&step.text);
 			}
 			Diagnostic {
-				range: line.range(crate::syntax::Span::new(q.range.start, q.range.end)),
+				range: line.range(Span::new(q.range.start, q.range.end)),
 				severity: Some(if q.resolved {
 					DiagnosticSeverity::ERROR
 				} else {
@@ -104,6 +101,60 @@ mod tests {
 		let uri = Uri::from_str("file:///d.vp").expect("a uri");
 		let doc = Document::new(uri, 1, src.to_string(), &PositionEncodingKind::UTF8);
 		for_document(&doc)
+	}
+
+	#[test]
+	fn every_diagnostic_of_a_text_being_typed_is_in_range_and_where_the_command_line_puts_it() {
+		let whole = "attacker[active]\n\
+			principal Alice[\n\
+			\tknows private dt_a\n\
+			\tdt_ga = PUBKEY(dt_a)\n\
+			]\n\n\
+			Alice -> Bob: dt_ga\n\
+			principal Bob[\n\
+			\t_ = HASH(dt_ga)\n\
+			]\n\n\
+			queries[\n\
+			\tconfidentiality? dt_a\n\
+			]\n";
+		let uri = Uri::from_str("file:///d.vp").expect("a uri");
+		let mut placed = 0;
+		for cut in 0..=whole.len() {
+			let text = &whole[..cut];
+			let doc = Document::new(
+				uri.clone(),
+				1,
+				text.to_string(),
+				&PositionEncodingKind::UTF8,
+			);
+			let Some(error) = &doc.error else {
+				continue;
+			};
+			let range = of_error(&doc, error).range;
+			let lines: Vec<&str> = text.split('\n').collect();
+			assert!(
+				lines
+					.get(range.end.line as usize)
+					.is_some_and(|line| range.end.character as usize <= line.len()),
+				"{range:?} ends outside {text:?}"
+			);
+			assert!(range.start <= range.end, "{range:?} in {text:?}");
+			let rendered = error.render("d.vp", text);
+			let Some(at) = rendered
+				.lines()
+				.find_map(|line| line.trim_start().strip_prefix("--> d.vp:"))
+			else {
+				continue;
+			};
+			assert_eq!(
+				format!("{}:{}", range.start.line + 1, range.start.character + 1),
+				at,
+				"{:?} in {text:?}",
+				error.message
+			);
+			placed += 1;
+		}
+		assert!(placed > 100, "{placed}");
 	}
 
 	#[test]

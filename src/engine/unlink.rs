@@ -394,30 +394,47 @@ impl<'a> Linker<'a> {
 	fn observed(&self) -> &TermSet {
 		self.observed.get_or_init(|| {
 			let (cx, ex) = (self.cx, self.ex);
-			let mut disclosed: Vec<Value> = cx
+			let mut disclosed: Vec<(Value, Option<&Held>)> = cx
 				.program
 				.sends(&ex.sent)
-				.filter(|&(_, delivery, slot, _)| {
-					ex.runs[delivery.sender]
-						.held(slot)
-						.is_none_or(|held| !held.authored)
-				})
-				.map(|(_, _, _, v)| v.clone())
+				.map(|(_, delivery, slot, v)| (v.clone(), ex.runs[delivery.sender].held(slot)))
 				.collect();
 			for &Taken { run, step, .. } in &ex.order {
 				if let Event::Leak(slot) = cx.program.runs[run].steps[step].event
 					&& let Some(held) = ex.runs[run].held(slot)
-					&& !held.authored
 				{
-					disclosed.push(held.value.clone());
+					disclosed.push((held.value.clone(), Some(held)));
 				}
 			}
-			unfolded(disclosed, |value| {
-				opening(value, self.capabilities(), self.attacker())
-			})
-			.into_iter()
-			.collect()
+			let opened = |value: &Value| opening(value, self.capabilities(), self.attacker());
+			let (fed, own): (Vec<_>, Vec<_>) = disclosed
+				.into_iter()
+				.partition(|(_, held)| held.is_some_and(|held| !held.fed.is_empty()));
+			let mut observed: TermSet = unfolded(own.into_iter().map(|(v, _)| v).collect(), opened)
+				.into_iter()
+				.collect();
+			for (value, held) in fed {
+				let supplied: TermSet = held
+					.into_iter()
+					.flat_map(|held| self.supplied_into(held))
+					.cloned()
+					.collect();
+				let kept = |values: Vec<Value>| -> Vec<Value> {
+					values
+						.into_iter()
+						.filter(|value| !supplied.contains(value))
+						.collect()
+				};
+				observed.extend(unfolded(kept(vec![value]), |value| kept(opened(value))));
+			}
+			observed
 		})
+	}
+
+	fn supplied_into(&self, held: &'a Held) -> impl Iterator<Item = &'a Value> {
+		super::exec::installed_into(&self.ex.runs, held)
+			.filter_map(|install| install.installed.as_deref())
+			.flatten()
 	}
 
 	fn observable(&self, v: &Value, seen: &mut IdMap<usize, bool>) -> bool {
@@ -443,33 +460,12 @@ impl<'a> Linker<'a> {
 		let (cx, ex) = (self.cx, self.ex);
 		let mut supplied = cx.initial.clone();
 		supplied.set_phase(ex.knowledge.state.current_phase);
-		let mut seen: Vec<(RunIdx, SlotIdx)> = Vec::new();
-		let mut pending = holders.to_vec();
-		while let Some((run, slot)) = pending.pop() {
-			if seen.contains(&(run, slot)) {
-				continue;
-			}
-			seen.push((run, slot));
-			let Some(held) = ex.runs[run].held(slot) else {
-				continue;
-			};
-			if let Some(components) = &held.installed {
-				for component in components.iter() {
-					supplied.learn(component, Origin::Initial);
-				}
-			} else if let Some(sender) = held.sender {
-				pending.push((sender, slot));
-			} else {
-				for step in &cx.program.runs[run].steps {
-					let Event::Recv(d) = step.event else {
-						continue;
-					};
-					for &(input, _) in &cx.program.deliveries[d].slots {
-						if cx.km.mentions(slot, input) {
-							pending.push((run, input));
-						}
-					}
-				}
+		for held in holders
+			.into_iter()
+			.filter_map(|(run, slot)| ex.runs[run].held(slot))
+		{
+			for component in self.supplied_into(held) {
+				supplied.learn(component, Origin::Initial);
 			}
 		}
 		supplied

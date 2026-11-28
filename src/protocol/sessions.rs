@@ -86,7 +86,7 @@ pub(crate) fn expand_sessions(mut e: Expansion, sessions: u8) -> VResult<Expansi
 	)?;
 
 	let blocks = session_blocks(m, &copies);
-	let query_variants = session_query_variants(m, &copies, &e.variants);
+	let variants = session_query_variants(m, &copies);
 	let siblings = session_siblings(&freshen, &copies);
 
 	let naming = if sessions == 2 {
@@ -120,7 +120,7 @@ pub(crate) fn expand_sessions(mut e: Expansion, sessions: u8) -> VResult<Expansi
 		e.actors.entry(original).or_insert(actor);
 	}
 	e.model.blocks = blocks;
-	e.variants = query_variants;
+	e.model.variants = variants;
 	e.siblings = siblings;
 	Ok(e)
 }
@@ -146,14 +146,10 @@ fn session_blocks(m: &Model, copies: &[ModelCopy]) -> Vec<Block> {
 	blocks
 }
 
-fn session_query_variants(
-	m: &Model,
-	copies: &[ModelCopy],
-	scenario_variants: &[Vec<Query>],
-) -> Vec<Vec<Query>> {
+fn session_query_variants(m: &Model, copies: &[ModelCopy]) -> Vec<Vec<Query>> {
 	let mut query_variants: Vec<Vec<Query>> = Vec::with_capacity(m.queries.len());
 	for (i, query) in m.queries.iter().enumerate() {
-		let scenarios: &[Query] = scenario_variants.get(i).map(Vec::as_slice).unwrap_or(&[]);
+		let scenarios: &[Query] = m.variants.get(i).map(Vec::as_slice).unwrap_or(&[]);
 		let mut variants: Vec<Query> = scenarios.to_vec();
 		for seed in std::iter::once(query).chain(scenarios.iter()) {
 			for copy in copies {
@@ -217,9 +213,14 @@ impl<'a> ModelCopy<'a> {
 					.iter()
 					.map(|(id, name)| {
 						next = next.checked_add(1).ok_or_else(|| {
-							VerifpalError::internal(
-								format!("{expansion} expansion exhausted principal ids").into(),
-							)
+							super::sanity::sanity_declared_principals(m)
+								.err()
+								.unwrap_or_else(|| {
+									VerifpalError::internal(
+										format!("{expansion} expansion exhausted principal ids")
+											.into(),
+									)
+								})
 						})?;
 						Ok((*id, (next, format!("{name}{suffix}"))))
 					})
@@ -437,7 +438,8 @@ mod tests {
 		let e = expanded();
 		crate::protocol::sanity::sanity(&e.model).expect("expanded model is a legal model");
 		let mut with_variants = e.model.clone();
-		with_variants.queries = e.variants.concat();
+		with_variants.queries = e.model.variants.concat();
+		with_variants.variants = Vec::new();
 		crate::protocol::sanity::sanity(&with_variants).expect("variants are legal queries");
 	}
 
@@ -445,13 +447,13 @@ mod tests {
 	fn variants_map_sessions_and_drop_identities() {
 		let e = expanded();
 		assert!(
-			e.variants[0].is_empty(),
+			e.model.variants[0].is_empty(),
 			"confidentiality? psk is all-shared: no variant"
 		);
-		assert_eq!(e.variants[1].len(), 1);
-		assert_eq!(&*e.variants[1][0].constants[0].name, "na#2");
-		assert_eq!(e.variants[2].len(), 1);
-		let auth = &e.variants[2][0];
+		assert_eq!(e.model.variants[1].len(), 1);
+		assert_eq!(&*e.model.variants[1][0].constants[0].name, "na#2");
+		assert_eq!(e.model.variants[2].len(), 1);
+		let auth = &e.model.variants[2][0];
 		assert_eq!(&*auth.message.sender_name, "Alice#2");
 		assert_eq!(&*auth.message.recipient_name, "Bob#2");
 		assert_eq!(&*auth.message.constants[0].name, "se_e1#2");
@@ -480,6 +482,31 @@ mod tests {
 			group,
 			e.siblings.get(&clone_id).expect("clone")
 		));
+	}
+
+	#[test]
+	fn an_undeclared_principal_is_reported_before_any_copy_is_numbered() {
+		let mut src = String::from(
+			"attacker[passive]\nprincipal Alice[\n\tknows private und_a\n\t\
+			 und_x = HASH(und_a)\n]\nAlice -> Bob: und_x\nprincipal Bob[\n\t\
+			 und_y = HASH(und_x)\n]\nqueries[\n",
+		);
+		for i in 1..=252 {
+			src += &format!("\tauthentication? Alice -> U{i}: und_x\n");
+		}
+		src += "]\n";
+		let m = parse_string("und.vp", &src).expect("parse");
+		for sessions in [1, 2, 3] {
+			let Err(error) = crate::verify::analyze_sessions(&m, sessions) else {
+				panic!("U1 is not a principal");
+			};
+			let error = error.located(&m.file_name, &m.source).to_string();
+			assert!(
+				error.contains("`U1` is never declared as a principal"),
+				"{sessions}: {error}"
+			);
+			assert!(error.contains(" --> und.vp:11:27\n"), "{sessions}: {error}");
+		}
 	}
 
 	#[test]

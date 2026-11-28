@@ -33,9 +33,44 @@ impl std::fmt::Display for ScenarioSummary {
 	}
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum StepKind {
+	Derive,
+	Idle,
+	Drop,
+	Mutations,
+	Replay,
+	Received,
+	Gate,
+	Static,
+	Resolves,
+}
+
+impl StepKind {
+	pub(crate) fn name(self) -> &'static str {
+		match self {
+			StepKind::Derive => "derive",
+			StepKind::Idle => "idle",
+			StepKind::Drop => "drop",
+			StepKind::Mutations => "mutations",
+			StepKind::Replay => "replay",
+			StepKind::Received => "received",
+			StepKind::Gate => "gate",
+			StepKind::Static => "static",
+			StepKind::Resolves => "resolves",
+		}
+	}
+}
+
+impl serde::Serialize for StepKind {
+	fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+		serializer.serialize_str(self.name())
+	}
+}
+
 #[derive(Clone, Debug, serde::Serialize)]
 pub(crate) struct TraceStep {
-	pub kind: &'static str,
+	pub kind: StepKind,
 	pub text: String,
 	#[serde(skip_serializing_if = "Option::is_none")]
 	pub sender: Option<String>,
@@ -48,7 +83,7 @@ pub(crate) struct TraceStep {
 }
 
 impl TraceStep {
-	pub(crate) fn new(kind: &'static str, text: String) -> TraceStep {
+	pub(crate) fn new(kind: StepKind, text: String) -> TraceStep {
 		TraceStep {
 			kind,
 			text,

@@ -20,34 +20,49 @@ use exec::{Context, Execution, Install, Installs, execute};
 use judgment::{Judge, Violation};
 use program::Program;
 
-pub(crate) fn verify(ctx: &VerifyContext, m: &Model, km: &ProtocolTrace) -> VResult<()> {
+fn honest<R>(
+	ctx: &VerifyContext,
+	m: &Model,
+	km: &ProtocolTrace,
+	then: impl FnOnce(&Context, Execution) -> R,
+) -> VResult<R> {
 	let program = Program::of(m, km);
 	let cx = Context::new(&program, km).cancellable(ctx.cancel());
 	let root = execute(&cx, &Vec::new()).map_err(|_| VerifpalError::cancelled())?;
 	check_honest_run(ctx, km, &program, &root)?;
-	crate::console::message(
-		&format!("Attacker is configured as {}.", m.attacker),
-		InfoLevel::Info,
-	);
-	ctx.analysis_count_increment();
-	for (i, v) in root.knowledge.state.known.iter().enumerate() {
-		if matches!(root.knowledge.origin(i), knowledge::Origin::Initial) {
-			continue;
+	Ok(then(&cx, root))
+}
+
+#[cfg_attr(not(feature = "language"), allow(dead_code))]
+pub(crate) fn check(ctx: &VerifyContext, m: &Model, km: &ProtocolTrace) -> VResult<()> {
+	honest(ctx, m, km, |_, _| ())
+}
+
+pub(crate) fn verify(ctx: &VerifyContext, m: &Model, km: &ProtocolTrace) -> VResult<()> {
+	honest(ctx, m, km, |cx, root| {
+		crate::console::message(
+			&format!("Attacker is configured as {}.", m.attacker),
+			InfoLevel::Info,
+		);
+		ctx.analysis_count_increment();
+		for (i, v) in root.knowledge.state.known.iter().enumerate() {
+			if matches!(root.knowledge.origin(i), knowledge::Origin::Initial) {
+				continue;
+			}
+			crate::console::deduction(|| {
+				format!(
+					"{} is obtained by the attacker.",
+					crate::console::output_text(v)
+				)
+			});
 		}
-		crate::console::deduction(|| {
-			format!(
-				"{} is obtained by the attacker.",
-				crate::console::output_text(v)
-			)
-		});
-	}
-	judge(ctx, &cx, &root, &Vec::new(), &root);
-	if m.attacker == AttackerKind::Active && !ctx.all_resolved() {
-		let mut search = search::Search::new(ctx, &cx, root);
-		search.run();
-		search.report_stats();
-	}
-	Ok(())
+		judge(ctx, cx, &root, &Vec::new(), &root);
+		if m.attacker == AttackerKind::Active && !ctx.all_resolved() {
+			let mut search = search::Search::new(ctx, cx, root);
+			search.run();
+			search.report_stats();
+		}
+	})
 }
 
 fn check_honest_run(

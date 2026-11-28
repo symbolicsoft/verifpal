@@ -139,7 +139,7 @@ fn validate_file_name(file_path: &str, file_name: &str) -> VResult<()> {
 	Ok(())
 }
 
-pub(crate) fn parse_file(file_path: &str) -> VResult<Model> {
+pub(crate) fn read_file(file_path: &str) -> VResult<(String, String)> {
 	let file_name = std::path::Path::new(file_path)
 		.file_name()
 		.and_then(|n| n.to_str())
@@ -147,12 +147,18 @@ pub(crate) fn parse_file(file_path: &str) -> VResult<Model> {
 	validate_file_name(file_path, file_name)?;
 	let content = std::fs::read_to_string(file_path)
 		.map_err(|e| VerifpalError::parse(format!("cannot read `{}`: {}", file_path, e).into()))?;
-	parse_string(file_name, &content)
+	Ok((file_name.to_string(), content))
+}
+
+pub(crate) fn parse_file(file_path: &str) -> VResult<Model> {
+	let (file_name, content) = read_file(file_path)?;
+	parse_string(&file_name, &content)
 }
 
 fn parse(file_name: &str, input: &str, queries_optional: bool) -> (VResult<Model>, TokenIndex) {
 	let mut parser = Parser::new(input, queries_optional);
-	let model = match parser.parse_model() {
+	let parsed = parser.parse_model();
+	let model = match parser.check_unterminated_block().and(parsed) {
 		Ok(model) => Ok(Model {
 			file_name: file_name.to_string(),
 			source: Source::from(input),

@@ -31,20 +31,10 @@ impl Document {
 		let (model, trace, error) = match parsed {
 			Err(e) => (None, None, Some(e)),
 			Ok(m) => {
-				let (trace, error) = match crate::protocol::sanity::sanity(&m) {
-					Ok(t) => (
-						Some(t),
-						crate::verify::expand(
-							&m,
-							crate::protocol::sessions::DEFAULT_SESSIONS,
-							&std::sync::atomic::AtomicBool::new(false),
-						)
-						.and_then(|e| crate::protocol::sanity::sanity(&e.model))
-						.err(),
-					),
-					Err(e) => (None, Some(e)),
-				};
-				let error = error.map(|e| e.located(&m.file_name, &m.source));
+				let error = crate::verify::check(&m, crate::protocol::sessions::DEFAULT_SESSIONS)
+					.err()
+					.map(|e| e.located(&m.file_name, &m.source));
+				let trace = crate::protocol::sanity::sanity(&m).ok();
 				(Some(m), trace, error)
 			}
 		};
@@ -139,6 +129,89 @@ mod tests {
 		let doc = document("shared.vp", 1, text);
 		assert!(doc.trace.is_some());
 		assert!(doc.error.is_none(), "{:?}", doc.error);
+	}
+
+	#[test]
+	fn a_live_check_starts_from_an_empty_term_table() {
+		let first = document("first.vp", 1, GOOD);
+		let trace = first.trace.as_ref().expect("a trace");
+		let assigned = trace
+			.slots
+			.iter()
+			.map(|slot| &slot.initial_value)
+			.find(|value| matches!(value, crate::term::Value::Primitive(_)))
+			.expect("the model assigns a primitive");
+		let crate::term::Value::Primitive(held) = crate::term::hashing::hashcons(assigned) else {
+			panic!("a primitive stays one");
+		};
+		assert!(crate::term::hashing::hashconsed(&held));
+		document("second.vp", 1, GOOD);
+		assert!(
+			!crate::term::hashing::hashconsed(&held),
+			"every check of a document is an analysis generation of its own, or the dispatch \
+			 thread keeps the terms of every text it was ever sent"
+		);
+	}
+
+	#[test]
+	fn the_live_check_rejects_what_verify_rejects_with_the_same_words() {
+		for name in [
+			"err_aead_wrong_nonce.vp",
+			"err_split_shared_chain.vp",
+			"err_honest_check_shared_chain.vp",
+			"scenario_identity_binding_keeps_the_error.vp",
+		] {
+			let path = format!("examples/test/{name}");
+			let text = std::fs::read_to_string(&path).expect("the model is in the corpus");
+			let rejected = crate::verify::verify(&path)
+				.expect_err("the honest run fails, so `verify` rejects the model");
+			let doc = document(name, 1, &text);
+			assert_eq!(
+				doc.error.map(|e| e.to_string()),
+				Some(rejected.to_string()),
+				"{name}"
+			);
+			assert!(doc.trace.is_some(), "{name}");
+		}
+	}
+
+	#[test]
+	fn of_two_errors_the_live_check_reports_the_one_verify_stops_on() {
+		let text = "attacker[passive]\n\
+			principal Bob[\n\
+			knows private te_shared\n\
+			te_tag = HASH(te_shared)\n\
+			]\n\
+			principal Mallory[\n\
+			knows private te_msk\n\
+			te_peer = PUBKEY(te_msk)\n\
+			]\n\
+			principal Alice[\n\
+			knows private te_shared\n\
+			knows private te_peer\n\
+			]\n\
+			Bob -> Alice: [te_tag]\n\
+			principal Alice[\n\
+			_ = ASSERT(HASH(te_peer), te_tag)\n\
+			]\n\
+			scenarios[\n\
+			Alice[te_peer = te_absent]\n\
+			]\n\
+			queries[\n\
+			confidentiality? te_shared\n\
+			]\n";
+		let model = crate::syntax::parser::parse_string("te.vp", text).expect("parses");
+		let alone = crate::protocol::sanity::sanity(&model)
+			.expect_err("the model as written is not sane either");
+		let rejected = crate::verify::analyze(&model)
+			.err()
+			.expect("`verify` rejects the model");
+		assert_ne!(alone.message, rejected.message);
+		let doc = document("te.vp", 1, text);
+		assert_eq!(
+			doc.error.expect("the live check rejects it").message,
+			rejected.message
+		);
 	}
 
 	#[test]

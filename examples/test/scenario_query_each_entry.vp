@@ -1,0 +1,53 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: a0a1 at one session and at two, in either order of the scenario entries
+// (scenario_query_each_entry_reversed.vp).
+//
+// Alice encrypts to whichever key her scenario binds: Bob's, which reaches
+// her guarded, or Carol's, which does not. Each query names a delivery she
+// uses in only one of the two scenarios, so each is read in the copy that
+// uses it. A query was once checked against the first scenario alone, which
+// rejected the second one here with "Alice receives `gc` but never uses it"
+// although she does, under `Alice[gpeer = gc]`.
+//
+// a0: `gb` is guarded, and the copy bound to it takes Bob's own value.
+// a1: `gc` travels unguarded, so in the copy bound to it the attacker
+// replaces it with a key of its own and Alice encrypts to that.
+
+attacker[active]
+
+principal Bob[
+	knows private b
+	gb = PUBKEY(b)
+]
+
+principal Carol[
+	knows private c
+	gc = PUBKEY(c)
+]
+
+Bob -> Alice: [gb]
+Carol -> Alice: gc
+
+principal Alice[
+	knows public gpeer
+	generates n
+	e = PKE_ENC(gpeer, n)
+]
+
+Alice -> Bob: e
+
+principal Bob[
+	d = PKE_DEC(b, e)
+]
+
+scenarios[
+	Alice[gpeer = gb]
+	Alice[gpeer = gc]
+]
+
+queries[
+	authentication? Bob -> Alice: gb
+	authentication? Carol -> Alice: gc
+]

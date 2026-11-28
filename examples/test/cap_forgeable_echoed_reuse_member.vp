@@ -1,0 +1,39 @@
+// SPDX-FileCopyrightText: © 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// Expected: c0 at one session and at two.
+//
+// cap_forgeable_unsent_reuse_member.vp under an active attacker, with Bob
+// wrapping what he received in a tuple and passing it on. Alice's e1 never
+// leaves her. The attacker mints a term equal to e1, installs it as Bob's e2,
+// and reads it back out of Bob's tuple. That is still its own minted term, which
+// repeats no keystream: Bob's send rests on an install only a forgery of e1
+// could supply, so e1 is no reuse partner for e2 and m2 stays confidential. The
+// engine once counted Bob's tuple as a principal's disclosure of e1 and read m2
+// out of the pair. cap_forgeable_sent_reuse_member.vp is the counterweight.
+attacker[active]
+
+principal Alice[
+	knows private k
+	knows public ad
+	generates n, m1, m2
+	e1 = AEAD_ENC[forgeable](k, n, m1, ad)
+	e2 = AEAD_ENC(k, n, m2, ad)
+	leaks m1
+]
+
+Alice -> Bob: n, e2
+
+principal Bob[
+	w = CONCAT(e2, nil)
+]
+
+Bob -> Carol: w
+
+principal Carol[
+	_ = HASH(w)
+]
+
+queries[
+	confidentiality? m2
+]

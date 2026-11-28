@@ -1,16 +1,19 @@
 /* SPDX-FileCopyrightText: (c) 2019-2026 Nadim Kobeissi <nadim@symbolic.software>
  * SPDX-License-Identifier: GPL-3.0-only */
 
+use std::sync::Arc;
+
 use super::construct::construct_protocol_trace;
 use super::{ProtocolTrace, SlotIdx, TraceSlot};
 use crate::primitive::argument_restrictions;
 use crate::syntax::names::base_name;
 use crate::syntax::pretty::{pretty_arity, pretty_constants};
 use crate::syntax::{
-	Block, Message, Model, PrincipalId, Query, QueryKind, QueryOptionKind, Span, VResult,
-	VerifpalError,
+	Block, Expression, Message, Model, PrincipalId, Query, QueryKind, QueryOptionKind, Span,
+	VResult, VerifpalError,
 };
 use crate::term::{Constant, Primitive, PrimitiveId, Value};
+use crate::util::IdMap;
 use crate::util::collections::append_unique;
 use crate::util::text::{did_you_mean, plural, quoted_list};
 
@@ -56,7 +59,9 @@ pub(crate) fn sanity(m: &Model) -> VResult<ProtocolTrace> {
 	let (principals, principal_ids) = sanity_declared_principals(m)?;
 	let km = construct_protocol_trace(m, &principals, &principal_ids)?;
 	sanity_capabilities(m, &km)?;
-	sanity_queries(m, &km)?;
+	if m.scenarios.is_empty() {
+		sanity_queries(m, &km)?;
+	}
 	Ok(km)
 }
 
@@ -69,22 +74,62 @@ fn sanity_capabilities(m: &Model, km: &ProtocolTrace) -> VResult<()> {
 			let Some(value) = &expression.assigned else {
 				continue;
 			};
-			sanity_capabilities_value(value, km).map_err(|e| e.or_span(expression.span))?;
+			sanity_capabilities_value(expression, value, km)
+				.map_err(|e| e.or_span(expression.span))?;
 		}
 	}
 	Ok(())
 }
 
-fn sanity_capabilities_value(v: &Value, km: &ProtocolTrace) -> VResult<()> {
+fn annotation_occurrence(expression: &Expression, target: &Primitive, word: &str) -> usize {
+	fn read(v: &Value, target: &Primitive, word: &str, spelled: &mut usize) -> bool {
+		match v {
+			Value::Variable(_) => false,
+			Value::Constant(c) => {
+				*spelled += usize::from(&*c.name == word);
+				false
+			}
+			Value::Primitive(p) => {
+				if std::ptr::eq(&**p, target) {
+					return true;
+				}
+				*spelled += p
+					.capabilities
+					.iter()
+					.filter(|(cap, _)| cap.name() == word)
+					.count();
+				p.arguments
+					.iter()
+					.any(|argument| read(argument, target, word, spelled))
+			}
+		}
+	}
+	let mut spelled = expression
+		.constants
+		.iter()
+		.filter(|c| &*c.name == word)
+		.count();
+	if let Some(assigned) = &expression.assigned {
+		read(assigned, target, word, &mut spelled);
+	}
+	spelled
+}
+
+fn sanity_capabilities_value(
+	expression: &Expression,
+	v: &Value,
+	km: &ProtocolTrace,
+) -> VResult<()> {
 	let Value::Primitive(p) = v else {
 		return Ok(());
 	};
 	for (cap, onset) in p.capabilities.iter() {
+		let annotation = || annotation_occurrence(expression, p, cap.name());
 		if !crate::primitive::capability::supports(p.id, cap) {
 			return Err(VerifpalError::sanity(
 				crate::primitive::capability::unsupported_message(p.id, cap).into(),
 			)
-			.narrow(cap.name())
+			.narrow_occurrence(cap.name(), annotation())
 			.note(
 				"a weakening assumption has to name a property the primitive has, or \
 				 the analysis would run under an assumption that does nothing",
@@ -100,7 +145,7 @@ fn sanity_capabilities_value(v: &Value, km: &ProtocolTrace) -> VResult<()> {
 				)
 				.into(),
 			)
-			.narrow(cap.name())
+			.narrow_occurrence(cap.name(), annotation())
 			.note(format!(
 				"the last phase this model declares is phase {}",
 				km.max_phase
@@ -112,7 +157,7 @@ fn sanity_capabilities_value(v: &Value, km: &ProtocolTrace) -> VResult<()> {
 		}
 	}
 	for arg in &p.arguments {
-		sanity_capabilities_value(arg, km)?;
+		sanity_capabilities_value(expression, arg, km)?;
 	}
 	Ok(())
 }
@@ -122,9 +167,10 @@ fn sanity_phases(m: &Model) -> VResult<()> {
 	for block in &m.blocks {
 		if let Block::Phase(p) = block {
 			if p.number <= phase {
-				return Err(VerifpalError::sanity(
-					format!("phase {} is declared after phase {}", p.number, phase).into(),
-				)
+				return Err(VerifpalError::sanity(match phase {
+					0 => "phase 0 is declared, but every model starts in it".into(),
+					_ => format!("phase {} is declared after phase {}", p.number, phase).into(),
+				})
 				.at(p.span)
 				.marking(p.span, "phase numbers must increase")
 				.help(format!("renumber this to `phase[{}]`", phase + 1)));
@@ -153,11 +199,48 @@ fn sanity_phases(m: &Model) -> VResult<()> {
 	Ok(())
 }
 
-pub(crate) fn sanity_assignment_constants(
-	right: &Value,
-	existing: &[Constant],
-) -> VResult<Vec<Constant>> {
-	let mut constants: Vec<Constant> = existing.to_vec();
+fn occurrence(root: &Value, target: &Primitive) -> usize {
+	let mut closed: IdMap<usize, usize> = IdMap::default();
+	let mut open: Vec<(&Arc<Primitive>, usize, usize)> = Vec::new();
+	let mut spelled = 0usize;
+	let mut next = Some(root);
+	loop {
+		if let Some(Value::Primitive(p)) = next.take() {
+			if std::ptr::eq(&**p, target) {
+				return spelled;
+			}
+			match closed.get(&(Arc::as_ptr(p) as usize)) {
+				Some(&within) => spelled = spelled.saturating_add(within),
+				None => {
+					open.push((p, 0, spelled));
+					spelled = spelled.saturating_add(usize::from(p.id == target.id));
+				}
+			}
+		}
+		let Some((p, read, entered)) = open.last_mut() else {
+			return spelled;
+		};
+		let p: &Arc<Primitive> = p;
+		match p.arguments.get(*read) {
+			Some(argument) => {
+				*read += 1;
+				next = Some(argument);
+			}
+			None => {
+				closed.insert(Arc::as_ptr(p) as usize, spelled - *entered);
+				open.pop();
+			}
+		}
+	}
+}
+
+pub(crate) fn sanity_assignment_constants(right: &Value) -> VResult<Vec<Constant>> {
+	let mut constants = Vec::new();
+	assignment_constants(right, right, &mut constants)?;
+	Ok(constants)
+}
+
+fn assignment_constants(root: &Value, right: &Value, constants: &mut Vec<Constant>) -> VResult<()> {
 	match right {
 		Value::Variable(_) => {
 			return Err(VerifpalError::sanity(
@@ -180,7 +263,7 @@ pub(crate) fn sanity_assignment_constants(
 					)
 					.into(),
 				)
-				.narrow(crate::primitive::name(p.id))
+				.narrow_occurrence(crate::primitive::name(p.id), occurrence(root, p))
 				.note(format!(
 					"its signature is `{}`",
 					crate::primitive::signature(p.id)
@@ -198,7 +281,7 @@ pub(crate) fn sanity_assignment_constants(
 					)
 					.into(),
 				)
-				.narrow(crate::primitive::name(p.id))
+				.narrow_occurrence(crate::primitive::name(p.id), occurrence(root, p))
 				.note(format!(
 					"its signature is `{}`",
 					crate::primitive::signature(p.id)
@@ -209,21 +292,25 @@ pub(crate) fn sanity_assignment_constants(
 				});
 			}
 			for arg in &p.arguments {
-				constants = sanity_assignment_constants(arg, &constants)?;
+				assignment_constants(root, arg, constants)?;
 			}
 		}
 	}
-	Ok(constants)
+	Ok(())
 }
 
-pub(crate) fn sanity_primitive(p: &Primitive, outputs: &[Constant]) -> VResult<()> {
+pub(crate) fn sanity_primitive(assigned: &Value, outputs: &[Constant]) -> VResult<()> {
+	let Value::Primitive(p) = assigned else {
+		return Ok(());
+	};
 	let (output, definition_check) = crate::primitive::output_spec(p.id)?;
 	if !output.contains(&(outputs.len() as i32)) {
 		return Err(VerifpalError::sanity(
 			format!(
-				"`{}` produces {} outputs, but {} constant{} bound here",
+				"`{}` produces {} output{}, but {} constant{} bound here",
 				crate::primitive::name(p.id),
 				pretty_arity(output),
+				if output == [1] { "" } else { "s" },
 				outputs.len(),
 				if outputs.len() == 1 { " is" } else { "s are" }
 			)
@@ -284,26 +371,37 @@ pub(crate) fn sanity_primitive(p: &Primitive, outputs: &[Constant]) -> VResult<(
 		))
 		.help("remove the `?`"));
 	}
-	sanity_check_primitive_arguments(p)
+	sanity_check_primitive_arguments(assigned, p)
 }
 
 fn sanity_queries(m: &Model, km: &ProtocolTrace) -> VResult<()> {
-	for query in &m.queries {
-		let located = |e: VerifpalError| e.or_span(query.span);
-		match query.kind {
-			QueryKind::Authentication => {
-				sanity_queries_authentication(query, km).map_err(located)?
-			}
-			QueryKind::Confidentiality | QueryKind::Freshness => {
-				sanity_queries_single_constant(query, km).map_err(located)?
-			}
-			QueryKind::Unlinkability | QueryKind::Equivalence => {
-				sanity_queries_multi_constant(query, km, query.kind.name()).map_err(located)?
-			}
+	for (written, query) in m.queries.iter().enumerate() {
+		let Err(e) = sanity_query(query, km) else {
+			continue;
+		};
+		let variants = m.variants.get(written).map_or(&[][..], Vec::as_slice);
+		if !variants
+			.iter()
+			.any(|variant| sanity_query(variant, km).is_ok())
+		{
+			return Err(e);
 		}
-		sanity_query_options(query, km).map_err(located)?;
 	}
 	Ok(())
+}
+
+fn sanity_query(query: &Query, km: &ProtocolTrace) -> VResult<()> {
+	match query.kind {
+		QueryKind::Authentication => sanity_queries_authentication(query, km),
+		QueryKind::Confidentiality | QueryKind::Freshness => {
+			sanity_queries_single_constant(query, km)
+		}
+		QueryKind::Unlinkability | QueryKind::Equivalence => {
+			sanity_queries_multi_constant(query, km, query.kind.name())
+		}
+	}
+	.and_then(|()| sanity_query_options(query, km))
+	.map_err(|e| e.or_span(query.span))
 }
 
 fn sanity_queries_single_constant(query: &Query, km: &ProtocolTrace) -> VResult<()> {
@@ -551,7 +649,7 @@ fn sanity_queries_check_known(
 	Ok(())
 }
 
-fn sanity_declared_principals(m: &Model) -> VResult<(Vec<String>, Vec<PrincipalId>)> {
+pub(super) fn sanity_declared_principals(m: &Model) -> VResult<(Vec<String>, Vec<PrincipalId>)> {
 	let mut declared_names: Vec<String> = vec![];
 	let mut declared_ids: Vec<PrincipalId> = vec![];
 	let mut mentions = Mentions::default();
@@ -711,11 +809,14 @@ fn split_beyond_concat(written: &Primitive, p: &Primitive) -> Option<VerifpalErr
 	}
 	let fields = inner.arguments.len();
 	let s = plural(fields);
+	let packed = crate::primitive::name(tuple);
 	Some(
 		VerifpalError::sanity(
 			format!(
-				"`SPLIT` takes field {} of a `CONCAT` that packs {} field{}",
+				"`{}` takes field {} of a `{}` that packs {} field{}",
+				crate::primitive::name(p.id),
 				p.output + 1,
+				packed,
 				fields,
 				s
 			)
@@ -729,8 +830,8 @@ fn split_beyond_concat(written: &Primitive, p: &Primitive) -> Option<VerifpalErr
 			source, fields, s
 		))
 		.help(format!(
-			"bind at most {} constant{} on the left, or pack more into the `CONCAT`",
-			fields, s
+			"bind at most {} constant{} on the left, or pack more into the `{}`",
+			fields, s, packed
 		)),
 	)
 }
@@ -778,7 +879,7 @@ pub(crate) fn honest_check_failure(
 	})
 }
 
-fn sanity_check_primitive_arguments(p: &Primitive) -> VResult<()> {
+fn sanity_check_primitive_arguments(root: &Value, p: &Primitive) -> VResult<()> {
 	for arg in &p.arguments {
 		let Value::Primitive(arg_prim) = arg else {
 			continue;
@@ -794,7 +895,10 @@ fn sanity_check_primitive_arguments(p: &Primitive) -> VResult<()> {
 				)
 				.into(),
 			)
-			.narrow(crate::primitive::name(arg_prim.id))
+			.narrow_occurrence(
+				crate::primitive::name(arg_prim.id),
+				occurrence(root, arg_prim),
+			)
 			.note(format!(
 				"`{}` has to be bound first, so that each of its outputs has a name",
 				crate::primitive::name(arg_prim.id)
@@ -816,7 +920,10 @@ fn sanity_check_primitive_arguments(p: &Primitive) -> VResult<()> {
 				)
 				.into(),
 			)
-			.narrow(crate::primitive::name(arg_prim.id))
+			.narrow_occurrence(
+				crate::primitive::name(arg_prim.id),
+				occurrence(root, arg_prim),
+			)
 			.labelled("this check can never halt the principal")
 			.note(format!(
 				"`?` halts the principal at the declaration it heads, and only the \
@@ -832,7 +939,7 @@ fn sanity_check_primitive_arguments(p: &Primitive) -> VResult<()> {
 				crate::primitive::name(p.id)
 			)));
 		}
-		sanity_check_primitive_arguments(arg_prim)?;
+		sanity_check_primitive_arguments(root, arg_prim)?;
 	}
 	Ok(())
 }
@@ -855,7 +962,7 @@ pub(crate) fn sanity_check_argument_restrictions(value: &Value) -> VResult<()> {
 					)
 					.into(),
 				)
-				.narrow(crate::primitive::name(inner.id))
+				.narrow_occurrence(crate::primitive::name(p.id), occurrence(value, p))
 				.note(restriction_note(p.id, inner.id, restriction.position))
 				.help(format!(
 					"pass a value the principal holds directly; the signature is `{}`",
@@ -994,6 +1101,112 @@ mod tests {
 		let x = make_constant("aru_x");
 		let ok = make_primitive(PRIM_HASH, vec![make_primitive(PRIM_HASH, vec![x], 0)], 0);
 		assert!(sanity_check_argument_restrictions(&ok).is_ok());
+	}
+
+	fn rejected(assignment: &str, phases: &str) -> String {
+		let src = format!(
+			"attacker[active]\nprincipal Alice[\n\tknows private a, k, m\n\tgenerates n\n\t\
+			 {assignment}\n]\n{phases}queries[\n\tconfidentiality? a\n]\n"
+		);
+		let model = crate::syntax::parser::parse_string("nested.vp", &src).expect("parses");
+		let Err(e) = crate::verify::analyze_sessions(&model, 1) else {
+			panic!("{assignment} must be rejected");
+		};
+		e.located(&model.file_name, &model.source).to_string()
+	}
+
+	#[test]
+	fn an_error_about_a_nested_primitive_points_at_that_occurrence() {
+		for (assignment, message, at) in [
+			("x = ENC(k, ENC(k))", "`ENC` takes 2 arguments", "5:13"),
+			("x = ENC(k)", "`ENC` takes 2 arguments", "5:6"),
+			(
+				"x = HASH(ENC(k, m), ENC())",
+				"called with no arguments",
+				"5:22",
+			),
+			(
+				"x = AEAD_DEC(k, n, AEAD_DEC(k, n, m, nil)?, nil)?",
+				"checked with `?` inside another primitive",
+				"5:21",
+			),
+			(
+				"x = HASH(HASH(a), THRESHOLD_SPLIT[2](k))",
+				"produces more than one output",
+				"5:20",
+			),
+			(
+				"x = HASH(ENC[weak](k, a), ENC[weak from phase 3](k, m))",
+				"`weak` on ENC comes into force at phase 3",
+				"5:32",
+			),
+			(
+				"weak = HASH(ENC[weak](k, a), ENC[weak from phase 3](k, m))",
+				"`weak` on ENC comes into force at phase 3",
+				"5:35",
+			),
+			(
+				"x = HASH(ENC[weak](k, a), CONCAT[weak](a, m))",
+				"CONCAT is a core primitive",
+				"5:35",
+			),
+			(
+				"x = HASH(PUBKEY(a), PUBKEY(PUBKEY(k)))",
+				"`PUBKEY` cannot take `PUBKEY` as its first argument",
+				"5:22",
+			),
+			(
+				"x = HASH(PUBKEY(a), PUBKEY(a), DH_KEX(PUBKEY(a), PUBKEY(k)))",
+				"`DH_KEX` cannot take `PUBKEY` as its second argument",
+				"5:33",
+			),
+		] {
+			let text = rejected(assignment, "phase[1]\n");
+			assert!(text.contains(message), "{assignment}: {text}");
+			assert!(
+				text.contains(&format!(" --> nested.vp:{at}\n")),
+				"{assignment}: {text}"
+			);
+		}
+	}
+
+	#[test]
+	fn an_occurrence_is_counted_as_the_term_reads_however_much_it_shares() {
+		let key = make_private("occurrence_dag_key");
+		let leaf = pubkey(key);
+		let mut shared = leaf.clone();
+		for _ in 0..80 {
+			shared = make_primitive(PRIM_HASH, vec![shared.clone(), shared], 0);
+		}
+		let target = pubkey(make_private("occurrence_dag_other"));
+		let Value::Primitive(sought) = &target else {
+			panic!("a primitive");
+		};
+		let once = make_primitive(PRIM_HASH, vec![leaf.clone(), leaf, target.clone()], 0);
+		assert_eq!(occurrence(&once, sought), 2);
+		let many = make_primitive(PRIM_HASH, vec![shared, target.clone()], 0);
+		assert_eq!(
+			occurrence(&many, sought),
+			usize::MAX,
+			"2^80 spellings precede it, counted once per node and saturating"
+		);
+		assert_eq!(occurrence(&target, sought), 0);
+	}
+
+	#[test]
+	fn messages_count_what_they_name() {
+		let text = rejected("x, y = HASH(a)", "");
+		assert!(
+			text.contains("`HASH` produces 1 output, but 2 constants are bound here"),
+			"{text}"
+		);
+		let text = rejected("x = HASH(a)", "phase[0]\n");
+		assert!(
+			text.contains("phase 0 is declared, but every model starts in it"),
+			"{text}"
+		);
+		let text = rejected("x = HASH(a)", "phase[1]\nphase[1]\n");
+		assert!(text.contains("phase 1 is declared after phase 1"), "{text}");
 	}
 
 	#[test]
